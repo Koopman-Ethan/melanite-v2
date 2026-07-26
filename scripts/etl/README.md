@@ -58,16 +58,17 @@ synthetic identity. v1 has no client entity.
 
 ## Reconciliation target
 
-`verify.ts` asserts the loaded ledger reproduces this, derived from Stripe (10 PIs, complete):
+`verify.ts` asserts the loaded ledger reproduces this, derived from Stripe (10 PIs, complete).
+**Both columns are net of refunds** — $2,227.25 was collected gross, $77.25 refunded.
 
-| source | gross | platform keeps |
+| source | net gross | platform keeps |
 |---|---|---|
-| booking | $167.25 | $52.75 |
-| membership | $600.00 | $600.00 |
-| training | $1,400.00 | $1,400.00 |
-| room_rental | $60.00 | $0.00 (fully refunded) |
-| package | $0.00 | $0.00 (not live) |
-| **total** | **$2,227.25** | **$2,052.75** |
+| booking | $150.00 | $52.75 | 2 purchases ($150.00 + $17.25), one fully refunded |
+| membership | $600.00 | $600.00 | 4 × $150, unsplit |
+| training | $1,400.00 | $1,400.00 | 1 enrollment: $500 deposit + $900 balance |
+| room_rental | $0.00 | $0.00 | $60.00 rental, fully refunded |
+| package | $0.00 | $0.00 | not live |
+| **total** | **$2,150.00** | **$2,052.75** | |
 
 For contrast, v1's `/admin/revenue` reports **$62.50** — it reads one ledger holding one row.
 

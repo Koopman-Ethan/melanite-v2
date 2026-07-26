@@ -12,7 +12,7 @@ import { join } from 'node:path'
 
 import { sql } from 'drizzle-orm'
 
-import { db } from '@/lib/db'
+import { db } from '../db'
 import * as schema from '@/lib/db/schema'
 
 import * as T from './transform'

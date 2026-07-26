@@ -9,16 +9,21 @@
 
 import { sql } from 'drizzle-orm'
 
-import { db } from '@/lib/db'
+import { db } from '../db'
 import { ledgerEntries } from '@/lib/db/schema'
 
 /** Derived from the live Stripe account (10 payment intents, has_more: false).
- *  Update alongside any re-pull of staged data. */
+ *  Update alongside any re-pull of staged data.
+ *
+ *  Both columns are NET of refunds, since that is what the query below computes. Gross
+ *  collected before refunds was $2,227.25 across all sources; $77.25 was refunded. */
 const EXPECTED: Record<string, { gross: string; cut: string }> = {
-  booking: { gross: '167.25', cut: '52.75' },
+  // 2 purchases ($150.00 + $17.25) less a $17.25 refund.
+  booking: { gross: '150.00', cut: '52.75' },
   membership: { gross: '600.00', cut: '600.00' },
   training: { gross: '1400.00', cut: '1400.00' },
-  room_rental: { gross: '60.00', cut: '0.00' },
+  // $60.00 rental, fully refunded.
+  room_rental: { gross: '0.00', cut: '0.00' },
   package: { gross: '0.00', cut: '0.00' },
 }
 
@@ -89,10 +94,12 @@ async function main() {
   }
 
   console.log(failures === 0 ? '\nreconciled' : `\n${failures} check(s) failed`)
-  process.exit(failures === 0 ? 0 : 1)
+  // Set the code rather than calling process.exit — exiting while the neon-http agent still
+  // holds handles trips a libuv assertion on Windows.
+  process.exitCode = failures === 0 ? 0 : 1
 }
 
 main().catch((err) => {
   console.error(err)
-  process.exit(1)
+  process.exitCode = 1
 })
