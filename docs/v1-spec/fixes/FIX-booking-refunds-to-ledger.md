@@ -2,15 +2,24 @@
 
 > **STATUS: NOT BEING APPLIED TO v1. Decided by Ethan 2026-07-26.**
 >
-> Corrected in v2 instead, at import. Two reasons:
+> **Reasoning corrected 2026-07-26 after reading Stripe directly. Reason 1 below was wrong.**
 >
-> 1. **It would be dead code today.** Per BUG-21, `charge.refunded` is not subscribed in
->    Stripe live, so this branch never fires in production. Applying the fix would require
->    BUG-21 as well — two changes to a live money path.
-> 2. **It is forward-only.** It does nothing for refunds already issued. If `charge.refunded`
->    has never been subscribed in live, that is *every* refund to date. Those must be
->    reconstructed from Stripe regardless, so the fix would not remove a reconciliation step
->    from the ETL — only shorten the window.
+> 1. ~~It would be dead code — `charge.refunded` is not subscribed in live per BUG-21.~~
+>    **FALSE.** `charge.refunded` **is** subscribed and live on the platform endpoint
+>    (`we_1Tqd2hCP9MreAgWjntXeufCG`, `livemode: true`) and on the room endpoint. The branch
+>    runs in production today. Booking refunds arrive, match no training enrollment, and are
+>    silently dropped — active data loss, not dead code.
+> 2. **It is forward-only.** Still true. It does nothing for refunds already issued, which
+>    must be reconstructed from Stripe regardless.
+>
+> **The decision still stands, but on different grounds: total exposure is $17.25.** Stripe
+> holds exactly two refunds ever — one room rental ($60.00, handled correctly by the room
+> webhook) and one booking (`re_3TqmnZCP9MreAgWj0CpDPuFi`, $17.25, 2026-07-06). That single
+> booking refund is the entire overstatement in `transactions`. It is one row to correct at
+> import, which does not justify editing a live money path.
+>
+> **Revisit if refund volume rises before cutover.** The defect is live; only the volume is
+> small.
 >
 > **The condition this decision depends on:** the v2 ETL must source refunds from **Stripe**,
 > not from v1's `transactions` table. If it trusts the v1 ledger, v2 silently inherits the
@@ -226,29 +235,43 @@ the next `payout.paid` sweep would stamp it with an unrelated payout's arrival d
 `"paid"` with **no `payout_date`** keeps the row inert and out of every sum. That's what the
 block does.
 
-## Open question — does the refund reverse the provider transfer?
+## ANSWERED — refunds do NOT reverse the provider transfer
 
-This one is a real decision and it changes the numbers.
+Verified 2026-07-26 against live Stripe. **The proportional split in the block above is
+wrong.** Corrected logic is below; the block is left as-written for the record.
 
-With destination charges, whether the provider's share returns on a refund depends on
-`reverse_transfer`, set when the refund is issued:
+The one booking refund on record:
 
-- **`reverse_transfer = true`** — the provider's share is pulled from their connected balance.
-  The proportional split in this block (negative `provider_payout` *and* negative
-  `melanite_cut`) is correct as written.
-- **`reverse_transfer` off** — the provider keeps their share and the platform absorbs the
-  entire refund. The correct entry would be `melanite_cut` = −(full refund) with
-  `provider_payout` unchanged at 0.
+```
+refund   re_3TqmnZCP9MreAgWj0CpDPuFi   $17.25   transfer_reversal: null
+charge   pi_3TqmnZCP9MreAgWj0bO5sHqx   type=booking_payment
+                                        transfer_data.destination = acct_1TqmHnCSuVTKKSSR
+                                        application_fee_amount    = $7.50
+```
 
-This block assumes the first. The package refund path assumes the same split, but its note
-says *"provider clawback handled manually per the refund SOP"* — which implies transfers are
-**not** auto-reversed. If that's the case, both paths record an intent to claw back rather
-than a settled fact, and `/earnings` shows providers a reduced lifetime payout for money they
-still hold.
+It was a genuine destination charge to a provider's connected account, and
+`transfer_reversal` is **null** — the transfer was not reversed. The provider kept their
+$9.75; the platform refunded the full $17.25 from its own balance and absorbed the loss.
 
-**Confirm how refunds are actually issued in the Stripe dashboard before publishing.** If
-transfers are not reversed, swap the four `_abs` computations for: `melanite_cut` = the full
-`$bkrf_delta`, `provider_payout` = 0, and keep `gross_amount` / `tip_amount` as they are.
+*(The other refund, `re_3Tta9o…` $60.00, was a room rental — `transfer_data: null`, a plain
+platform charge — so it says nothing about the booking path. Worth noting it independently
+confirms the v2 model for room rentals: 100% platform, no split.)*
+
+**Correct entry for a booking refund, as refunds are actually issued today:**
+
+| column | value |
+|---|---|
+| `gross_amount` | −(refunded portion of price) |
+| `tip_amount` | −(refunded portion of tip) |
+| `provider_payout` | **0** — unchanged, the provider keeps their share |
+| `melanite_cut` | **−(full refund delta)** — the platform absorbs all of it |
+
+Note this breaks the `cut + payout == gross + tip` invariant that holds for purchases, and it
+should: the platform is out more than its cut. Any v2 check constraint must allow it.
+
+**This also means the existing package refund path is wrong the same way** — it splits
+proportionally. No bad data yet, since packages aren't live, but fix it before
+`packages_enabled` goes true.
 
 ## Known cosmetic side-effect
 
