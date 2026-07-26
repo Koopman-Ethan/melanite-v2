@@ -1,12 +1,877 @@
-// Table definitions live here. Column names are derived from the property names
-// via `casing: 'snake_case'`, so `createdAt` maps to `created_at` in Postgres.
+// Melanite v2 schema.
 //
-// import { pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
+// Models the business, not Xano's tables. See `docs/v1-spec/revenue-model.md` for why the
+// ledger looks the way it does, and `docs/v1-spec/schema/*.xs` for the v1 definitions this
+// was derived from.
 //
-// export const posts = pgTable('posts', {
-//   id: uuid().primaryKey().defaultRandom(),
-//   title: text().notNull(),
-//   createdAt: timestamp().notNull().defaultNow(),
-// })
+// Conventions:
+//  - Column names come from property names via `casing: 'snake_case'` (see lib/db/index.ts).
+//  - Money is `numeric(10,2)`, which Drizzle maps to `string` — never float. Do arithmetic
+//    in SQL or a decimal library, not in JS numbers.
+//  - Timestamps are `timestamptz`. The business timezone is America/Denver; store UTC and
+//    convert at the edge.
+//
+// Deliberately NOT ported from v1:
+//  - `user` / `event_log` — Xano quick-start scaffolding (tagged `xano:quick-start`),
+//    never used by the app. `providers` is the real auth table.
+//  - `providers.is_admin` — collapsed into the `role` enum; v1 had both and gated on
+//    different ones in different places.
+//  - `role = 'test_provider'` — existed because Xano Free has no test data source, so test
+//    accounts lived in production. v2 has real environments.
+//  - `room_bookings.active_slot_key` — a denormalized string that existed only to fake a
+//    partial unique index. Postgres does this natively; see `roomBookings` below.
 
-export {}
+import { relations, sql } from 'drizzle-orm'
+import {
+  boolean,
+  check,
+  date,
+  index,
+  integer,
+  jsonb,
+  numeric,
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from 'drizzle-orm/pg-core'
+
+/** Money columns: 10 digits, 2 decimal places, returned as string. */
+const money = () => numeric({ precision: 10, scale: 2 })
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+export const providerRole = pgEnum('provider_role', [
+  'platform_owner',
+  'developer',
+  'medical_director',
+  'provider',
+])
+
+export const providerStatus = pgEnum('provider_status', ['pending', 'active', 'inactive'])
+
+export const medicalDirectorType = pgEnum('medical_director_type', ['melanite', 'own'])
+
+/** The booking gate. `melanite` path mirrors the Stripe subscription; `own` path is set
+ *  active once director info and a signed agreement are on file. */
+export const medicalDirectorStatus = pgEnum('medical_director_status', [
+  'none',
+  'active',
+  'past_due',
+  'inactive',
+])
+
+export const documentType = pgEnum('document_type', [
+  'training_certificate',
+  'supervision_agreement',
+])
+
+export const inviteStatus = pgEnum('invite_status', ['pending', 'accepted', 'expired'])
+
+export const bookingStatus = pgEnum('booking_status', [
+  'upcoming',
+  'completed',
+  'cancelled',
+  'no_show',
+])
+
+/** v1 gap: package redemptions arrived as ordinary $0 bookings with no marker, so three
+ *  separate surfaces inferred payment method from price. Now explicit. */
+export const bookingPaymentSource = pgEnum('booking_payment_source', [
+  'checkout_link',
+  'package_redemption',
+  'comped',
+])
+
+export const checkoutLinkStatus = pgEnum('checkout_link_status', [
+  'pending',
+  'paid',
+  'expired',
+  'cancelled',
+])
+
+export const clientPackageStatus = pgEnum('client_package_status', [
+  'active',
+  'exhausted',
+  'expired',
+  'refunded',
+])
+
+export const membershipPlan = pgEnum('membership_plan', ['medical_director'])
+
+export const membershipStatus = pgEnum('membership_status', ['active', 'past_due', 'cancelled'])
+
+export const roomSlotType = pgEnum('room_slot_type', ['full', 'am', 'pm'])
+
+export const roomBookingStatus = pgEnum('room_booking_status', [
+  'confirmed',
+  'cancellation_requested',
+  'cancelled',
+  'refunded',
+])
+
+export const trainingCourseStatus = pgEnum('training_course_status', [
+  'scheduled',
+  'completed',
+  'cancelled',
+])
+
+export const trainingPaymentStatus = pgEnum('training_payment_status', [
+  'unpaid',
+  'partial',
+  'paid_in_full',
+])
+
+// --- Ledger ----------------------------------------------------------------
+
+/** Every revenue primitive. v1 split these across three ledger tables with three different
+ *  column vocabularies, plus two streams with no ledger row at all. */
+export const ledgerSource = pgEnum('ledger_source', [
+  'booking',
+  'package',
+  'room_rental',
+  'membership',
+  'training',
+])
+
+/** Who handed over the money. This is what makes `SUM(melanite_cut)` mean the same thing
+ *  across all five sources — see the note on `ledgerEntries`. */
+export const ledgerPayer = pgEnum('ledger_payer', ['client', 'provider', 'student'])
+
+export const ledgerEntryType = pgEnum('ledger_entry_type', ['purchase', 'refund'])
+
+export const ledgerSubjectType = pgEnum('ledger_subject_type', [
+  'booking',
+  'client_package',
+  'room_booking',
+  'membership',
+  'training_enrollment',
+])
+
+export const payoutStatus = pgEnum('payout_status', ['pending', 'paid', 'failed'])
+
+// ---------------------------------------------------------------------------
+// Platform configuration
+// ---------------------------------------------------------------------------
+
+/** Singleton config row. Splits are computed from these rates at write time and persisted
+ *  onto the ledger entry — a rate change must never retroactively rewrite history. */
+export const platformSettings = pgTable('platform_settings', {
+  id: integer().primaryKey().default(1),
+  providerSharePct: numeric({ precision: 4, scale: 3 }).notNull().default('0.500'),
+  tipToProviderPct: numeric({ precision: 4, scale: 3 }).notNull().default('1.000'),
+  noShowFeePctOfPrice: numeric({ precision: 4, scale: 3 }).notNull().default('0.500'),
+  cancellationFeeAmount: money().notNull().default('50.00'),
+  stripePlatformAccountId: text().notNull(),
+  medicalDirectorPriceId: text(),
+  laserOpenTime: text().notNull().default('08:00'),
+  laserCloseTime: text().notNull().default('20:00'),
+  slotStrideMins: integer().notNull().default(15),
+  roomRentalEnabled: boolean().notNull().default(false),
+  packagesEnabled: boolean().notNull().default(false),
+  updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  updatedBy: uuid().references(() => providers.id, { onDelete: 'set null' }),
+}, (t) => [check('platform_settings_singleton', sql`${t.id} = 1`)])
+
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
+
+export const providers = pgTable('providers', {
+  id: uuid().primaryKey().defaultRandom(),
+  joinedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+
+  email: text().notNull(),
+  /** Null for rows migrated from Xano — its hashes are not portable (undocumented HMAC
+   *  keying). Those users go through a forced reset on first login. */
+  passwordHash: text(),
+  requiresPasswordReset: boolean().notNull().default(false),
+
+  firstName: text().notNull(),
+  lastName: text().notNull(),
+  phone: text(),
+  credentials: text(),
+  licenseNumber: text(),
+  licenseState: text(),
+  licenseExpiry: date(),
+  malpracticeInsurance: text(),
+
+  role: providerRole().notNull().default('provider'),
+  status: providerStatus().notNull().default('pending'),
+
+  // Stripe Connect (money out, to the provider).
+  stripeAccountId: text(),
+  stripeOnboardingComplete: boolean().notNull().default(false),
+  // Stripe Customer for billing the provider (money in, distinct from any client Customer).
+  stripeBillingCustomerId: text(),
+
+  medicalDirectorType: medicalDirectorType(),
+  medicalDirectorStatus: medicalDirectorStatus().notNull().default('none'),
+
+  /** Two independent booking gates, both must pass. `medicalDirectorStatus` is the
+   *  subscription/credential gate; this one is a manual admin flip once Keoni has confirmed
+   *  documents are on file. In v1 the equivalent check lived partly in page JS. */
+  bookingEnabled: boolean().notNull().default(false),
+  roomRentalEnabled: boolean().notNull().default(true),
+
+  trainingCertDocumentId: uuid(),
+  onboardingStep: integer().notNull().default(0),
+  lastLoginAt: timestamp({ withTimezone: true }),
+  policyAckAt: timestamp({ withTimezone: true }),
+  policyAckVersion: text(),
+
+  // Notification preferences. Kept inline rather than split out: they are 1:1, always
+  // present, and cheap. The sparse `md_*` credential block is what got its own table.
+  notifyBookingConfirmed: boolean().notNull().default(true),
+  notifyPayoutDeposited: boolean().notNull().default(true),
+  notifyAppointmentReminders: boolean().notNull().default(true),
+  notifyNewAvailability: boolean().notNull().default(true),
+  notifyMembershipBilling: boolean().notNull().default(true),
+}, (t) => [
+  uniqueIndex().on(t.email),
+  index().on(t.status),
+  index().on(t.role),
+  index().on(t.stripeAccountId),
+])
+
+/** The "own medical director" path only — 8 sparse columns that were inline on `providers`
+ *  in v1 and are null for every provider on the Melanite subscription path. */
+export const medicalDirectorCredentials = pgTable('medical_director_credentials', {
+  providerId: uuid()
+    .primaryKey()
+    .references(() => providers.id, { onDelete: 'cascade' }),
+  name: text().notNull(),
+  npi: text(),
+  licenseNumber: text(),
+  licenseState: text(),
+  licenseExpiry: date(),
+  credentials: text(),
+  contactEmail: text(),
+  contactPhone: text(),
+  agreementDocumentId: uuid(),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+})
+
+/** v1 used Xano's `attachment` type. v2 stores an object-storage key and resolves URLs at
+ *  read time, so the file store can change without a data migration. */
+export const documents = pgTable('documents', {
+  id: uuid().primaryKey().defaultRandom(),
+  providerId: uuid()
+    .notNull()
+    .references(() => providers.id, { onDelete: 'cascade' }),
+  docType: documentType().notNull(),
+  storageKey: text().notNull(),
+  originalFilename: text(),
+  mimeType: text(),
+  sizeBytes: integer(),
+  uploadedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index().on(t.providerId, t.docType)])
+
+export const inviteLinks = pgTable('invite_links', {
+  id: uuid().primaryKey().defaultRandom(),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  email: text().notNull(),
+  invitedByAdminId: uuid()
+    .notNull()
+    .references(() => providers.id, { onDelete: 'restrict' }),
+  token: text().notNull(),
+  status: inviteStatus().notNull().default('pending'),
+  sentAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp({ withTimezone: true }).notNull(),
+  acceptedAt: timestamp({ withTimezone: true }),
+}, (t) => [uniqueIndex().on(t.token), index().on(t.email), index().on(t.status)])
+
+export const passwordResetTokens = pgTable('password_reset_tokens', {
+  id: uuid().primaryKey().defaultRandom(),
+  providerId: uuid()
+    .notNull()
+    .references(() => providers.id, { onDelete: 'cascade' }),
+  token: text().notNull(),
+  sentAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp({ withTimezone: true }).notNull(),
+  usedAt: timestamp({ withTimezone: true }),
+}, (t) => [uniqueIndex().on(t.token), index().on(t.providerId)])
+
+// ---------------------------------------------------------------------------
+// Clients
+// ---------------------------------------------------------------------------
+
+/** New in v2. v1 had no client entity — `client_packages` keyed off a lowercased email
+ *  string, so a typo silently split a package balance, and honouring a deletion request
+ *  meant scanning every table. Scope is deliberately minimal: exactly the fields v1 already
+ *  collected. Clients belong to the provider; this is not a CRM. */
+export const clients = pgTable('clients', {
+  id: uuid().primaryKey().defaultRandom(),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  email: text(),
+  name: text(),
+  phone: text(),
+  /** Stripe Customer for card-on-file. Distinct from `providers.stripeBillingCustomerId`. */
+  stripeCustomerId: text(),
+}, (t) => [uniqueIndex().on(t.email), index().on(t.phone)])
+
+// ---------------------------------------------------------------------------
+// Service catalog
+// ---------------------------------------------------------------------------
+
+export const services = pgTable('services', {
+  id: uuid().primaryKey().defaultRandom(),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  name: text().notNull(),
+  description: text(),
+  suggestedDurationMins: integer().notNull(),
+  minDurationMins: integer().notNull(),
+  maxDurationMins: integer().notNull(),
+  packageEligible: boolean().notNull().default(false),
+  /** Ablative lasers (CO2, Erbium) need training beyond the standard RN/NP/PA license. */
+  advancedTierRequired: boolean().notNull().default(false),
+  colorHex: text(),
+  active: boolean().notNull().default(true),
+}, (t) => [index().on(t.active)])
+
+/** A provider's own price, duration and on/off toggle for a catalog service. */
+export const providerServices = pgTable('provider_services', {
+  id: uuid().primaryKey().defaultRandom(),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  providerId: uuid()
+    .notNull()
+    .references(() => providers.id, { onDelete: 'cascade' }),
+  serviceId: uuid()
+    .notNull()
+    .references(() => services.id, { onDelete: 'restrict' }),
+  price: money().notNull(),
+  durationMins: integer().notNull(),
+  isActive: boolean().notNull().default(true),
+}, (t) => [uniqueIndex().on(t.providerId, t.serviceId), index().on(t.providerId, t.isActive)])
+
+// ---------------------------------------------------------------------------
+// Bookings
+// ---------------------------------------------------------------------------
+
+/** One appointment on the single shared laser. Availability is global — any provider's
+ *  booking blocks the slot platform-wide. */
+export const bookings = pgTable('bookings', {
+  id: uuid().primaryKey().defaultRandom(),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  providerId: uuid()
+    .notNull()
+    .references(() => providers.id, { onDelete: 'restrict' }),
+  providerServiceId: uuid()
+    .notNull()
+    .references(() => providerServices.id, { onDelete: 'restrict' }),
+
+  /** Nullable so ETL and walk-ins are never blocked on resolving an identity. */
+  clientId: uuid().references(() => clients.id, { onDelete: 'set null' }),
+  // Point-in-time snapshot of who attended. Not a cache of `clients` — the name on the
+  // appointment record should not change because someone later edited a client row.
+  clientName: text().notNull(),
+  clientPhone: text(),
+  clientEmail: text(),
+
+  treatmentArea: text(),
+  notes: text(),
+
+  originalPrice: money().notNull(),
+  /** Percent off applied by the provider, e.g. 10 = 10%. */
+  discountPct: numeric({ precision: 5, scale: 2 }).notNull().default('0'),
+  price: money().notNull(),
+  paymentSource: bookingPaymentSource().notNull(),
+
+  durationMins: integer().notNull(),
+  startTime: timestamp({ withTimezone: true }).notNull(),
+  endTime: timestamp({ withTimezone: true }).notNull(),
+  status: bookingStatus().notNull().default('upcoming'),
+
+  googleCalendarEventId: text(),
+  policyAckAt: timestamp({ withTimezone: true }),
+  policyAckVersion: text(),
+}, (t) => [
+  index().on(t.providerId, t.startTime),
+  index().on(t.startTime, t.endTime),
+  index().on(t.status),
+  index().on(t.clientId),
+  check('bookings_time_order', sql`${t.endTime} > ${t.startTime}`),
+])
+
+/** Token-authenticated public checkout, 1:1 with a booking. */
+export const checkoutLinks = pgTable('checkout_links', {
+  id: uuid().primaryKey().defaultRandom(),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  bookingId: uuid()
+    .notNull()
+    .references(() => bookings.id, { onDelete: 'cascade' }),
+  token: text().notNull(),
+  status: checkoutLinkStatus().notNull().default('pending'),
+  tipAmount: money().notNull().default('0.00'),
+  stripeCustomerId: text(),
+  stripePaymentIntentId: text(),
+  paidAt: timestamp({ withTimezone: true }),
+  expiresAt: timestamp({ withTimezone: true }).notNull(),
+}, (t) => [
+  uniqueIndex().on(t.token),
+  uniqueIndex().on(t.bookingId),
+  index().on(t.status),
+  index().on(t.stripePaymentIntentId),
+])
+
+// ---------------------------------------------------------------------------
+// Packages
+// ---------------------------------------------------------------------------
+
+/** What a provider sells. Soft-deleted via `active`, never removed — sold packages
+ *  reference the template they came from. */
+export const packageTemplates = pgTable('package_templates', {
+  id: uuid().primaryKey().defaultRandom(),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  providerId: uuid()
+    .notNull()
+    .references(() => providers.id, { onDelete: 'cascade' }),
+  name: text().notNull(),
+  description: text(),
+  totalPrice: money().notNull().default('0.00'),
+  expiresAfterDays: integer(),
+  active: boolean().notNull().default(true),
+}, (t) => [index().on(t.providerId, t.active)])
+
+export const packageTemplateItems = pgTable('package_template_items', {
+  id: uuid().primaryKey().defaultRandom(),
+  packageTemplateId: uuid()
+    .notNull()
+    .references(() => packageTemplates.id, { onDelete: 'cascade' }),
+  serviceId: uuid()
+    .notNull()
+    .references(() => services.id, { onDelete: 'restrict' }),
+  quantity: integer().notNull().default(1),
+  perSessionValue: money().notNull().default('0.00'),
+}, (t) => [uniqueIndex().on(t.packageTemplateId, t.serviceId)])
+
+/** A purchased package instance. */
+export const clientPackages = pgTable('client_packages', {
+  id: uuid().primaryKey().defaultRandom(),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  providerId: uuid()
+    .notNull()
+    .references(() => providers.id, { onDelete: 'restrict' }),
+  /** Required — the durable balance identity that v1 approximated with an email string. */
+  clientId: uuid()
+    .notNull()
+    .references(() => clients.id, { onDelete: 'restrict' }),
+  packageTemplateId: uuid()
+    .notNull()
+    .references(() => packageTemplates.id, { onDelete: 'restrict' }),
+  status: clientPackageStatus().notNull().default('active'),
+  purchasedAt: timestamp({ withTimezone: true }),
+  expiresAt: timestamp({ withTimezone: true }),
+}, (t) => [index().on(t.clientId, t.status), index().on(t.providerId, t.status)])
+
+/** Per-instance balances, snapshotted from the template at purchase so later template
+ *  edits never rewrite a sold package. */
+export const clientPackageItems = pgTable('client_package_items', {
+  id: uuid().primaryKey().defaultRandom(),
+  clientPackageId: uuid()
+    .notNull()
+    .references(() => clientPackages.id, { onDelete: 'cascade' }),
+  serviceId: uuid()
+    .notNull()
+    .references(() => services.id, { onDelete: 'restrict' }),
+  perSessionValue: money().notNull().default('0.00'),
+  qtyTotal: integer().notNull().default(1),
+  qtyUsed: integer().notNull().default(0),
+}, (t) => [
+  uniqueIndex().on(t.clientPackageId, t.serviceId),
+  check('client_package_items_qty', sql`${t.qtyUsed} >= 0 AND ${t.qtyUsed} <= ${t.qtyTotal}`),
+])
+
+/** Append-only: one row per session consumed. `voidedAt` set means the booking was
+ *  cancelled and the session returned to the package — the row is kept for audit but must
+ *  be excluded from balance math. */
+export const packageRedemptions = pgTable('package_redemptions', {
+  id: uuid().primaryKey().defaultRandom(),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  clientPackageId: uuid()
+    .notNull()
+    .references(() => clientPackages.id, { onDelete: 'cascade' }),
+  clientPackageItemId: uuid()
+    .notNull()
+    .references(() => clientPackageItems.id, { onDelete: 'cascade' }),
+  bookingId: uuid()
+    .notNull()
+    .references(() => bookings.id, { onDelete: 'restrict' }),
+  /** Power the "Session 3 of 6 · Laser 2 of 3" display. */
+  overallIndex: integer().notNull(),
+  serviceIndex: integer().notNull(),
+  redeemedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  voidedAt: timestamp({ withTimezone: true }),
+}, (t) => [
+  index().on(t.clientPackageId),
+  uniqueIndex().on(t.bookingId),
+])
+
+/** Package purchase links. Separate from `checkoutLinks`, which is 1:1 with a booking. */
+export const packageCheckoutLinks = pgTable('package_checkout_links', {
+  id: uuid().primaryKey().defaultRandom(),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  token: text().notNull(),
+  packageTemplateId: uuid()
+    .notNull()
+    .references(() => packageTemplates.id, { onDelete: 'restrict' }),
+  providerId: uuid()
+    .notNull()
+    .references(() => providers.id, { onDelete: 'cascade' }),
+  clientId: uuid().references(() => clients.id, { onDelete: 'set null' }),
+  clientName: text(),
+  clientEmail: text(),
+  status: checkoutLinkStatus().notNull().default('pending'),
+  tipAmount: money().notNull().default('0.00'),
+  stripeCustomerId: text(),
+  stripePaymentIntentId: text(),
+  paidAt: timestamp({ withTimezone: true }),
+  expiresAt: timestamp({ withTimezone: true }).notNull(),
+}, (t) => [
+  uniqueIndex().on(t.token),
+  index().on(t.providerId, t.status),
+  index().on(t.stripePaymentIntentId),
+])
+
+// ---------------------------------------------------------------------------
+// Memberships
+// ---------------------------------------------------------------------------
+
+/** The $150/mo medical-director subscription. In v1 this generated revenue that existed
+ *  only in Stripe — no ledger row anywhere. Now it writes to `ledgerEntries` per invoice. */
+export const memberships = pgTable('memberships', {
+  id: uuid().primaryKey().defaultRandom(),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  providerId: uuid()
+    .notNull()
+    .references(() => providers.id, { onDelete: 'cascade' }),
+  plan: membershipPlan().notNull().default('medical_director'),
+  status: membershipStatus().notNull().default('active'),
+  stripeSubscriptionId: text(),
+  stripeCustomerId: text(),
+  cancelAtPeriodEnd: boolean().notNull().default(false),
+  startDate: timestamp({ withTimezone: true }),
+  renewalDate: timestamp({ withTimezone: true }),
+  cancelDate: timestamp({ withTimezone: true }),
+}, (t) => [uniqueIndex().on(t.stripeSubscriptionId), index().on(t.providerId, t.status)])
+
+// ---------------------------------------------------------------------------
+// Room rental
+// ---------------------------------------------------------------------------
+
+/** Daily room rental. The provider pays Melanite, so this is platform-inbound revenue —
+ *  `ledgerEntries.payer = 'provider'` and the whole amount is `melaniteCut`.
+ *
+ *  v1 carried an `active_slot_key` text column ("<date>:<slot>", nulled on cancel) purely
+ *  to get a partial unique index out of a plain unique index. Postgres does this properly. */
+export const roomBookings = pgTable('room_bookings', {
+  id: uuid().primaryKey().defaultRandom(),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  providerId: uuid()
+    .notNull()
+    .references(() => providers.id, { onDelete: 'restrict' }),
+  rentalDate: date().notNull(),
+  slotType: roomSlotType().notNull().default('full'),
+  price: money().notNull().default('0.00'),
+  status: roomBookingStatus().notNull().default('confirmed'),
+  startAt: timestamp({ withTimezone: true }).notNull(),
+  endAt: timestamp({ withTimezone: true }).notNull(),
+  cancelledAt: timestamp({ withTimezone: true }),
+}, (t) => [
+  uniqueIndex()
+    .on(t.rentalDate, t.slotType)
+    .where(sql`${t.status} = 'confirmed'`),
+  index().on(t.providerId),
+  index().on(t.rentalDate),
+])
+
+// ---------------------------------------------------------------------------
+// Training
+// ---------------------------------------------------------------------------
+
+export const trainingCourses = pgTable('training_courses', {
+  id: uuid().primaryKey().defaultRandom(),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  day1Date: date().notNull(),
+  day1Start: text().notNull().default('10:00'),
+  day1End: text().notNull().default('16:00'),
+  day2Date: date(),
+  day2Start: text().notNull().default('10:00'),
+  day2End: text().notNull().default('14:00'),
+  maxStudents: integer().notNull().default(5),
+  depositAmount: money().notNull().default('500.00'),
+  totalPrice: money().notNull().default('1400.00'),
+  googleCalendarEventIdDay1: text(),
+  googleCalendarEventIdDay2: text(),
+  status: trainingCourseStatus().notNull().default('scheduled'),
+}, (t) => [index().on(t.status), index().on(t.day1Date)])
+
+/** A student's enrolment. `providerId` is nullable because students typically are not
+ *  providers yet — training is how they become one.
+ *
+ *  v1 denormalized the money onto this row (`deposit_amount`, `amount_paid`, `balance_due`,
+ *  two Stripe intent ids) with no ledger entry, which is why training revenue never
+ *  appeared in any admin total. Payments now write to `ledgerEntries`; the columns kept
+ *  here are enrolment state, not the money record. */
+export const trainingEnrollments = pgTable('training_enrollments', {
+  id: uuid().primaryKey().defaultRandom(),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  trainingCourseId: uuid()
+    .notNull()
+    .references(() => trainingCourses.id, { onDelete: 'restrict' }),
+  providerId: uuid().references(() => providers.id, { onDelete: 'set null' }),
+  inviteLinkId: uuid().references(() => inviteLinks.id, { onDelete: 'set null' }),
+
+  firstName: text().notNull(),
+  lastName: text().notNull(),
+  email: text().notNull(),
+  phone: text(),
+  licenseNumber: text(),
+
+  paymentStatus: trainingPaymentStatus().notNull().default('unpaid'),
+  balanceDueDate: date(),
+  courseCompletedAt: timestamp({ withTimezone: true }),
+}, (t) => [
+  index().on(t.trainingCourseId),
+  index().on(t.email),
+  index().on(t.providerId),
+])
+
+// ---------------------------------------------------------------------------
+// The ledger
+// ---------------------------------------------------------------------------
+
+/** Append-only money ledger — one row per payment, across every revenue primitive.
+ *  Replaces v1's `transactions`, `package_transactions` and `room_transactions`, and adds
+ *  the two streams that had no ledger at all (membership, training).
+ *
+ *  The `payer` column is what lets one expression work for every source. For client-paid
+ *  revenue (booking, package) the money splits and the platform keeps `melaniteCut`. For
+ *  provider-paid revenue (room rental, membership) there is no split — `providerPayout` is
+ *  0 and `melaniteCut` is the whole amount. So:
+ *
+ *      platform revenue  = SUM(melanite_cut)                        -- all five sources
+ *      provider earnings = SUM(provider_payout)
+ *      provider charges  = SUM(gross_amount) WHERE payer = 'provider'
+ *
+ *  Splits are computed from `platformSettings` at write time and persisted here; a rate
+ *  change must not rewrite history. Stripe remains the source of truth for money movement —
+ *  the ids on every row exist so this can be reconciled against it.
+ *
+ *  Rows are never updated except to stamp payout status. Corrections are `refund` rows. */
+export const ledgerEntries = pgTable('ledger_entries', {
+  id: uuid().primaryKey().defaultRandom(),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+
+  source: ledgerSource().notNull(),
+  payer: ledgerPayer().notNull(),
+  entryType: ledgerEntryType().notNull().default('purchase'),
+
+  /** Polymorphic subject — no FK, since it points at one of five tables. Always set
+   *  together with `subjectId`. */
+  subjectType: ledgerSubjectType().notNull(),
+  subjectId: uuid().notNull(),
+
+  /** Null only for training enrolments by students who are not yet providers. */
+  providerId: uuid().references(() => providers.id, { onDelete: 'restrict' }),
+  clientId: uuid().references(() => clients.id, { onDelete: 'set null' }),
+  /** Denormalized for per-service revenue reporting. v1 resolved this with an N+1
+   *  `booking → provider_service → service` lookup inside the aggregation loop. */
+  serviceId: uuid().references(() => services.id, { onDelete: 'set null' }),
+
+  grossAmount: money().notNull().default('0.00'),
+  tipAmount: money().notNull().default('0.00'),
+  providerPayout: money().notNull().default('0.00'),
+  melaniteCut: money().notNull().default('0.00'),
+
+  stripePaymentIntentId: text(),
+  stripeTransferId: text(),
+  stripeRefundId: text(),
+  stripeInvoiceId: text(),
+
+  payoutStatus: payoutStatus().notNull().default('pending'),
+  payoutDate: date(),
+
+  note: text(),
+}, (t) => [
+  index().on(t.createdAt.desc()),
+  index().on(t.providerId, t.createdAt.desc()),
+  index().on(t.source, t.createdAt.desc()),
+  index().on(t.subjectType, t.subjectId),
+  index().on(t.clientId),
+  index().on(t.payoutStatus),
+  uniqueIndex()
+    .on(t.stripePaymentIntentId, t.entryType)
+    .where(sql`${t.stripePaymentIntentId} IS NOT NULL`),
+  check(
+    'ledger_entries_provider_paid_is_unsplit',
+    sql`${t.payer} <> 'provider' OR (${t.providerPayout} = 0 AND ${t.melaniteCut} = ${t.grossAmount})`,
+  ),
+])
+
+// ---------------------------------------------------------------------------
+// Operational
+// ---------------------------------------------------------------------------
+
+/** Raw webhook receipts, for replay and idempotency. v1 routed Stripe through four
+ *  separate endpoints; v2 should land them in one place. */
+export const webhookEvents = pgTable('webhook_events', {
+  id: uuid().primaryKey().defaultRandom(),
+  receivedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  destination: text().notNull(),
+  eventType: text(),
+  eventId: text(),
+  payload: jsonb(),
+  signatureVerified: boolean().notNull().default(false),
+  processedAt: timestamp({ withTimezone: true }),
+  error: text(),
+}, (t) => [uniqueIndex().on(t.eventId), index().on(t.receivedAt.desc())])
+
+// ---------------------------------------------------------------------------
+// Relations
+// ---------------------------------------------------------------------------
+
+export const providersRelations = relations(providers, ({ one, many }) => ({
+  medicalDirectorCredentials: one(medicalDirectorCredentials),
+  providerServices: many(providerServices),
+  bookings: many(bookings),
+  ledgerEntries: many(ledgerEntries),
+  packageTemplates: many(packageTemplates),
+  memberships: many(memberships),
+  roomBookings: many(roomBookings),
+  documents: many(documents),
+}))
+
+export const medicalDirectorCredentialsRelations = relations(
+  medicalDirectorCredentials,
+  ({ one }) => ({
+    provider: one(providers, {
+      fields: [medicalDirectorCredentials.providerId],
+      references: [providers.id],
+    }),
+  }),
+)
+
+export const clientsRelations = relations(clients, ({ many }) => ({
+  bookings: many(bookings),
+  clientPackages: many(clientPackages),
+  ledgerEntries: many(ledgerEntries),
+}))
+
+export const servicesRelations = relations(services, ({ many }) => ({
+  providerServices: many(providerServices),
+  ledgerEntries: many(ledgerEntries),
+}))
+
+export const providerServicesRelations = relations(providerServices, ({ one, many }) => ({
+  provider: one(providers, {
+    fields: [providerServices.providerId],
+    references: [providers.id],
+  }),
+  service: one(services, {
+    fields: [providerServices.serviceId],
+    references: [services.id],
+  }),
+  bookings: many(bookings),
+}))
+
+export const bookingsRelations = relations(bookings, ({ one, many }) => ({
+  provider: one(providers, { fields: [bookings.providerId], references: [providers.id] }),
+  providerService: one(providerServices, {
+    fields: [bookings.providerServiceId],
+    references: [providerServices.id],
+  }),
+  client: one(clients, { fields: [bookings.clientId], references: [clients.id] }),
+  checkoutLink: one(checkoutLinks),
+  redemption: one(packageRedemptions),
+  ledgerEntries: many(ledgerEntries),
+}))
+
+export const checkoutLinksRelations = relations(checkoutLinks, ({ one }) => ({
+  booking: one(bookings, { fields: [checkoutLinks.bookingId], references: [bookings.id] }),
+}))
+
+export const packageTemplatesRelations = relations(packageTemplates, ({ one, many }) => ({
+  provider: one(providers, {
+    fields: [packageTemplates.providerId],
+    references: [providers.id],
+  }),
+  items: many(packageTemplateItems),
+  clientPackages: many(clientPackages),
+}))
+
+export const packageTemplateItemsRelations = relations(packageTemplateItems, ({ one }) => ({
+  template: one(packageTemplates, {
+    fields: [packageTemplateItems.packageTemplateId],
+    references: [packageTemplates.id],
+  }),
+  service: one(services, {
+    fields: [packageTemplateItems.serviceId],
+    references: [services.id],
+  }),
+}))
+
+export const clientPackagesRelations = relations(clientPackages, ({ one, many }) => ({
+  provider: one(providers, { fields: [clientPackages.providerId], references: [providers.id] }),
+  client: one(clients, { fields: [clientPackages.clientId], references: [clients.id] }),
+  template: one(packageTemplates, {
+    fields: [clientPackages.packageTemplateId],
+    references: [packageTemplates.id],
+  }),
+  items: many(clientPackageItems),
+  redemptions: many(packageRedemptions),
+}))
+
+export const clientPackageItemsRelations = relations(clientPackageItems, ({ one, many }) => ({
+  clientPackage: one(clientPackages, {
+    fields: [clientPackageItems.clientPackageId],
+    references: [clientPackages.id],
+  }),
+  service: one(services, { fields: [clientPackageItems.serviceId], references: [services.id] }),
+  redemptions: many(packageRedemptions),
+}))
+
+export const packageRedemptionsRelations = relations(packageRedemptions, ({ one }) => ({
+  clientPackage: one(clientPackages, {
+    fields: [packageRedemptions.clientPackageId],
+    references: [clientPackages.id],
+  }),
+  item: one(clientPackageItems, {
+    fields: [packageRedemptions.clientPackageItemId],
+    references: [clientPackageItems.id],
+  }),
+  booking: one(bookings, { fields: [packageRedemptions.bookingId], references: [bookings.id] }),
+}))
+
+export const membershipsRelations = relations(memberships, ({ one }) => ({
+  provider: one(providers, { fields: [memberships.providerId], references: [providers.id] }),
+}))
+
+export const roomBookingsRelations = relations(roomBookings, ({ one }) => ({
+  provider: one(providers, { fields: [roomBookings.providerId], references: [providers.id] }),
+}))
+
+export const trainingCoursesRelations = relations(trainingCourses, ({ many }) => ({
+  enrollments: many(trainingEnrollments),
+}))
+
+export const trainingEnrollmentsRelations = relations(trainingEnrollments, ({ one }) => ({
+  course: one(trainingCourses, {
+    fields: [trainingEnrollments.trainingCourseId],
+    references: [trainingCourses.id],
+  }),
+  provider: one(providers, {
+    fields: [trainingEnrollments.providerId],
+    references: [providers.id],
+  }),
+}))
+
+export const ledgerEntriesRelations = relations(ledgerEntries, ({ one }) => ({
+  provider: one(providers, { fields: [ledgerEntries.providerId], references: [providers.id] }),
+  client: one(clients, { fields: [ledgerEntries.clientId], references: [clients.id] }),
+  service: one(services, { fields: [ledgerEntries.serviceId], references: [services.id] }),
+}))
