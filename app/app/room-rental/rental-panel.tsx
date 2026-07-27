@@ -269,7 +269,7 @@ export function RentalPanel({
               <SlotMarks amFree pmFree mine selected={false} /> Yours
             </span>
             <span className="flex items-center gap-1">
-              <span className="text-ink-disabled line-through">00</span> Fully booked
+              <span className="text-ink-faint line-through">00</span> Fully booked
             </span>
           </div>
         </div>

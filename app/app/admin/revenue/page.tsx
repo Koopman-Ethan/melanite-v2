@@ -167,7 +167,12 @@ export default async function AdminRevenuePage() {
       <div className="grid gap-6 lg:grid-cols-2">
         <section className="space-y-3">
           <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">By provider</h2>
-          <div className="overflow-x-auto rounded-card border border-line">
+          <div
+              tabIndex={0}
+              role="region"
+              aria-label="Scrollable table"
+              className="overflow-x-auto rounded-card border border-line"
+            >
             <table className="w-full text-sm">
               <thead className="text-xs uppercase tracking-wide text-ink-muted">
                 <tr className="border-b border-line">
@@ -191,7 +196,12 @@ export default async function AdminRevenuePage() {
 
         <section className="space-y-3">
           <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">By service</h2>
-          <div className="overflow-x-auto rounded-card border border-line">
+          <div
+              tabIndex={0}
+              role="region"
+              aria-label="Scrollable table"
+              className="overflow-x-auto rounded-card border border-line"
+            >
             <table className="w-full text-sm">
               <thead className="text-xs uppercase tracking-wide text-ink-muted">
                 <tr className="border-b border-line">
@@ -227,7 +237,12 @@ export default async function AdminRevenuePage() {
 
       <section className="space-y-3">
         <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">Recent entries</h2>
-        <div className="overflow-x-auto rounded-card border border-line">
+        <div
+              tabIndex={0}
+              role="region"
+              aria-label="Scrollable table"
+              className="overflow-x-auto rounded-card border border-line"
+            >
           <table className="w-full text-sm">
             <thead className="text-xs uppercase tracking-wide text-ink-muted">
               <tr className="border-b border-line">
@@ -239,8 +254,11 @@ export default async function AdminRevenuePage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-line">
+              {/* No row-level opacity on refunds. Dimming a row dims every colour inside it —
+                  the refund badge measured 2.71:1 that way — and the badge already says
+                  "refund", so the opacity was decoration doing damage. */}
               {recent.map((entry) => (
-                <tr key={entry.id} className={entry.entryType === 'refund' ? 'opacity-70' : undefined}>
+                <tr key={entry.id}>
                   <td className="p-3 whitespace-nowrap tabular-nums">
                     {entry.createdAt.toLocaleDateString('en-US', {
                       month: 'short',

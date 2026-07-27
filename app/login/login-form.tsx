@@ -25,7 +25,7 @@ export function LoginForm({ next }: { next?: string }) {
     <form action={formAction} className="space-y-4">
       <input type="hidden" name="next" value={next ?? '/app'} />
 
-      <Field id="email" name="email" type="email" label="Email" autoComplete="email" required autoFocus />
+      <Field id="email" name="email" type="email" label="Email" autoComplete="email" required />
       <Field
         id="password"
         name="password"

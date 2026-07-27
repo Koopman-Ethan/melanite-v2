@@ -32,7 +32,6 @@ export function ResetForm({ token }: { token: string }) {
         autoComplete="new-password"
         required
         minLength={12}
-        autoFocus
         hint="At least 12 characters, with a letter and a number."
       />
       <Field

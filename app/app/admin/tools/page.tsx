@@ -69,7 +69,12 @@ export default async function AdminToolsPage() {
             Nothing has been entered manually yet.
           </div>
         ) : (
-          <div className="overflow-x-auto rounded-card border border-line">
+          <div
+              tabIndex={0}
+              role="region"
+              aria-label="Scrollable table"
+              className="overflow-x-auto rounded-card border border-line"
+            >
             <table className="w-full text-sm">
               <thead className="text-xs uppercase tracking-wide text-ink-muted">
                 <tr className="border-b border-line">

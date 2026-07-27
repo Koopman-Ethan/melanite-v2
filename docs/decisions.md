@@ -396,6 +396,46 @@ read the busiest control in the app at all. Straight WCAG 1.4.1 failure.
 Touch targets on inputs and both button sizes are now 44px minimum. `sm` buttons were 27px —
 fine with a mouse, poor for a provider tapping between clients one-handed.
 
+### Accessibility, in three layers — 2026-07-27
+
+Each layer catches what the one below it cannot, and none of them is sufficient alone.
+
+**1. Lint (`npm run a11y:lint`)** — `eslint-plugin-jsx-a11y` strict, set to error rather than
+warn, because a warning in a project this size is a thing nobody reads. Found 5 issues across
+~30 files: `autoFocus` on the three auth forms (removed — on a phone it opens the keyboard over
+the page on load, and it moves a screen reader user without warning), and two consent checkboxes
+the default rule depth could not see text inside. The label markup was correct; the rule only
+looks two elements deep, so that was a config fix rather than a suppression.
+
+**2. Contrast (`npm run a11y:contrast`)** — reads tokens from `globals.css`; see the token entry
+above.
+
+**3. axe in a real browser (`npm run a11y`)** — Playwright, every page, at 390×844 and desktop.
+This is the layer that found things the other two structurally cannot:
+
+- **Text on a colour-mixed background.** Admin calendar blocks tint by the service's own colour,
+  so contrast varies with whatever hue that service was given — 4.06:1 on the gold tint. No
+  flat-token check can see this; only the rendered pixel can.
+- **Row-level opacity.** `opacity-70` on refunded rows dimmed every colour inside them, dropping
+  the refund badge to 2.71:1. The badge already says "refund", so the opacity was decoration
+  doing damage.
+- **A hue cannot contrast with itself.** `text-danger` on `bg-danger/15` measured 4.25:1.
+  `--color-danger` lifted to #d97b7b, which clears AA on both the plain surface and its own tint.
+- **Scrollable regions were keyboard-unreachable.** Five `overflow-x-auto` tables could be seen
+  but not scrolled without a mouse. Now `role="region"` + `tabIndex={0}`.
+- **My own misuse of `ink-disabled`** on legend swatches — 2.75:1. A legend describing a
+  disabled state is informational text, not a disabled control; the WCAG exemption does not
+  reach it.
+
+axe and jsx-a11y contradict each other on the scrollable region: axe requires the tabIndex,
+the lint rule forbids it on a div. axe is right, and the rule is configured to permit it for
+`role="region"` only.
+
+**What this does not prove.** axe catches perhaps a third of accessibility problems — the
+mechanical ones. It cannot tell you whether a flow makes sense to someone who cannot see it. A
+manual screen reader pass is still outstanding, and treating a clean axe run as "accessible" is
+the standard mistake.
+
 ## Backlog
 
 ### Multi-service bookings

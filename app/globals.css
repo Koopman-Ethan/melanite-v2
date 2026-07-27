@@ -61,7 +61,10 @@
   --color-success: #4c9a5e;
   --color-info: #64b5f6;
   --color-warning: #d4a04e;
-  --color-danger: #c96565;
+  /* Lifted from #c96565, which measured 4.25:1 as small text on its own 15% tint — a hue
+   * cannot provide contrast against itself, and severity badges are drawn exactly that way.
+   * Now clears AA on the plain surface AND on its own tint. */
+  --color-danger: #d97b7b;
   --color-critical: #c34848;
 
   --radius-field: 6px;

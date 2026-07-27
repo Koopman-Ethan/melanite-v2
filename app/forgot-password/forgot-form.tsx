@@ -40,7 +40,7 @@ export function ForgotForm() {
 
   return (
     <form action={formAction} className="space-y-4">
-      <Field id="email" name="email" type="email" label="Email" autoComplete="email" required autoFocus />
+      <Field id="email" name="email" type="email" label="Email" autoComplete="email" required />
       {state.error && <Notice>{state.error}</Notice>}
       <SubmitButton />
     </form>

@@ -111,7 +111,10 @@ function BookingBlock({
         </div>
       )}
       {height > 46 && (
-        <div className="truncate text-[10px] leading-tight text-ink-faint">
+        // ink-secondary, not ink-faint: this text sits on a service-coloured tint, so its
+        // contrast varies with whatever hue that service was given. Measured at 4.06:1 on the
+        // gold tint — the one case a flat token check cannot catch.
+        <div className="truncate text-[10px] leading-tight text-ink-secondary">
           {booking.serviceName}
         </div>
       )}
@@ -171,7 +174,12 @@ export function WeekGrid({
         </p>
       </div>
 
-      <div className="overflow-x-auto rounded-card border border-line bg-surface">
+      <div
+        tabIndex={0}
+        role="region"
+        aria-label="Weekly laser calendar"
+        className="overflow-x-auto rounded-card border border-line bg-surface"
+      >
         <div className="min-w-[720px]">
           {/* Day headings */}
           <div className="flex border-b border-line">

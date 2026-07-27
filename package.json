@@ -19,7 +19,10 @@
     "db:set-password": "tsx --tsconfig scripts/tsconfig.json scripts/set-password.ts",
     "db:reset-link": "tsx --tsconfig scripts/tsconfig.json scripts/reset-link.ts",
     "db:migrate:kit": "drizzle-kit migrate",
-    "a11y:contrast": "tsx scripts/contrast.ts"
+    "a11y:contrast": "tsx scripts/contrast.ts",
+    "a11y:lint": "eslint app components lib",
+    "a11y": "playwright test",
+    "a11y:report": "playwright test --reporter=list"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
@@ -33,13 +36,17 @@
     "server-only": "^0.0.1"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
+    "@playwright/test": "^1.62.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "axe-core": "^4.12.1",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.2.11",
+    "eslint-plugin-jsx-a11y": "^6.10.2",
     "tailwindcss": "^4",
     "tsx": "^4.23.1",
     "typescript": "^5"
