@@ -60,7 +60,7 @@ function Dead({
       )}
 
       <p className="mt-6 text-xs text-ink-faint">
-        <a href={`mailto:${CONTACT}`} className="text-gold underline-offset-4 hover:underline">
+        <a href={`mailto:${CONTACT}`} className="text-gold underline underline-offset-4">
           {CONTACT}
         </a>
       </p>

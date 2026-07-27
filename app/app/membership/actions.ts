@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm'
 import { requireProvider } from '@/lib/auth/dal'
 import { db } from '@/lib/db'
 import { providers } from '@/lib/db/schema'
+import { isOnboarding } from '@/lib/onboarding'
 import { friendlyStripeError, stripePost } from '@/lib/stripe/client'
 import { appOrigin, medicalDirectorPriceId, modeMismatch } from '@/lib/stripe/config'
 
@@ -49,14 +50,18 @@ export async function startSubscription(): Promise<StripeRedirect> {
 
   const base = await appOrigin()
 
+  // A provider still in setup returns to the medical-director step, not to Membership. Their
+  // remaining steps are there, and Membership shows nothing they can act on yet.
+  const back = isOnboarding(user) ? '/app/onboarding/director' : '/app/membership'
+
   try {
     const session = await stripePost<{ url?: string }>(
       '/checkout/sessions',
       {
         mode: 'subscription',
         line_items: [{ price: priceId, quantity: 1 }],
-        success_url: `${base}/app/membership?subscribed=1`,
-        cancel_url: `${base}/app/membership`,
+        success_url: `${base}${back}?subscribed=1`,
+        cancel_url: `${base}${back}`,
         // The webhook has no other way to know whose subscription this is. Set on BOTH the
         // session and the subscription, because checkout.session.completed and
         // invoice.payment_succeeded read from different objects.

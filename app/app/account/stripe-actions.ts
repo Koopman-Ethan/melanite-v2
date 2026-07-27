@@ -6,6 +6,7 @@ import { headers } from 'next/headers'
 import { requireProvider } from '@/lib/auth/dal'
 import { db } from '@/lib/db'
 import { providers } from '@/lib/db/schema'
+import { isOnboarding } from '@/lib/onboarding'
 import { friendlyStripeError, stripePost } from '@/lib/stripe/client'
 
 export interface StripeRedirect {
@@ -87,12 +88,17 @@ export async function startStripeOnboarding(): Promise<StripeRedirect> {
         .where(eq(providers.id, user.id))
     }
 
+    // Where Stripe sends them back to. A provider still in setup goes back to the SETUP step,
+    // not to Account — landing them in the full app halfway through the flow, with their
+    // progress still recorded as the previous step, is how someone gets stranded and gives up.
+    const back = isOnboarding(user) ? '/app/onboarding/stripe' : '/app/account'
+
     // Deliberately no idempotency key: account links are single-use and expire in minutes, so
     // replaying a stale one for 24 hours would hand back a dead link.
     const link = await stripePost<{ url?: string }>('/account_links', {
       account: accountId,
-      refresh_url: `${base}/app/account?stripe=refresh`,
-      return_url: `${base}/app/account?stripe=return`,
+      refresh_url: `${base}${back}?stripe=refresh`,
+      return_url: `${base}${back}?stripe=return`,
       type: 'account_onboarding',
     })
 

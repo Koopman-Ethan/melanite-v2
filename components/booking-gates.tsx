@@ -32,7 +32,7 @@ export function BookingGates({ gates, heading }: { gates: BlockedGate[]; heading
               {gate.href && gate.action && (
                 <Link
                   href={gate.href}
-                  className="ml-1.5 whitespace-nowrap text-gold underline-offset-4 hover:underline"
+                  className="ml-1.5 whitespace-nowrap text-gold underline underline-offset-4"
                 >
                   {gate.action} →
                 </Link>

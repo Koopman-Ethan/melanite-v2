@@ -1,0 +1,57 @@
+import type { Metadata } from 'next'
+import { eq } from 'drizzle-orm'
+
+import { db } from '@/lib/db'
+import { providers } from '@/lib/db/schema'
+
+import { requireOnboardingStep } from '../guard'
+import { ProgressRail, StepShell } from '../steps'
+import { LicenseForm } from './form'
+
+export const metadata: Metadata = { title: 'Licence & compliance · Melanite' }
+export const dynamic = 'force-dynamic'
+
+export default async function LicenseStep() {
+  const user = await requireOnboardingStep('license')
+
+  const [row] = await db
+    .select({
+      licenseNumber: providers.licenseNumber,
+      licenseState: providers.licenseState,
+      licenseExpiry: providers.licenseExpiry,
+      malpracticeInsurance: providers.malpracticeInsurance,
+    })
+    .from(providers)
+    .where(eq(providers.id, user.id))
+    .limit(1)
+
+  return (
+    <StepShell
+      current={3}
+      rail={
+        <ProgressRail
+          current={3}
+          heading={
+            <>
+              Why we ask for <span className="text-gold">your licence</span>.
+            </>
+          }
+          body="Melanite operates under strict compliance standards. Your licence and insurance details are kept on file for platform records and are never shared with clients."
+          aside={{
+            title: 'Confidentiality',
+            body: 'Licence numbers, expiry dates and insurance information are visible only to Melanite administrators. They are never displayed on client checkout pages or shared with third parties.',
+          }}
+        />
+      }
+    >
+      <LicenseForm
+        initial={{
+          licenseNumber: row?.licenseNumber ?? '',
+          licenseState: row?.licenseState ?? '',
+          licenseExpiry: row?.licenseExpiry ?? '',
+          malpracticeInsurance: row?.malpracticeInsurance ?? '',
+        }}
+      />
+    </StepShell>
+  )
+}

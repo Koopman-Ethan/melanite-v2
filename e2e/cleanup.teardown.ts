@@ -27,4 +27,12 @@ teardown('remove e2e rows', async () => {
   )
   await query.query(`DELETE FROM bookings WHERE client_name LIKE 'ZZ E2E %'`)
   await query.query(`DELETE FROM clients WHERE email = 'zz.e2e@example.com'`)
+
+  // The onboarding journey builds a whole provider out of an invite. Sessions and services
+  // both reference it, so those go first.
+  const created = `SELECT id FROM providers WHERE email LIKE 'zz.onboard.%@example.com'`
+  await query.query(`DELETE FROM sessions WHERE provider_id IN (${created})`)
+  await query.query(`DELETE FROM provider_services WHERE provider_id IN (${created})`)
+  await query.query(`DELETE FROM providers WHERE email LIKE 'zz.onboard.%@example.com'`)
+  await query.query(`DELETE FROM invite_links WHERE email LIKE 'zz.onboard.%@example.com'`)
 })
