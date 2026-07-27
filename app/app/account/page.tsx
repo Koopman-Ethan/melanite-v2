@@ -4,6 +4,7 @@ import { isLicenseExpired, requireProvider } from '@/lib/auth/dal'
 import { getAccount, getActiveSessions, getDocuments } from '@/lib/db/queries/account'
 
 import { NotificationsForm, PasswordForm, ProfileForm } from './forms'
+import { Payouts } from './payouts'
 
 export const metadata: Metadata = { title: 'Account · Melanite' }
 export const dynamic = 'force-dynamic'
@@ -76,6 +77,13 @@ export default async function AccountPage() {
         description="Your email is your sign-in and can’t be changed here — contact Melanite if it needs to move."
       >
         <ProfileForm values={account} />
+      </Section>
+
+      <Section
+        title="Getting paid"
+        description="Bookings use destination charges, so your share needs somewhere to land."
+      >
+        <Payouts connected={account.stripeOnboardingComplete} />
       </Section>
 
       <Section
