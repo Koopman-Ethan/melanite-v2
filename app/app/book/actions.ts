@@ -5,7 +5,7 @@ import { randomBytes } from 'node:crypto'
 import { and, eq, sql } from 'drizzle-orm'
 import { redirect } from 'next/navigation'
 
-import { canBook, bookingBlockedReason, requireProvider } from '@/lib/auth/dal'
+import { canBook, bookingBlockedReasons, requireProvider } from '@/lib/auth/dal'
 import { denverInstant, getLaserHours } from '@/lib/db/queries/availability'
 import { db } from '@/lib/db'
 import { providerServices, services } from '@/lib/db/schema'
@@ -28,7 +28,10 @@ export async function createBooking(_prev: BookState, formData: FormData): Promi
   // Gates first. canBook() covers bookingEnabled, medicalDirectorStatus and licence expiry;
   // an inactive account never gets a session at all.
   if (!canBook(user)) {
-    return { error: bookingBlockedReason(user) ?? 'Your account cannot book right now.' }
+    const gates = bookingBlockedReasons(user)
+    return {
+      error: gates.length ? gates.map((g) => g.message).join(' ') : 'Your account cannot book right now.',
+    }
   }
 
   const providerServiceId = String(formData.get('providerServiceId') ?? '')

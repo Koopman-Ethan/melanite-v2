@@ -69,23 +69,60 @@ export function isLicenseExpired(user: SessionUser): boolean {
   return user.licenseExpiry < today
 }
 
-export function bookingBlockedReason(user: SessionUser): string | null {
+export interface BlockedGate {
+  gate: 'booking_enabled' | 'medical_director' | 'license'
+  message: string
+  /** Where the provider can act on it themselves, if anywhere. Documents and licence renewal
+   *  both go through Keoni, so those have no self-serve route. */
+  href?: string
+  action?: string
+}
+
+/** EVERY failing gate, not just the first.
+ *
+ *  Returning one at a time means a provider fixes it, comes back, and discovers another —
+ *  which is how a single onboarding problem turns into three support messages. v1 behaved that
+ *  way by accident, since each precondition threw on the first failure and the request stopped
+ *  there. Showing all of them is a deliberate change.
+ */
+export function bookingBlockedReasons(user: SessionUser): BlockedGate[] {
+  const blocked: BlockedGate[] = []
+
   if (!user.bookingEnabled) {
-    return 'Your account is not yet cleared for booking. Melanite will enable it once your documents are on file.'
+    blocked.push({
+      gate: 'booking_enabled',
+      message:
+        'Your account is not yet cleared for booking. Melanite will enable it once your required documents are confirmed.',
+    })
   }
-  if (user.medicalDirectorStatus === 'none') {
-    return 'You need a medical director on file before booking.'
+
+  if (user.medicalDirectorStatus !== 'active') {
+    const message =
+      user.medicalDirectorStatus === 'past_due'
+        ? 'Your medical director subscription is past due. Update your billing to resume booking.'
+        : user.medicalDirectorStatus === 'inactive'
+          ? 'Your medical director coverage is inactive.'
+          : 'You need a medical director on file before booking.'
+
+    blocked.push({
+      gate: 'medical_director',
+      message,
+      href: '/app/medical-director',
+      action:
+        user.medicalDirectorStatus === 'past_due'
+          ? 'Update billing'
+          : 'Set up your medical director',
+    })
   }
-  if (user.medicalDirectorStatus === 'past_due') {
-    return 'Your medical director subscription is past due. Update your billing to resume booking.'
-  }
-  if (user.medicalDirectorStatus === 'inactive') {
-    return 'Your medical director coverage is inactive.'
-  }
+
   if (isLicenseExpired(user)) {
-    return 'Your professional license has expired. Renew it and contact Melanite to update your record before booking.'
+    blocked.push({
+      gate: 'license',
+      message: `Your professional license expired on ${user.licenseExpiry}. Renew it, then contact Melanite to update your record.`,
+    })
   }
-  return null
+
+  return blocked
 }
 
 export async function requireBookingAccess(): Promise<SessionUser> {

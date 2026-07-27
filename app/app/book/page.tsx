@@ -1,7 +1,8 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 
-import { bookingBlockedReason, canBook, requireProvider } from '@/lib/auth/dal'
+import { BookingGates } from '@/components/booking-gates'
+import { bookingBlockedReasons, canBook, requireProvider } from '@/lib/auth/dal'
 import { getAvailability, getBookableServices } from '@/lib/db/queries/availability'
 
 import { BookPanel } from './book-panel'
@@ -22,25 +23,15 @@ export default async function BookPage({
 
   // The gates are shown rather than enforced by redirect. A blocked provider landing on an
   // empty page learns nothing; v1's equivalent was a 403 whose reason lived in an error string.
-  const blocked = bookingBlockedReason(user)
   if (!canBook(user)) {
     return (
       <main className="mx-auto w-full max-w-2xl px-6 py-10 space-y-6">
         <header>
           <h1 className="text-2xl font-semibold">Book laser time</h1>
         </header>
-        <div className="rounded-card border border-warning/40 bg-warning/10 p-6">
-          <h2 className="text-sm font-medium text-warning">Booking isn&rsquo;t available yet</h2>
-          <p className="mt-2 text-sm text-ink-secondary">{blocked}</p>
-          {user.medicalDirectorStatus !== 'active' && (
-            <Link
-              href="/app/medical-director"
-              className="mt-4 inline-block text-sm text-gold underline-offset-4 hover:underline"
-            >
-              Set up your medical director →
-            </Link>
-          )}
-        </div>
+        {/* A real apostrophe, not &rsquo; — this is a string prop, not JSX text, so an HTML
+            entity would render literally. */}
+        <BookingGates gates={bookingBlockedReasons(user)} heading="Booking isn’t available yet" />
       </main>
     )
   }
