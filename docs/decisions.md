@@ -142,22 +142,31 @@ Two bugs fixed in `roomRentalPaid` while wiring this up:
 
 Both are fixed by carrying `room_booking_id` in the PaymentIntent metadata.
 
-### `drizzle-kit migrate` does not work here — 2026-07-27
+### Migrations: enum values need their own run — 2026-07-27
 
-It prints "applying migrations…", exits 0, and changes nothing. The cause is the driver:
-drizzle-kit wraps a run in a transaction and `@neondatabase/serverless` over HTTP has no
-interactive transactions, so the run is silently abandoned. A migration tool that reports
-success without applying anything is worse than one that fails.
+`drizzle-kit migrate` reported success and changed nothing when applying 0008. The environment
+is not at fault, and an earlier version of this note blamed the driver — that was wrong.
 
-`npm run db:migrate` now runs `scripts/migrate.ts`, which sends statements one at a time.
-That is not only a workaround: `ALTER TYPE … ADD VALUE` cannot be followed by a use of that
-value in the same transaction, so statement-at-a-time is the only way migration 0008 could
-apply at all. `drizzle-kit generate` is still the right way to author migrations, and
-`db:migrate:kit` keeps the old command available.
+What is actually true, each point tested:
+
+- The WebSocket path drizzle-kit uses **works**, including transactions. `@neondatabase/serverless`
+  picks up Node 24's global `WebSocket` with no configuration.
+- `drizzle-kit migrate` **works** — a no-op migration applied and reported `✓`.
+- The failure is a Postgres rule: `ALTER TYPE … ADD VALUE` followed by any *use* of that value
+  in the same transaction raises `55P04 unsafe use of new value`. Migration 0008 adds `'pending'`
+  to `room_booking_status` and then sets it as a column default.
+- **Splitting it across two migration files does not help.** drizzle-kit wraps the whole run —
+  every pending file — in one transaction, so the two statements still meet. Tested directly.
+- drizzle-kit's real failing is that it swallowed the error and exited 0. A migration tool
+  reporting success while applying nothing is worse than one that fails loudly.
+
+So `npm run db:migrate` runs `scripts/migrate.ts`, which sends statements one at a time and logs
+each. `drizzle-kit generate` is still how migrations are authored, and `db:migrate:kit` keeps
+the original command available.
 
 Trade-off: without a transaction, a failure halfway leaves the schema partly changed. Each
 statement is logged as it runs, and a migration is recorded only after all of its statements
-succeed.
+succeed. For a migration with no enum changes, `db:migrate:kit` is the safer of the two.
 
 ## Backlog
 

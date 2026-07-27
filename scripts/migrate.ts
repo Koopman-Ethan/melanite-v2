@@ -1,19 +1,23 @@
-// Applies pending migrations from ./drizzle.
+// Applies pending migrations from ./drizzle, one statement at a time.
 //
-// This exists because `drizzle-kit migrate` does nothing against this database: it prints
-// "applying migrations…" and exits 0 with the journal untouched. The cause is the driver —
-// drizzle-kit wraps a migration run in a transaction, and `@neondatabase/serverless` over HTTP
-// has no interactive transactions, so the run is silently abandoned. A migration tool that
-// reports success without applying anything is worse than one that fails.
+// `drizzle-kit migrate` works fine here for ordinary migrations, and `db:migrate:kit` still
+// runs it. This exists for one specific case it cannot handle:
 //
-// Statements are split on drizzle's own `--> statement-breakpoint` marker and sent one at a
-// time. That is not merely a workaround: `ALTER TYPE … ADD VALUE` cannot be followed by a use
-// of that value inside the same transaction, so statement-at-a-time is the only way migration
-// 0008 could ever apply.
+//   ALTER TYPE … ADD VALUE 'x';        -- adds an enum value
+//   ALTER TABLE … SET DEFAULT 'x';     -- uses it
 //
-// Trade-off worth stating: without a transaction, a migration that fails halfway leaves the
-// schema partly changed. Each statement is logged as it runs so the failure point is obvious,
-// and migrations are recorded only after every statement in the file succeeds.
+// Postgres refuses the second inside the same transaction (`55P04 unsafe use of new value`),
+// and drizzle-kit wraps an entire run — every pending file — in one transaction. Splitting the
+// statements across two migration files does not help, because both files are still in the
+// same run. Sending statements separately is the only way such a migration applies.
+//
+// drizzle-kit also swallows that error and exits 0, which is how migration 0008 appeared to
+// succeed while changing nothing. Reporting success without applying anything is worse than
+// failing, so this logs every statement as it runs.
+//
+// Trade-off: with no surrounding transaction, a failure halfway leaves the schema partly
+// changed. A migration is recorded only once all of its statements succeed, and the failing
+// statement is printed. For migrations with no enum changes, `db:migrate:kit` is the safer one.
 //
 //   npm run db:migrate
 
