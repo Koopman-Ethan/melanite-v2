@@ -11,8 +11,13 @@ import { DirectorForm } from './form'
 export const metadata: Metadata = { title: 'Medical director · Melanite' }
 export const dynamic = 'force-dynamic'
 
-export default async function DirectorStep() {
+export default async function DirectorStep({
+  searchParams,
+}: {
+  searchParams: Promise<{ subscribed?: string }>
+}) {
   const user = await requireOnboardingStep('director')
+  const { subscribed } = await searchParams
 
   const [row] = await db
     .select({
@@ -45,6 +50,7 @@ export default async function DirectorStep() {
       <DirectorForm
         initialChoice={row?.type ?? null}
         subscriptionActive={row?.status === 'active'}
+        justPaid={subscribed === '1'}
       />
     </StepShell>
   )

@@ -38,9 +38,17 @@ export function LicenseForm({
         </p>
       </div>
 
+      <p className="text-xs text-ink-faint">
+        Every field is required.{' '}
+        <span className="text-gold" aria-hidden>
+          *
+        </span>
+      </p>
+
       <Field
         id="licenseNumber"
         label="Licence number"
+        required
         value={licenseNumber}
         onChange={(e) => setLicenseNumber(e.target.value)}
         placeholder="e.g. RN-123456"
@@ -50,14 +58,18 @@ export function LicenseForm({
         <Field
           id="licenseState"
           label="Licence state"
+          required
           value={licenseState}
           onChange={(e) => setLicenseState(e.target.value)}
           placeholder="Idaho, Utah, Oregon, Washington"
         />
         <label className="block space-y-1.5">
-          <span className="block text-sm font-medium text-ink-secondary">Licence expiry</span>
+          <span className="block text-sm font-medium text-ink-secondary after:ml-1 after:text-gold after:content-['*']">
+            Licence expiry
+          </span>
           <input
             type="date"
+            required
             value={licenseExpiry}
             onChange={(e) => setLicenseExpiry(e.target.value)}
             className="min-h-11 w-full rounded-field border border-line-control bg-surface px-3 py-2 text-sm text-ink focus:border-gold"
@@ -68,6 +80,7 @@ export function LicenseForm({
       <Field
         id="malpractice"
         label="Malpractice insurance provider"
+        required
         value={malpracticeInsurance}
         onChange={(e) => setMalpractice(e.target.value)}
         placeholder="e.g. NSO, CM&F, Proliability"

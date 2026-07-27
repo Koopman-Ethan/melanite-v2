@@ -16,16 +16,27 @@ export interface FieldProps extends Omit<ComponentProps<'input'>, 'className' | 
   error?: string
 }
 
-export function Field({ id, label, hint, error, ...props }: FieldProps) {
+export function Field({ id, label, hint, error, required, ...props }: FieldProps) {
   const describedBy = [hint && `${id}-hint`, error && `${id}-error`].filter(Boolean).join(' ')
 
   return (
     <div className="space-y-1.5">
-      <label htmlFor={id} className="block text-sm font-medium text-ink-secondary">
+      {/* The asterisk is drawn by CSS rather than added to the label's text.
+          `required` on the input is what actually tells assistive tech, so the marker is purely
+          visual — and putting it in the DOM changes the label's accessible name from "Name" to
+          "Name *", which silently breaks every caller and test that matches a label exactly. */}
+      <label
+        htmlFor={id}
+        className={cn(
+          'block text-sm font-medium text-ink-secondary',
+          required && "after:ml-1 after:text-gold after:content-['*']",
+        )}
+      >
         {label}
       </label>
       <input
         id={id}
+        required={required}
         aria-describedby={describedBy || undefined}
         aria-invalid={error ? true : undefined}
         {...props}

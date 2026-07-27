@@ -1,5 +1,6 @@
 'use client'
 
+import { useRouter } from 'next/navigation'
 import { useState, useTransition } from 'react'
 
 import { Button } from '@/components/ui/button'
@@ -14,13 +15,23 @@ const CONTACT = 'melanitelasersuite@gmail.com'
 export function DirectorForm({
   initialChoice,
   subscriptionActive,
+  justPaid,
 }: {
   initialChoice: 'melanite' | 'own' | null
   subscriptionActive: boolean
+  /** Back from Stripe Checkout. Says nothing about whether the payment has been CONFIRMED. */
+  justPaid: boolean
 }) {
+  const router = useRouter()
   const [choice, setChoice] = useState<'melanite' | 'own'>(initialChoice ?? 'melanite')
   const [error, setError] = useState<string | null>(null)
   const [pending, start] = useTransition()
+
+  // Melanite's director is a Stripe subscription, so the money is settled here rather than
+  // deferred: someone who passes this step unpaid is never asked again by anything in the flow.
+  // Bringing your own director cannot be settled in the moment — it needs a signed supervision
+  // agreement Keoni confirms by hand — so that path continues and states the requirement.
+  const blocked = choice === 'melanite' && !subscriptionActive
 
   return (
     <div className="mt-6 space-y-5">
@@ -89,23 +100,40 @@ export function DirectorForm({
             </div>
           </dl>
 
+          {justPaid && !subscriptionActive && (
+            // Checkout completed, but access is granted by the invoice webhook, not by landing
+            // back on this URL. Usually a few seconds. Saying so beats a button that fails.
+            <Notice tone="warning">
+              Payment received — Stripe is confirming it. This usually takes a few seconds.
+            </Notice>
+          )}
+
           {!subscriptionActive && (
-            <Button
-              block
-              disabled={pending}
-              onClick={() =>
-                start(async () => {
-                  const result = await startSubscription()
-                  if (result.url) {
-                    window.location.href = result.url
-                    return
-                  }
-                  setError(result.error ?? 'Could not start the subscription.')
-                })
-              }
-            >
-              {pending ? 'Opening Stripe…' : 'Subscribe — $150 / month'}
-            </Button>
+            <div className="space-y-2">
+              <Button
+                block
+                disabled={pending}
+                onClick={() =>
+                  start(async () => {
+                    const result = await startSubscription()
+                    if (result.url) {
+                      window.location.href = result.url
+                      return
+                    }
+                    setError(result.error ?? 'Could not start the subscription.')
+                  })
+                }
+              >
+                {pending ? 'Opening Stripe…' : 'Subscribe — $150 / month'}
+              </Button>
+              <Button block variant="outline" disabled={pending} onClick={() => router.refresh()}>
+                I&rsquo;ve paid — check again
+              </Button>
+            </div>
+          )}
+
+          {subscriptionActive && (
+            <Notice tone="success">Subscription active. You can continue.</Notice>
           )}
         </>
       ) : (
@@ -129,19 +157,27 @@ export function DirectorForm({
 
       {error && <Notice>{error}</Notice>}
 
-      <Button
-        block
-        variant={choice === 'melanite' && !subscriptionActive ? 'outline' : 'gold'}
-        disabled={pending}
-        onClick={() =>
-          start(async () => {
-            const result = await saveDirectorChoice(choice)
-            if (result?.error) setError(result.error)
-          })
-        }
-      >
-        {pending ? 'Saving…' : 'Continue to services'}
-      </Button>
+      {blocked ? (
+        // No Continue button at all here. A button that is always going to be refused is worse
+        // than no button: it reads as a bug rather than as a requirement.
+        <p className="text-xs text-ink-muted">
+          Subscribe above to continue. Choosing your own medical director instead lets you carry
+          on now.
+        </p>
+      ) : (
+        <Button
+          block
+          disabled={pending}
+          onClick={() =>
+            start(async () => {
+              const result = await saveDirectorChoice(choice)
+              if (result?.error) setError(result.error)
+            })
+          }
+        >
+          {pending ? 'Saving…' : 'Continue to services'}
+        </Button>
+      )}
     </div>
   )
 }

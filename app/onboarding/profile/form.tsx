@@ -31,10 +31,18 @@ export function ProfileForm({
         </p>
       </div>
 
+      <p className="text-xs text-ink-faint">
+        Every field is required.{' '}
+        <span className="text-gold" aria-hidden>
+          *
+        </span>
+      </p>
+
       <div className="grid gap-3 sm:grid-cols-2">
         <Field
           id="firstName"
           label="First name"
+          required
           value={firstName}
           onChange={(e) => setFirstName(e.target.value)}
           autoComplete="given-name"
@@ -42,6 +50,7 @@ export function ProfileForm({
         <Field
           id="lastName"
           label="Last name"
+          required
           value={lastName}
           onChange={(e) => setLastName(e.target.value)}
           autoComplete="family-name"
@@ -51,6 +60,7 @@ export function ProfileForm({
       <Field
         id="phone"
         label="Phone number"
+        required
         type="tel"
         value={phone}
         onChange={(e) => setPhone(e.target.value)}
@@ -62,6 +72,7 @@ export function ProfileForm({
       <Field
         id="credentials"
         label="Professional credentials"
+        required
         value={credentials}
         onChange={(e) => setCredentials(e.target.value)}
         placeholder="RN, NP, PA, MD, DO, Esthetician, or Other"

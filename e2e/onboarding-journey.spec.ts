@@ -96,6 +96,7 @@ test.describe('provider onboarding', () => {
     await page.getByLabel('First name').fill('Zzonboard')
     await page.getByLabel('Last name').fill('Tester')
     await page.getByLabel('Phone number').fill('208-555-0134')
+    await page.getByLabel('Professional credentials').fill('RN')
     await page.getByRole('button', { name: /continue/i }).click()
 
     // --- Step 3: licence ------------------------------------------------------------------
@@ -106,6 +107,7 @@ test.describe('provider onboarding', () => {
     await page.getByLabel('Licence number').fill('RN-E2E-0001')
     await page.getByLabel('Licence state').fill('Idaho')
     await page.getByLabel('Licence expiry').fill('2099-12-31')
+    await page.getByLabel('Malpractice insurance provider').fill('NSO')
     await page.getByRole('button', { name: /continue to stripe/i }).click()
 
     // --- Step 4: Stripe -------------------------------------------------------------------
@@ -193,6 +195,97 @@ test.describe('provider onboarding', () => {
     // stale tab and rewrite their whole service menu.
     await page.goto('/onboarding/profile')
     await expect(page).toHaveURL(/\/app\/dashboard/)
+  })
+
+  test('no step can be skipped', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name === 'phone', 'workflow covered once, on desktop')
+
+    // The gates, one at a time. Each of these was open at some point: a provider could pass a
+    // step with a field blank, with no Stripe account, or with Melanite's medical director
+    // chosen and never paid for.
+    const query = await sql()
+    const token = randomBytes(24).toString('base64url')
+    const email = `zz.onboard.gate.${Date.now()}@example.com`
+    await inviteFrom(query, { email, token, status: 'pending', expiresIn: '7 days' })
+
+    const password = `E2e-Gate-${randomBytes(6).toString('hex')}!`
+    await page.goto(`/onboard/${token}`)
+    await page.getByLabel('Create password', { exact: true }).fill(password)
+    await page.getByLabel('Confirm password').fill(password)
+    await page.getByRole('button', { name: 'Activate account' }).click()
+    await expect(page).toHaveURL(/\/onboarding\/profile/)
+
+    // --- Step 2: credentials are not optional ---------------------------------------------
+    await page.getByLabel('First name').fill('Gate')
+    await page.getByLabel('Last name').fill('Tester')
+    await page.getByLabel('Phone number').fill('208-555-0100')
+    await page.getByRole('button', { name: /continue/i }).click()
+    await expect(page.getByText(/professional credentials/i).last()).toBeVisible()
+    await expect(page).toHaveURL(/\/onboarding\/profile/)
+
+    await page.getByLabel('Professional credentials').fill('RN')
+    await page.getByRole('button', { name: /continue/i }).click()
+    await expect(page).toHaveURL(/\/onboarding\/license/)
+
+    // --- Step 3: malpractice cover is not optional ----------------------------------------
+    await page.getByLabel('Licence number').fill('RN-GATE-1')
+    await page.getByLabel('Licence state').fill('Idaho')
+    await page.getByLabel('Licence expiry').fill('2099-12-31')
+    await page.getByRole('button', { name: /continue to stripe/i }).click()
+    await expect(page.getByText(/malpractice insurance provider/i).last()).toBeVisible()
+    await expect(page).toHaveURL(/\/onboarding\/license/)
+
+    // An already-expired licence is refused outright rather than stored and flagged.
+    await page.getByLabel('Malpractice insurance provider').fill('NSO')
+    await page.getByLabel('Licence expiry').fill('2020-01-01')
+    await page.getByRole('button', { name: /continue to stripe/i }).click()
+    await expect(page.getByText(/already expired/i)).toBeVisible()
+
+    await page.getByLabel('Licence expiry').fill('2099-12-31')
+    await page.getByRole('button', { name: /continue to stripe/i }).click()
+    await expect(page).toHaveURL(/\/onboarding\/stripe/)
+
+    // --- Step 4: there is no way past Stripe without connecting ----------------------------
+    // Not merely hidden in the UI. The action itself refuses, because a server action is a
+    // public endpoint and a hidden button is not a gate.
+    await expect(page.getByRole('button', { name: 'Next step' })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: /connect bank account/i })).toBeVisible()
+
+    await query.query(`UPDATE providers SET stripe_account_id = $1 WHERE email = $2`, [
+      `acct_e2e_${randomBytes(6).toString('hex')}`,
+      email,
+    ])
+    await page.reload()
+    await page.getByRole('button', { name: 'Next step' }).click()
+    await expect(page).toHaveURL(/\/onboarding\/director/)
+
+    // --- Step 5: Melanite's director must actually be paid for -----------------------------
+    // It defaults to the Melanite option, which is unpaid here, so there is no way forward on
+    // that path at all — not a button that would be refused.
+    await expect(page.getByRole('button', { name: /continue to services/i })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: /subscribe/i })).toBeVisible()
+    await expect(page.getByText(/subscribe above to continue/i)).toBeVisible()
+
+    // Bringing your own director cannot be settled in the moment, so that path is open — the
+    // documents requirement is stated instead.
+    await page.getByRole('button', { name: /use my own director/i }).click()
+    await page.getByRole('button', { name: /continue to services/i }).click()
+    await expect(page).toHaveURL(/\/onboarding\/services/)
+
+    // --- Step 6: at least one service, priced ----------------------------------------------
+    const finish = page.getByRole('button', { name: /finish setup/i })
+    await expect(finish).toBeDisabled()
+    await page.locator('input[type="checkbox"]').first().check()
+    await expect(finish).toBeEnabled()
+
+    // Checked but unpriced is refused: a service at zero is not a service.
+    await finish.click()
+    await expect(page.getByText(/price above zero/i)).toBeVisible()
+    await expect(page).toHaveURL(/\/onboarding\/services/)
+
+    await page.getByLabel('Your price').fill('180')
+    await finish.click()
+    await expect(page).toHaveURL(/\/onboarding\/done/)
   })
 
   test('a spent invite cannot create a second account', async ({ page }) => {

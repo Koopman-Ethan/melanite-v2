@@ -43,15 +43,15 @@ export async function saveProfile(input: {
   const lastName = input.lastName.trim()
   const phone = input.phone.trim()
 
+  const credentials = input.credentials.trim()
+
   if (!firstName || !lastName) return { error: 'Enter your first and last name.' }
   if (!phone) return { error: 'Enter a phone number — bookings and client messages use it.' }
+  if (!credentials) {
+    return { error: 'Enter your professional credentials — clients see them at checkout.' }
+  }
 
-  await completeStep(user.id, 2, {
-    firstName,
-    lastName,
-    phone,
-    credentials: input.credentials.trim() || null,
-  })
+  await completeStep(user.id, 2, { firstName, lastName, phone, credentials })
 
   redirect('/onboarding/license')
 }
@@ -71,9 +71,13 @@ export async function saveLicense(input: {
 
   const licenseNumber = input.licenseNumber.trim()
   const licenseState = input.licenseState.trim()
+  const malpracticeInsurance = input.malpracticeInsurance.trim()
 
   if (!licenseNumber) return { error: 'Enter your licence number.' }
   if (!licenseState) return { error: 'Enter the state your licence was issued in.' }
+  if (!malpracticeInsurance) {
+    return { error: 'Enter your malpractice insurance provider.' }
+  }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.licenseExpiry)) {
     return { error: 'Enter the licence expiry date.' }
   }
@@ -89,34 +93,77 @@ export async function saveLicense(input: {
     licenseNumber,
     licenseState,
     licenseExpiry: input.licenseExpiry,
-    malpracticeInsurance: input.malpracticeInsurance.trim() || null,
+    malpracticeInsurance,
   })
 
   redirect('/onboarding/stripe')
 }
 
-/** Step 4 — acknowledges that Stripe onboarding has been started or finished.
+/** Step 4 — Stripe must be connected before anything else happens.
  *
- *  Whether payouts actually work is decided by `stripeOnboardingComplete`, which only the
- *  `account.updated` webhook sets. This just records that the provider has been through the
- *  hand-off, so they are not blocked from continuing while Stripe verifies them. */
+ *  The gate is "an account exists", not "payouts are enabled". Those are different questions:
+ *  the first is entirely within the provider's control and takes three minutes, the second is
+ *  Stripe verifying them in the background and can take days. Blocking on the second would
+ *  strand someone at step 4 with nothing they can do about it, so `stripeOnboardingComplete`
+ *  — set only by the `account.updated` webhook — gates BOOKING instead, which is where it
+ *  belongs.
+ *
+ *  Checked here rather than only in the form. The button that calls this is hidden until an
+ *  account exists, but a hidden button is not a gate: a server action is a public endpoint.
+ */
 export async function completeStripeStep(): Promise<StepState> {
   const user = await requireProvider()
+
+  const [row] = await db
+    .select({ stripeAccountId: providers.stripeAccountId })
+    .from(providers)
+    .where(eq(providers.id, user.id))
+    .limit(1)
+
+  if (!row?.stripeAccountId) {
+    return { error: 'Connect your bank account with Stripe before continuing.' }
+  }
+
   await completeStep(user.id, 4, {})
   redirect('/onboarding/director')
 }
 
 /** Step 5 — medical director.
  *
- *  Either path is recorded here; NEITHER opens the booking gate. The Melanite path needs a paid
- *  subscription (the invoice webhook sets `medicalDirectorStatus`), and the own-director path
- *  needs a signed supervision agreement that Keoni confirms by hand. v1 said the same thing on
- *  this screen: "an active subscription alone doesn't unlock booking".
+ *  The two paths are gated differently, on purpose. Choosing Melanite's director means the
+ *  subscription is paid HERE — it is a thing the provider can complete in the moment, and
+ *  letting them past it would leave someone who is "set up" but has never paid, with nothing
+ *  in the flow that ever asks again. Bringing their own director cannot be settled in the
+ *  moment: it needs a signed supervision agreement that Keoni confirms by hand, so that path
+ *  continues and the document requirement is stated instead.
+ *
+ *  NEITHER opens the booking gate. v1 said the same thing on this screen, and it is still the
+ *  thing people get wrong: an active subscription alone doesn't unlock booking.
  */
 export async function saveDirectorChoice(choice: 'melanite' | 'own'): Promise<StepState> {
   const user = await requireProvider()
 
   if (choice !== 'melanite' && choice !== 'own') return { error: 'Choose an option to continue.' }
+
+  if (choice === 'melanite') {
+    // Read fresh rather than trusting the session: the invoice webhook may well have landed in
+    // the seconds since this page rendered, which is exactly the case that must not be refused.
+    const [row] = await db
+      .select({ status: providers.medicalDirectorStatus })
+      .from(providers)
+      .where(eq(providers.id, user.id))
+      .limit(1)
+
+    // `past_due` is deliberately not accepted. It means a payment has failed, and starting
+    // someone off on a subscription that is already failing is how a provider ends up believing
+    // they are covered when they are not.
+    if (row?.status !== 'active') {
+      return {
+        error:
+          'Your subscription isn’t active yet. Complete the payment, then try again — if you’ve just paid, give it a few seconds and press Check again.',
+      }
+    }
+  }
 
   await completeStep(user.id, 5, { medicalDirectorType: choice })
   redirect('/onboarding/services')
