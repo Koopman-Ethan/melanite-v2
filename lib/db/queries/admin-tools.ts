@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { and, desc, eq, isNotNull, isNull, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, isNotNull, isNull, sql } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
 import {
@@ -186,4 +186,28 @@ export async function bookingHasPayment(bookingId: string): Promise<boolean> {
     .limit(1)
 
   return Boolean(row)
+}
+
+/** Provider licences, for the admin view.
+ *
+ *  Nothing surfaced this anywhere before: the licence is a booking gate that fails on a date,
+ *  and the only person who could see it coming was the provider — on a page they have no reason
+ *  to open. Renewal goes through Melanite, so Melanite has to be able to see it.
+ *
+ *  Only accounts that can actually book. An inactive provider whose licence lapsed is not a
+ *  problem anyone needs to act on.
+ */
+export async function getProviderLicenses(): Promise<
+  { id: string; name: string; email: string; licenseExpiry: string | null }[]
+> {
+  return db
+    .select({
+      id: providers.id,
+      name: sql<string>`${providers.firstName} || ' ' || ${providers.lastName}`,
+      email: providers.email,
+      licenseExpiry: providers.licenseExpiry,
+    })
+    .from(providers)
+    .where(and(eq(providers.status, 'active'), eq(providers.bookingEnabled, true)))
+    .orderBy(asc(providers.lastName))
 }

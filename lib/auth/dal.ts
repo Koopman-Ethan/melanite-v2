@@ -106,7 +106,7 @@ export function bookingBlockedReasons(user: SessionUser): BlockedGate[] {
     blocked.push({
       gate: 'medical_director',
       message,
-      href: '/app/medical-director',
+      href: '/app/membership',
       action:
         user.medicalDirectorStatus === 'past_due'
           ? 'Update billing'

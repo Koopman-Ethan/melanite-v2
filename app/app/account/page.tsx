@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 
-import { isLicenseExpired, requireProvider } from '@/lib/auth/dal'
+import { requireProvider } from '@/lib/auth/dal'
+import { licenseMessage, licenseStatus } from '@/lib/license'
 import { getAccount, getActiveSessions, getDocuments } from '@/lib/db/queries/account'
 
 import { NotificationsForm, PasswordForm, ProfileForm } from './forms'
@@ -54,7 +55,11 @@ export default async function AccountPage() {
 
   if (!account) return null
 
-  const licenseExpired = isLicenseExpired(user)
+  // Was only ever past tense — "your license expired", by which point booking is already
+  // dead. The same surface now speaks up during the renewal window, and when there is no date
+  // on file at all.
+  const license = licenseStatus(account.licenseExpiry)
+  const licenseNote = licenseMessage(license, account.licenseExpiry)
 
   return (
     <main className="mx-auto w-full max-w-3xl px-6 py-10 space-y-10">
@@ -65,10 +70,23 @@ export default async function AccountPage() {
         </p>
       </header>
 
-      {licenseExpired && (
-        <div className="rounded-card border border-danger/40 bg-danger/10 p-4 text-sm text-ink-secondary">
-          Your license expired on {date(account.licenseExpiry)}, which is blocking booking.
-          Update the date below once you&rsquo;ve renewed.
+      {licenseNote && (
+        <div
+          className={
+            license.state === 'expired'
+              ? 'rounded-card border border-danger/40 bg-danger/10 p-4 text-sm text-ink-secondary'
+              : 'rounded-card border border-warning/40 bg-warning/10 p-4 text-sm text-ink-secondary'
+          }
+        >
+          {/* The state is in the words, not only in the border colour. */}
+          <strong className={license.state === 'expired' ? 'text-danger' : 'text-warning'}>
+            {license.state === 'expired'
+              ? 'Licence expired.'
+              : license.state === 'missing'
+                ? 'No licence on file.'
+                : 'Licence renewal due.'}
+          </strong>{' '}
+          {licenseNote}
         </div>
       )}
 

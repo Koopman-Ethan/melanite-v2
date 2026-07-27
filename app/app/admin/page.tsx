@@ -2,7 +2,9 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 
 import { requireAdmin } from '@/lib/auth/dal'
+import { getProviderLicenses } from '@/lib/db/queries/admin-tools'
 import { getRevenueTotals } from '@/lib/db/queries/revenue'
+import { licenseStatus, licenseUrgency } from '@/lib/license'
 
 export const metadata: Metadata = { title: 'Admin · Melanite' }
 export const dynamic = 'force-dynamic'
@@ -11,7 +13,14 @@ const usd = (v: string) => Number(v).toLocaleString('en-US', { style: 'currency'
 
 export default async function AdminHome() {
   const user = await requireAdmin()
-  const totals = await getRevenueTotals()
+  const [totals, licenses] = await Promise.all([getRevenueTotals(), getProviderLicenses()])
+
+  // Only what needs acting on. A list of every provider whose licence is fine is a list nobody
+  // reads, and a panel that is always there stops being noticed.
+  const needsAttention = licenses
+    .map((provider) => ({ ...provider, status: licenseStatus(provider.licenseExpiry) }))
+    .filter((provider) => provider.status.state !== 'ok')
+    .sort((a, b) => licenseUrgency(a.status) - licenseUrgency(b.status))
 
   return (
     <main className="mx-auto w-full max-w-5xl px-6 py-10 space-y-8">
@@ -19,6 +28,39 @@ export default async function AdminHome() {
         <h1 className="text-2xl font-semibold">Welcome back, {user.firstName}</h1>
         <p className="mt-1 text-sm text-ink-muted">Platform overview</p>
       </header>
+
+      {needsAttention.length > 0 && (
+        <section className="rounded-card border border-warning/40 bg-warning/10 p-5">
+          <h2 className="text-sm font-medium text-warning">
+            {needsAttention.length} licence{needsAttention.length === 1 ? '' : 's'} need attention
+          </h2>
+          <p className="mt-1 text-xs text-ink-muted">
+            A lapsed licence blocks booking outright, and renewals go through Melanite. This is
+            the only place that shows it coming.
+          </p>
+          <ul className="mt-4 space-y-2">
+            {needsAttention.map((provider) => (
+              <li
+                key={provider.id}
+                className="flex flex-wrap items-baseline justify-between gap-2 border-t border-line pt-2 text-sm"
+              >
+                <span>
+                  {provider.name}
+                  <span className="ml-2 text-xs text-ink-faint">{provider.email}</span>
+                </span>
+                {/* Said in words, not by colour alone. */}
+                <span className="text-xs text-ink-secondary">
+                  {provider.status.state === 'missing'
+                    ? 'no expiry date on file'
+                    : provider.status.state === 'expired'
+                      ? `expired ${Math.abs(provider.status.daysLeft!)} day${Math.abs(provider.status.daysLeft!) === 1 ? '' : 's'} ago — booking blocked`
+                      : `expires in ${provider.status.daysLeft} day${provider.status.daysLeft === 1 ? '' : 's'} (${provider.licenseExpiry})`}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <Link
         href="/app/admin/revenue"
