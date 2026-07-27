@@ -32,7 +32,9 @@ export default async function AdminHome() {
       {needsAttention.length > 0 && (
         <section className="rounded-card border border-warning/40 bg-warning/10 p-5">
           <h2 className="text-sm font-medium text-warning">
-            {needsAttention.length} licence{needsAttention.length === 1 ? '' : 's'} need attention
+            {needsAttention.length === 1
+              ? '1 licence needs attention'
+              : `${needsAttention.length} licences need attention`}
           </h2>
           <p className="mt-1 text-xs text-ink-muted">
             A lapsed licence blocks booking outright, and renewals go through Melanite. This is

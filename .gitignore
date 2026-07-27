@@ -54,3 +54,6 @@ playwright-report/
 
 # Demo walkthrough screenshots — generated, not source.
 demo/
+
+# Role-view screenshots — generated.
+demo-roles/

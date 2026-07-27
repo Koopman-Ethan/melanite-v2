@@ -190,10 +190,20 @@ export function Roster({
                 />
               </div>
 
-              {provider.bookingEnabled && licence.state !== 'ok' && (
+              {/* Only an EXPIRED licence blocks. An expiring one still works, and a missing
+                  one passes the gate entirely — `isLicenseExpired` reads a null as not-expired.
+                  Saying "the gate will block them" for either would be plainly false, and a
+                  warning that is wrong twice out of three times is one nobody reads. */}
+              {provider.bookingEnabled && licence.state === 'expired' && (
                 <p className="mt-2 text-xs text-warning">
-                  Booking is on, but the licence gate will block them regardless — a lapsed or
-                  missing licence stops booking on its own.
+                  Booking is on, but the licence expired — the licence gate blocks them
+                  regardless of this toggle.
+                </p>
+              )}
+              {provider.bookingEnabled && licence.state === 'missing' && (
+                <p className="mt-2 text-xs text-warning">
+                  Booking is on with no licence on file. Nothing stops them: the licence gate
+                  treats a missing date as valid.
                 </p>
               )}
             </li>

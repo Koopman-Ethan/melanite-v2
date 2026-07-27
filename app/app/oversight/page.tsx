@@ -92,7 +92,9 @@ export default async function OversightPage() {
       {attention.length > 0 && (
         <section className="rounded-card border border-warning/40 bg-warning/10 p-5">
           <h2 className="text-sm font-medium text-warning">
-            {attention.length} credential{attention.length === 1 ? '' : 's'} need attention
+            {attention.length === 1
+              ? '1 credential needs attention'
+              : `${attention.length} credentials need attention`}
           </h2>
           <ul className="mt-3 space-y-1.5">
             {attention.map(({ provider, status }) => (
@@ -201,7 +203,9 @@ export default async function OversightPage() {
                         // Said in words, not by a colour or an icon: nobody is being treated
                         // here, the room is simply taken.
                         <span className="text-ink-muted">
-                          Room rental — no treatment scheduled
+                          Room rental
+                          {item.treatmentArea && ` — ${item.treatmentArea.replace(/_/g, ' ')} day`}
+                          {' · no treatment scheduled'}
                         </span>
                       )}
                       <span className="ml-auto text-xs text-ink-faint">{item.providerName}</span>
