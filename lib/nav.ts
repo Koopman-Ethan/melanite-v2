@@ -1,4 +1,4 @@
-import { isAdmin } from '@/lib/auth/roles'
+import { isAdmin, isMedicalDirector } from '@/lib/auth/roles'
 import type { SessionUser } from '@/lib/auth/session'
 
 // The provider sidebar, ported from v1's nav wiring.
@@ -18,6 +18,8 @@ export interface NavItem {
   /** Hidden from admin-view roles. In v1 this was the BUG-15 HIDE array — an admin does not
    *  book, has no earnings, and holds no membership, so those surfaces are noise. */
   providerOnly?: boolean
+  /** Shown only to the medical director. His surfaces are neither provider nor admin. */
+  directorOnly?: boolean
   /** Shown only to roles `requireAdmin()` actually admits. Gated on that same set rather than
    *  on `isAdminView`, which is wider — a medical director sees the platform nav but would be
    *  redirected straight back out of these. */
@@ -37,8 +39,14 @@ export function isAdminView(user: SessionUser): boolean {
 }
 
 /** Dashboard is the one item whose destination depends on who you are — v1 expressed this as
- *  a `dashTarget` function inside the MAP. */
+ *  a `dashTarget` function inside the MAP.
+ *
+ *  The medical director gets his own home, and it is not optional. He counts as an admin VIEW
+ *  (so the provider items are hidden) but not as an admin (so `requireAdmin` turns him away),
+ *  which sent him to /app/admin, which redirected to /app, which sent him to /app/admin. He
+ *  could not sign in at all — the browser gave up after ~70 redirects. */
 export function dashboardHref(user: SessionUser): string {
+  if (isMedicalDirector(user.role)) return '/app/oversight'
   return isAdminView(user) ? '/app/admin' : '/app/dashboard'
 }
 
@@ -57,15 +65,22 @@ const ITEMS: NavItem[] = [
   { label: 'Queue', href: '/app/admin/queue', adminOnly: true },
   { label: 'Revenue', href: '/app/admin/revenue', adminOnly: true },
   { label: 'Tools', href: '/app/admin/tools', adminOnly: true },
+  { label: 'Oversight', href: '/app/oversight', directorOnly: true },
   { label: 'Account', href: '/app/account' },
 ]
 
 export function navFor(user: SessionUser): NavItem[] {
   const adminView = isAdminView(user)
   const admin = isAdmin(user.role)
+  const director = isMedicalDirector(user.role)
 
   return ITEMS.filter(
-    (item) => !(item.providerOnly && adminView) && !(item.adminOnly && !admin),
+    (item) =>
+      !(item.providerOnly && adminView) &&
+      !(item.adminOnly && !admin) &&
+      !(item.directorOnly && !director) &&
+      // Dashboard is the director's Oversight page, so listing both is one link too many.
+      !(item.label === 'Dashboard' && director),
   ).map((item) => (item.label === 'Dashboard' ? { ...item, href: dashboardHref(user) } : item))
 }
 

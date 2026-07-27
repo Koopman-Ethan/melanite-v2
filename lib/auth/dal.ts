@@ -3,7 +3,7 @@ import 'server-only'
 import { cache } from 'react'
 import { redirect } from 'next/navigation'
 
-import { isAdmin } from './roles'
+import { canSeeOversight, isAdmin } from './roles'
 import { getSessionUser, type SessionUser } from './session'
 
 // The Data Access Layer. Per the Next 16 authentication guide, `proxy.ts` performs only an
@@ -37,6 +37,14 @@ export async function requireProvider(): Promise<SessionUser> {
 export async function requireAdmin(): Promise<SessionUser> {
   const user = await requireProvider()
   if (!isAdmin(user.role)) redirect('/app')
+  return user
+}
+
+/** Clinical oversight surfaces. Admits the medical director plus admins — see OVERSIGHT_ROLES
+ *  for why that is a separate set rather than a wider definition of admin. */
+export async function requireOversight(): Promise<SessionUser> {
+  const user = await requireProvider()
+  if (!canSeeOversight(user.role)) redirect('/app')
   return user
 }
 
