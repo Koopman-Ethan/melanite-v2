@@ -60,6 +60,10 @@ export interface SessionUser {
   status: (typeof providers.$inferSelect)['status']
   bookingEnabled: boolean
   medicalDirectorStatus: (typeof providers.$inferSelect)['medicalDirectorStatus']
+  /** `YYYY-MM-DD`, or null when the provider has none on file. A lapsed licence blocks
+   *  booking — v1's LICENSE_EXPIRED gate, which is easy to miss because it lives in the
+   *  create endpoint rather than alongside the other two gates. */
+  licenseExpiry: string | null
   requiresPasswordReset: boolean
 }
 
@@ -80,6 +84,7 @@ export async function getSessionUser(): Promise<SessionUser | null> {
       status: providers.status,
       bookingEnabled: providers.bookingEnabled,
       medicalDirectorStatus: providers.medicalDirectorStatus,
+      licenseExpiry: providers.licenseExpiry,
       requiresPasswordReset: providers.requiresPasswordReset,
     })
     .from(sessions)

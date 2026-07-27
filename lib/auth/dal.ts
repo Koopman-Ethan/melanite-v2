@@ -41,13 +41,32 @@ export async function requireAdmin(): Promise<SessionUser> {
 
 const ADMIN_ROLES = new Set<SessionUser['role']>(['platform_owner', 'developer'])
 
-/** The two booking gates, which in v1 were enforced partly in page JS and partly per
- *  endpoint, with no single place that answered "may this provider book?".
+/** THREE booking gates, not two. v1 enforced them partly in page JS and partly per endpoint,
+ *  with no single place that answered "may this provider book?" — which is how the licence
+ *  check gets overlooked: it lives inside POST /bookings/create alongside validation, well
+ *  away from the other two.
  *
- *  Both must pass: `medicalDirectorStatus` is the credential/subscription gate, and
- *  `bookingEnabled` is the manual admin flip once documents are confirmed on file. */
+ *  All must pass:
+ *   - `bookingEnabled`         manual admin flip once documents are confirmed on file
+ *   - `medicalDirectorStatus`  the credential / subscription gate
+ *   - `licenseExpiry`          a lapsed professional licence blocks booking outright
+ *
+ *  Account status is a fourth, handled upstream: getSessionUser() signs out an inactive
+ *  provider rather than letting them reach a gate at all. */
 export function canBook(user: SessionUser): boolean {
-  return user.bookingEnabled && user.medicalDirectorStatus === 'active'
+  return (
+    user.bookingEnabled &&
+    user.medicalDirectorStatus === 'active' &&
+    !isLicenseExpired(user)
+  )
+}
+
+/** Compared as a calendar date in America/Denver, not a timestamp — a licence valid "through
+ *  the 31st" must not expire at 6pm on the 30th because the server is in UTC. */
+export function isLicenseExpired(user: SessionUser): boolean {
+  if (!user.licenseExpiry) return false
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(new Date())
+  return user.licenseExpiry < today
 }
 
 export function bookingBlockedReason(user: SessionUser): string | null {
@@ -62,6 +81,9 @@ export function bookingBlockedReason(user: SessionUser): string | null {
   }
   if (user.medicalDirectorStatus === 'inactive') {
     return 'Your medical director coverage is inactive.'
+  }
+  if (isLicenseExpired(user)) {
+    return 'Your professional license has expired. Renew it and contact Melanite to update your record before booking.'
   }
   return null
 }
