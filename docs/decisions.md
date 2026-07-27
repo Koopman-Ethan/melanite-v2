@@ -477,6 +477,41 @@ there isn't one. The exclusion is narrow, their count and net value are pinned b
 and a third test guards the predicate itself — a first attempt at the exclusion accidentally
 skipped every entry with a NULL note, which is most of them, and still passed.
 
+### Constraint and journey tests — 2026-07-27
+
+**Constraints are tested by attempting the corruption**, not by observing that today's rows are
+clean. Those are different claims: data can be clean because nothing has tried to break it yet.
+These write the bad row and require Postgres to refuse — the only way to know a constraint
+survived a migration or a `drizzle-kit push`.
+
+Assertions read the constraint NAME off `error.cause`, not a substring of the message. The
+neon-http driver wraps failures in its own Error whose message is only "Failed query: …", so a
+message match would have passed for *any* error — including a syntax error in the test itself.
+A test that expects a rejection and gets the wrong rejection looks green.
+
+Covered: the room exclusion constraint (a full day refused against a held morning, an afternoon
+still allowed, a cancelled hold genuinely freeing the slot), provider-paid entries refusing a
+split, Stripe entries requiring a reference while membership invoices are accepted without a
+payment intent, one non-refund entry per payment intent but SEVERAL refunds allowed, booking
+time order, package quantity, and the settings singleton.
+
+**The journey test covers everything up to the card.** A provider books, lands on the
+confirmation banner, the payment link is present and copyable, the client's view of that same
+link renders with the consent language naming the actual fees, and cancelling removes it from
+upcoming while leaving it visible under cancelled.
+
+It deliberately stops before completing a payment. Entering card details is not something to
+automate here, and the part after "client presses pay" is Stripe's — already verified once by
+hand end to end. What the test covers is where this app's own logic lives.
+
+Cleanup runs as a Playwright teardown, so it happens whether or not the tests passed. Cleanup
+that only runs on a green build is cleanup that skips exactly the days it matters.
+
+One assertion I got wrong and corrected: I expected "Appointment cancelled." to appear after
+cancelling. It never does — the list is filtered to upcoming, so the element carrying the
+message is the one being removed. The test now asserts the card leaves that list AND appears
+under cancelled, which is both true and a stronger claim.
+
 ## Backlog
 
 ### Multi-service bookings

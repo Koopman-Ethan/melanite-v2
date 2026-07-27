@@ -26,7 +26,13 @@ export default defineConfig({
   },
   projects: [
     // Signs in once per role; the page specs reuse the saved session.
-    { name: 'setup', testMatch: /auth\.setup\.ts/, use: { channel: 'chrome' } },
+    {
+      name: 'setup',
+      testMatch: /auth\.setup\.ts/,
+      use: { channel: 'chrome' },
+      teardown: 'cleanup',
+    },
+    { name: 'cleanup', testMatch: /cleanup\.teardown\.ts/, use: { channel: 'chrome' } },
     {
       // The primary target. A provider stands in a treatment room holding a phone, so this is
       // the case that has to work — not the desktop one that happens to get tested first.
