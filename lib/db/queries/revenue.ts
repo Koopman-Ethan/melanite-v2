@@ -3,7 +3,7 @@ import 'server-only'
 import { desc, eq, sql } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
-import { ledgerEntries, ledgerSource, providers, services } from '@/lib/db/schema'
+import { ledgerEntries, ledgerSource, paymentMethod, providers, services } from '@/lib/db/schema'
 
 // The whole point of the unified ledger.
 //
@@ -83,6 +83,41 @@ export async function getRevenueBySource(): Promise<SourceRevenue[]> {
         entries: 0,
       },
   ).sort((a, b) => Number(b.revenue) - Number(a.revenue))
+}
+
+export interface MethodRevenue {
+  method: string
+  revenue: string
+  gross: string
+  entries: number
+}
+
+/** How the money arrived. Stripe is only one rail: Cherry financing pays Melanite by ACH,
+ *  Groupon remits on its own schedule, and some payments are cash or cheque. None of those
+ *  produce a Stripe object, so a Stripe-only view understates real revenue.
+ *
+ *  Methods with no entries are returned as zeros, for the same reason `getRevenueBySource`
+ *  does it — "we took no Cherry payments" and "Cherry is missing from this report" must not
+ *  render identically. */
+export async function getRevenueByMethod(): Promise<MethodRevenue[]> {
+  const rows = await db
+    .select({
+      method: ledgerEntries.paymentMethod,
+      revenue: sql<string>`coalesce(sum(${ledgerEntries.melaniteCut}), 0)`,
+      gross: sql<string>`coalesce(sum(${ledgerEntries.grossAmount} + ${ledgerEntries.tipAmount}), 0)`,
+      entries: sql<number>`count(*)::int`,
+    })
+    .from(ledgerEntries)
+    .groupBy(ledgerEntries.paymentMethod)
+
+  const byMethod = new Map(rows.map((r) => [r.method as string, r]))
+
+  return paymentMethod.enumValues
+    .map(
+      (method): MethodRevenue =>
+        byMethod.get(method) ?? { method, revenue: '0.00', gross: '0.00', entries: 0 },
+    )
+    .filter((r) => r.entries > 0 || r.method === 'stripe' || r.method === 'cherry' || r.method === 'groupon')
 }
 
 export interface MonthlyRevenue {
@@ -191,14 +226,15 @@ export async function getRecentEntries(limit = 15): Promise<RecentEntry[]> {
 
 /** Everything the admin revenue page needs, in parallel. */
 export async function getAdminRevenue() {
-  const [totals, bySource, byProvider, byService, series, recent] = await Promise.all([
+  const [totals, bySource, byMethod, byProvider, byService, series, recent] = await Promise.all([
     getRevenueTotals(),
     getRevenueBySource(),
+    getRevenueByMethod(),
     getRevenueByProvider(),
     getRevenueByService(),
     getMonthlySeries(),
     getRecentEntries(),
   ])
 
-  return { totals, bySource, byProvider, byService, series, recent }
+  return { totals, bySource, byMethod, byProvider, byService, series, recent }
 }

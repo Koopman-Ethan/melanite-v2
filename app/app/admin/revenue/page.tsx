@@ -45,8 +45,18 @@ function Stat({ label, value, hint }: { label: string; value: string; hint?: str
   )
 }
 
+const METHOD_LABELS: Record<string, string> = {
+  stripe: 'Stripe',
+  cherry: 'Cherry financing',
+  groupon: 'Groupon',
+  cash: 'Cash',
+  check: 'Check',
+  other: 'Other',
+}
+
 export default async function AdminRevenuePage() {
-  const { totals, bySource, byProvider, byService, series, recent } = await getAdminRevenue()
+  const { totals, bySource, byMethod, byProvider, byService, series, recent } =
+    await getAdminRevenue()
 
   const lifetime = Number(totals.lifetimeRevenue)
   const peakMonth = Math.max(...series.map((s) => Number(s.revenue)), 1)
@@ -104,6 +114,31 @@ export default async function AdminRevenuePage() {
             )
           })}
         </div>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium uppercase tracking-wide opacity-60">
+          By payment method
+        </h2>
+        <div className="grid gap-3 sm:grid-cols-3">
+          {byMethod.map((row) => (
+            <div
+              key={row.method}
+              className="rounded-lg border border-black/10 dark:border-white/15 p-4"
+            >
+              <div className="text-xs opacity-60">{METHOD_LABELS[row.method] ?? row.method}</div>
+              <div className="mt-1 text-xl font-semibold tabular-nums">{usd(row.revenue)}</div>
+              <div className="mt-0.5 text-xs opacity-60 tabular-nums">
+                {row.entries} {row.entries === 1 ? 'entry' : 'entries'}
+              </div>
+            </div>
+          ))}
+        </div>
+        <p className="text-xs opacity-60">
+          Only Stripe figures reconcile automatically. Cherry, Groupon, cash and check are
+          recorded by hand — they are real revenue that never produced a Stripe charge, so they
+          are reported here but cannot be verified against Stripe.
+        </p>
       </section>
 
       {series.length > 0 && (

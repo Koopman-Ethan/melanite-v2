@@ -7,7 +7,7 @@
 // it would mean reproducing a known-wrong figure. Expected values come from Stripe; see
 // ./README.md for their derivation.
 
-import { sql } from 'drizzle-orm'
+import { eq, ne, sql } from 'drizzle-orm'
 
 import { db } from '../db'
 import { ledgerEntries } from '@/lib/db/schema'
@@ -31,6 +31,11 @@ const TOTAL_CUT = '2052.75'
 
 const fmt = (n: unknown) => Number(n ?? 0).toFixed(2)
 
+/** Only Stripe-funded entries can be reconciled against Stripe. Cherry, Groupon, cash and
+ *  cheque payments are real revenue that never produced a Stripe object, so including them
+ *  here would report a permanent, growing "failure" that is actually correct data. */
+const STRIPE_ONLY = eq(ledgerEntries.paymentMethod, 'stripe')
+
 async function main() {
   // gross here is purchases + refunds netted, matching how Stripe reports it.
   const bySource = await db
@@ -42,6 +47,7 @@ async function main() {
       entries: sql<number>`count(*)::int`,
     })
     .from(ledgerEntries)
+    .where(STRIPE_ONLY)
     .groupBy(ledgerEntries.source)
 
   const seen = new Map(bySource.map((r) => [r.source as string, r]))
@@ -69,15 +75,37 @@ async function main() {
       payout: sql<string>`sum(${ledgerEntries.providerPayout})`,
     })
     .from(ledgerEntries)
+    .where(STRIPE_ONLY)
 
   console.log('─────────────────────────────────────────────────────────────')
-  console.log(`platform revenue  ${fmt(totals.cut).padStart(12)}   expected ${TOTAL_CUT}`)
+  console.log(`stripe revenue    ${fmt(totals.cut).padStart(12)}   expected ${TOTAL_CUT}`)
   console.log(`provider payouts  ${fmt(totals.payout).padStart(12)}`)
 
   if (fmt(totals.cut) !== TOTAL_CUT) failures++
 
-  // The purchase-side identity. Refunds are excluded because an unreversed refund puts the
-  // whole amount on melaniteCut with providerPayout 0, which breaks it by design.
+  // Non-Stripe money is reported, never asserted — there is nothing to reconcile it against.
+  // Showing it here keeps it visible rather than letting it look like it does not exist.
+  const offStripe = await db
+    .select({
+      method: ledgerEntries.paymentMethod,
+      cut: sql<string>`sum(${ledgerEntries.melaniteCut})`,
+      entries: sql<number>`count(*)::int`,
+    })
+    .from(ledgerEntries)
+    .where(ne(ledgerEntries.paymentMethod, 'stripe'))
+    .groupBy(ledgerEntries.paymentMethod)
+
+  if (offStripe.length) {
+    console.log('\nrecorded outside Stripe (not reconcilable — reported only):')
+    for (const r of offStripe) {
+      console.log(`  ${r.method.padEnd(10)} ${fmt(r.cut).padStart(10)}  ${r.entries} entries`)
+    }
+  }
+
+  // Purchase-side identity, deliberately across ALL payment methods — a hand-entered Cherry
+  // or Groupon row still has to balance, even though it cannot be reconciled against Stripe.
+  // Refunds are excluded because an unreversed refund puts the whole amount on melaniteCut
+  // with providerPayout 0, which breaks the identity by design.
   const broken = await db
     .select({ id: ledgerEntries.id, source: ledgerEntries.source })
     .from(ledgerEntries)

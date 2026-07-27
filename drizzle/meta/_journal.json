@@ -8,6 +8,13 @@
       "when": 1785097643919,
       "tag": "0000_normal_tarantula",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1785121628823,
+      "tag": "0001_eminent_elektra",
+      "breakpoints": true
     }
   ]
 }

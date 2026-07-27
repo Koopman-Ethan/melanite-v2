@@ -154,6 +154,39 @@ export const ledgerSubjectType = pgEnum('ledger_subject_type', [
 
 export const payoutStatus = pgEnum('payout_status', ['pending', 'paid', 'failed'])
 
+/** How the money actually arrived. Not every payment routes through Stripe:
+ *
+ *  - `cherry` — patient financing. The client finances with Cherry, Cherry pays Melanite by
+ *    ACH a day or two later, minus their merchant fee. Real revenue, normal split, no Stripe
+ *    charge ever exists.
+ *  - `groupon` — a voucher sold in advance and redeemed at the appointment. Groupon keeps
+ *    their share and remits the rest on their own schedule.
+ *  - `cash` / `check` / `other` — recorded by hand.
+ *
+ *  This is deliberately separate from `source`: a booking can be paid by any of these.
+ *  Reconciliation against Stripe must filter to `stripe`, or manual entries read as failures
+ *  forever. */
+export const paymentMethod = pgEnum('payment_method', [
+  'stripe',
+  'cherry',
+  'groupon',
+  'cash',
+  'check',
+  'other',
+])
+
+/** How the provider's share was settled. Stripe Connect handles this automatically for
+ *  Stripe-funded bookings; anything else has to be paid by hand, which is what Venmo is
+ *  doing today. A payout rail, NOT a payment method — conflating the two would put money
+ *  going out into the same column as money coming in. */
+export const payoutMethod = pgEnum('payout_method', [
+  'stripe_connect',
+  'venmo',
+  'cash',
+  'check',
+  'other',
+])
+
 // ---------------------------------------------------------------------------
 // Platform configuration
 // ---------------------------------------------------------------------------
@@ -685,8 +718,18 @@ export const ledgerEntries = pgTable('ledger_entries', {
 
   grossAmount: money().notNull().default('0.00'),
   tipAmount: money().notNull().default('0.00'),
+  /** Split is stored explicitly rather than derived, so an arrangement that differs from the
+   *  platform default is representable without a schema change. A Groupon voucher the
+   *  provider sells directly is `providerPayout = gross, melaniteCut = 0`; one Melanite
+   *  receives carries the normal split. The row records what happened. */
   providerPayout: money().notNull().default('0.00'),
   melaniteCut: money().notNull().default('0.00'),
+
+  paymentMethod: paymentMethod().notNull().default('stripe'),
+  /** Their identifier — Cherry contract id, Groupon voucher code, cheque number. Nothing
+   *  reads this yet; it exists so a statement import can reconcile against it later without
+   *  a backfill. */
+  externalReference: text(),
 
   stripePaymentIntentId: text(),
   stripeTransferId: text(),
@@ -694,9 +737,14 @@ export const ledgerEntries = pgTable('ledger_entries', {
   stripeInvoiceId: text(),
 
   payoutStatus: payoutStatus().notNull().default('pending'),
+  payoutMethod: payoutMethod().notNull().default('stripe_connect'),
+  payoutReference: text(),
   payoutDate: date(),
 
   note: text(),
+  /** Who entered this by hand. Null for anything machine-generated, which is also how you
+   *  tell a recorded payment from an observed one. */
+  recordedBy: uuid().references(() => providers.id, { onDelete: 'set null' }),
 }, (t) => [
   index().on(t.createdAt.desc()),
   index().on(t.providerId, t.createdAt.desc()),
@@ -704,9 +752,20 @@ export const ledgerEntries = pgTable('ledger_entries', {
   index().on(t.subjectType, t.subjectId),
   index().on(t.clientId),
   index().on(t.payoutStatus),
+  index().on(t.paymentMethod),
   uniqueIndex()
     .on(t.stripePaymentIntentId, t.entryType)
     .where(sql`${t.stripePaymentIntentId} IS NOT NULL`),
+  // A Stripe-funded entry must carry its payment intent — that link is what makes
+  // reconciliation possible, and an entry claiming to be Stripe without one is either a data
+  // error or a manual entry mislabelled. Membership entries are the exception: they come
+  // from invoices, which have no payment intent of their own.
+  check(
+    'ledger_entries_stripe_needs_reference',
+    sql`${t.paymentMethod} <> 'stripe'
+        OR ${t.stripePaymentIntentId} IS NOT NULL
+        OR ${t.stripeInvoiceId} IS NOT NULL`,
+  ),
   check(
     'ledger_entries_provider_paid_is_unsplit',
     sql`${t.payer} <> 'provider' OR (${t.providerPayout} = 0 AND ${t.melaniteCut} = ${t.grossAmount})`,

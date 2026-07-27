@@ -46,7 +46,11 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 // HTTP with 429 handling
 // ---------------------------------------------------------------------------
 
-async function get(url: string, headers: Record<string, string>, attempt = 1): Promise<any> {
+async function get<T = unknown>(
+  url: string,
+  headers: Record<string, string>,
+  attempt = 1,
+): Promise<T> {
   const res = await fetch(url, { headers })
 
   if (res.status === 429) {
@@ -63,7 +67,7 @@ async function get(url: string, headers: Record<string, string>, attempt = 1): P
     throw new Error(`${res.status} ${res.statusText} — ${url}\n${(await res.text()).slice(0, 300)}`)
   }
 
-  return res.json()
+  return res.json() as Promise<T>
 }
 
 // ---------------------------------------------------------------------------
@@ -77,7 +81,7 @@ async function stageXano(token: string) {
   const tableIds = new Map<string, number>()
   let page = 1
   for (;;) {
-    const body = await get(
+    const body = await get<{ items?: Array<{ id: number; name: string }>; nextPage?: number }>(
       `${XANO_BASE}/workspace/${WORKSPACE_ID}/table?page=${page}&per_page=100`,
       headers,
     )
@@ -96,7 +100,7 @@ async function stageXano(token: string) {
     let p = 1
 
     for (;;) {
-      const body = await get(
+      const body = await get<{ items?: unknown[]; nextPage?: number }>(
         `${XANO_BASE}/workspace/${WORKSPACE_ID}/table/${id}/content?page=${p}&per_page=100`,
         headers,
       )
@@ -117,16 +121,24 @@ async function stageXano(token: string) {
 // ---------------------------------------------------------------------------
 
 /** Stripe list endpoints paginate by `starting_after` on the last id. */
+interface StripeRecord {
+  id: string
+  livemode?: boolean
+}
+
 async function stripeList(path: string, key: string, params: Record<string, string> = {}) {
   const headers = { Authorization: `Bearer ${key}` }
-  const all: any[] = []
+  const all: StripeRecord[] = []
   let startingAfter: string | undefined
 
   for (;;) {
     const qs = new URLSearchParams({ limit: '100', ...params })
     if (startingAfter) qs.set('starting_after', startingAfter)
 
-    const body = await get(`https://api.stripe.com/v1${path}?${qs}`, headers)
+    const body = await get<{ data: StripeRecord[]; has_more: boolean }>(
+      `https://api.stripe.com/v1${path}?${qs}`,
+      headers,
+    )
     all.push(...body.data)
     if (!body.has_more || body.data.length === 0) break
     startingAfter = body.data[body.data.length - 1].id
