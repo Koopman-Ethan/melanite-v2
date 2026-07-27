@@ -318,6 +318,29 @@ export const inviteLinks = pgTable('invite_links', {
   acceptedAt: timestamp({ withTimezone: true }),
 }, (t) => [uniqueIndex().on(t.token), index().on(t.email), index().on(t.status)])
 
+/** Database-backed sessions, so revocation is immediate. That matters here: `status`,
+ *  `bookingEnabled` and `medicalDirectorStatus` are live gates, and a stateless token would
+ *  keep a deactivated provider signed in until it expired.
+ *
+ *  The cookie carries a random token; only its SHA-256 hash is stored. A leak of this table
+ *  therefore yields nothing usable, the same reasoning that applies to password hashes. */
+export const sessions = pgTable('sessions', {
+  id: uuid().primaryKey().defaultRandom(),
+  providerId: uuid()
+    .notNull()
+    .references(() => providers.id, { onDelete: 'cascade' }),
+  tokenHash: text().notNull(),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  lastUsedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp({ withTimezone: true }).notNull(),
+  userAgent: text(),
+  ipAddress: text(),
+}, (t) => [
+  uniqueIndex().on(t.tokenHash),
+  index().on(t.providerId),
+  index().on(t.expiresAt),
+])
+
 export const passwordResetTokens = pgTable('password_reset_tokens', {
   id: uuid().primaryKey().defaultRandom(),
   providerId: uuid()

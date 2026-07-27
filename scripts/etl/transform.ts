@@ -48,8 +48,14 @@ const lower = (s: string | null | undefined) => s?.trim().toLowerCase() || null
 // ---------------------------------------------------------------------------
 
 /** v1's `role` enum and `is_admin` boolean were independent and gated different endpoints.
- *  v2 collapses to `role`. `is_admin` wins where they disagree, since that is what
- *  /admin/* actually checked.
+ *  v2 collapses to `role`.
+ *
+ *  The explicit role WINS over `is_admin`. Letting `is_admin` win looks reasonable — it is
+ *  what /admin/* actually checked — but it silently promotes: three v1 accounts carry
+ *  `is_admin: true`, and two of them have a more specific role (`developer` and, notably,
+ *  `medical_director`). Collapsing those to `platform_owner` would hand a medical director
+ *  full owner rights including the revenue dashboard. `is_admin` is only consulted when the
+ *  role carries no privilege of its own.
  *
  *  `test_provider` has no v2 role — it existed only because Xano Free has no test data
  *  source, so test accounts lived in production. But those accounts moved REAL money (one
@@ -57,9 +63,12 @@ const lower = (s: string | null | undefined) => s?.trim().toLowerCase() || null
  *  as ordinary providers forced to `inactive`, which keeps referential integrity and keeps
  *  the money attributable. Purge them after the v1 CLN cleanup, not during the migration. */
 export function mapRole(xanoRole: string, isAdmin: boolean): (typeof providers.$inferInsert)['role'] {
-  if (isAdmin || xanoRole === 'platform_owner') return 'platform_owner'
+  if (xanoRole === 'platform_owner') return 'platform_owner'
   if (xanoRole === 'developer') return 'developer'
   if (xanoRole === 'medical_director') return 'medical_director'
+  // Only now does is_admin matter: a generic account flagged as admin has no other way to
+  // express that privilege.
+  if (isAdmin) return 'platform_owner'
   return 'provider'
 }
 

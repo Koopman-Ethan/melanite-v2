@@ -15,6 +15,13 @@
       "when": 1785121628823,
       "tag": "0001_eminent_elektra",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785122265315,
+      "tag": "0002_flawless_mad_thinker",
+      "breakpoints": true
     }
   ]
 }
