@@ -63,9 +63,12 @@ test.describe('provider access', () => {
     // Granting booking does not quietly grant everything else.
     expect(state[0].room_rental_enabled, 'room rental changed on its own').toBe(false)
 
-    // Booking on with no licence is still blocked by the licence gate, and the page says so
-    // rather than letting an admin believe the provider is now good to go.
-    await expect(row.getByText(/licence gate will block them/i)).toBeVisible()
+    // This provider has NO licence on file, and the honest thing to say about that is that
+    // nothing stops them — `isLicenseExpired` reads a null as not-expired. The page used to
+    // claim the gate would block them, which was false; asserting the true sentence is what
+    // stops that regressing.
+    await expect(row.getByText(/nothing stops them/i)).toBeVisible()
+    await expect(row.getByText(/licence gate blocks them/i)).toHaveCount(0)
 
     // --- Revoke -----------------------------------------------------------------------------
     await row.getByLabel('Can book clients').uncheck()
