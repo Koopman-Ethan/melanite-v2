@@ -20,6 +20,8 @@ import {
   roomBookings,
 } from '@/lib/db/schema'
 
+import { refreshPaymentStatus } from '@/lib/db/queries/training'
+
 import { stripeGet } from './client'
 import type {
   StripeAccountObject,
@@ -434,6 +436,11 @@ async function trainingPaid(
     payoutStatus: 'paid',
     note: kind === 'training_deposit' ? 'Deposit' : 'Balance',
   })
+
+  // Recompute rather than increment. v1 kept a running `amount_paid` on the enrolment and the
+  // status beside it, which drifts the first time an event is replayed or a refund is issued.
+  // Derived from the ledger, the two cannot disagree.
+  await refreshPaymentStatus(enrollmentId)
 
   return { handled: true, detail: `${kind} recorded` }
 }

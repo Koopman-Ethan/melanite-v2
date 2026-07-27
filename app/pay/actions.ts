@@ -26,6 +26,21 @@ export interface IntentState {
   error?: string
 }
 
+/** The payment methods Melanite accepts, stated explicitly.
+ *
+ *  NOT `automatic_payment_methods` — that hands the choice to Stripe, which surfaces whatever
+ *  it thinks converts (Klarna, Afterpay, Cash App) and cannot be reliably suppressed from the
+ *  Dashboard, since those toggles are per-mode and interact with automatic methods in ways that
+ *  look like they have not taken effect. An explicit list is deterministic: what is here is
+ *  what a client sees.
+ *
+ *  Buy-now-pay-later is deliberately absent. Melanite's financing partner is Cherry, and a
+ *  competing BNPL button beside it splits the one route the business actually has a
+ *  relationship with. v1 used this same explicit pair.
+ *
+ *  Card covers Apple Pay and Google Pay — those ride on the card rail, not separate types. */
+const PAYMENT_METHODS = ['card', 'link'] as const
+
 const cents = (v: number) => Math.round(v * 100)
 
 /** Creates (or re-creates) the PaymentIntent for a booking link.
@@ -98,7 +113,7 @@ export async function createBookingIntent(input: {
       amount: priceCents + tipCents,
       currency: 'usd',
       customer: customerId,
-      automatic_payment_methods: { enabled: true },
+      payment_method_types: PAYMENT_METHODS,
       transfer_data: { destination: provider.stripeAccountId },
       application_fee_amount: feeCents,
       // Saving the card is what makes a no-show fee collectable at all. It is the client's
@@ -199,7 +214,7 @@ export async function createPackageIntent(input: {
       amount: priceCents + tipCents,
       currency: 'usd',
       customer: customerId,
-      automatic_payment_methods: { enabled: true },
+      payment_method_types: PAYMENT_METHODS,
       transfer_data: { destination: provider.stripeAccountId },
       application_fee_amount: feeCents,
       ...(input.saveCard ? { setup_future_usage: 'off_session' } : {}),

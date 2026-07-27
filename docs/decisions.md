@@ -244,6 +244,51 @@ With no `RESEND_API_KEY` set, `sendEmail` logs loudly to the console and reports
 `delivered: false` rather than pretending. Callers surface that honestly — the package link
 action says "copy it to your client" rather than "emailed" when nothing was sent.
 
+### Training — 2026-07-27
+
+Admin at `/app/admin/training`, public enrolment at `/training`, balance payment at
+`/pay/training/[enrollmentId]`.
+
+**The money is not on the enrolment row.** v1 kept `deposit_amount`, `amount_paid`,
+`balance_due` and two Stripe intent ids there, wrote no ledger entry, and therefore never showed
+a dollar of training revenue in any admin total. Here the ledger is the record and every figure
+— paid, owed, collected, outstanding — is derived from it, so "paid in full" cannot drift from
+"there is money against this". `refreshPaymentStatus` recomputes rather than increments, which
+is what makes a replayed webhook or a refund harmless.
+
+**Training takes no provider split.** `payer = 'student'`, no `transfer_data`, no
+`application_fee_amount` — the charge stays wholly on the platform account. Verified against the
+created intent: `transfer_data: null`.
+
+**Re-enrolling with the same email reuses the row.** v1 refused with ALREADY_ENROLLED, which
+strands anyone whose first card attempt failed — they cannot retry and cannot enrol.
+
+**Seats count enrolments that have paid something.** An abandoned form must not hold a place.
+
+**Completing a course does not invite anyone.** v1's note, kept: Keoni issues provider invites
+separately, and finishing a course is not the same as being cleared to practise. Cancelling a
+course does not auto-refund either — a deposit may be transferable to another date, which is a
+conversation rather than a rule.
+
+The balance link is addressed by enrolment id and carries no token. That is v1's design and it
+holds up: the page reveals only that student's own name, course date and balance, and the link
+has to survive being re-sent months later. A rotating token would break every email already out.
+
+### Payment methods are stated, not delegated — 2026-07-27
+
+Every PaymentIntent lists `payment_method_types: ['card', 'link']` instead of
+`automatic_payment_methods: { enabled: true }`.
+
+Automatic methods hand the choice to Stripe, which surfaces whatever it thinks converts — Klarna,
+Afterpay, Cash App — and cannot be reliably suppressed from the Dashboard: those toggles are
+per-mode, and turning one off in test leaves live untouched, which reads as the setting not
+working.
+
+Beyond determinism there is a business reason: Melanite's financing partner is Cherry. A
+competing BNPL button beside it splits the one route the business has a relationship with.
+`card` covers Apple Pay and Google Pay, which ride the card rail rather than being separate
+types.
+
 ## Backlog
 
 ### Multi-service bookings

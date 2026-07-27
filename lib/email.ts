@@ -214,3 +214,93 @@ export function feeChargedEmail(input: {
     ),
   }
 }
+
+export function trainingBalanceEmail(input: {
+  firstName: string
+  amount: string
+  courseDate: string
+  dueDate: string | null
+  url: string
+}): Omit<EmailMessage, 'to'> {
+  const when = new Date(`${input.courseDate}T12:00:00Z`).toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'UTC',
+  })
+  const due = input.dueDate
+    ? new Date(`${input.dueDate}T12:00:00Z`).toLocaleDateString('en-US', {
+        month: 'long',
+        day: 'numeric',
+        timeZone: 'UTC',
+      })
+    : null
+
+  return {
+    subject: `Balance due for your training — ${input.amount}`,
+    text: [
+      `Hi ${input.firstName},`,
+      '',
+      `Your remaining balance for the laser training course on ${when} is ${input.amount}.`,
+      due ? `It is due by ${due}.` : '',
+      '',
+      'Pay here:',
+      input.url,
+      '',
+      'This link stays valid — you can come back to it any time.',
+    ]
+      .filter(Boolean)
+      .join('\n'),
+    html: wrap(
+      'Your training balance',
+      p(`Hi ${input.firstName},`) +
+        p(
+          `Your remaining balance for the laser training course on <strong>${when}</strong> is <strong>${input.amount}</strong>.`,
+        ) +
+        (due ? p(`It is due by <strong>${due}</strong>.`) : '') +
+        p('This link stays valid — you can come back to it any time.'),
+      { label: `Pay ${input.amount}`, url: input.url },
+    ),
+  }
+}
+
+export function trainingEnrolledEmail(input: {
+  firstName: string
+  courseDate: string
+  deposit: string
+  balance: string
+  url: string
+}): Omit<EmailMessage, 'to'> {
+  const when = new Date(`${input.courseDate}T12:00:00Z`).toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'UTC',
+  })
+
+  return {
+    subject: `You're enrolled — laser training, ${when}`,
+    text: [
+      `Hi ${input.firstName},`,
+      '',
+      `Your seat is confirmed for the laser training course on ${when}.`,
+      `Deposit paid: ${input.deposit}`,
+      `Balance remaining: ${input.balance}`,
+      '',
+      'You can pay the balance any time here:',
+      input.url,
+      '',
+      'Melanite will be in touch with joining details before the course.',
+    ].join('\n'),
+    html: wrap(
+      "You're enrolled",
+      p(`Hi ${input.firstName},`) +
+        p(`Your seat is confirmed for the laser training course on <strong>${when}</strong>.`) +
+        p(`Deposit paid: <strong>${input.deposit}</strong><br>Balance remaining: <strong>${input.balance}</strong>`) +
+        p('Melanite will be in touch with joining details before the course.'),
+      { label: `Pay the balance — ${input.balance}`, url: input.url },
+    ),
+  }
+}
