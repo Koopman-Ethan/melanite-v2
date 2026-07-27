@@ -2,10 +2,11 @@
 //
 // Run: npx tsx scripts/etl/load.ts [--force]
 //
-// Refuses to run against a non-empty database unless --force is passed, because this is a
-// full load rather than an incremental sync — re-running against existing rows would
-// duplicate the ledger. The neon-http driver has no interactive transactions, so a failure
-// mid-run leaves a partial load; recover by truncating and re-running rather than patching.
+// Refuses to run against a non-empty database, because this is a full load rather than an
+// incremental sync — inserting over existing rows would duplicate the ledger. `--force`
+// TRUNCATES and reloads; it does not mean "insert anyway". That matters because the
+// neon-http driver has no interactive transactions, so a mid-run failure leaves partial data
+// behind and a plain retry would just collide on primary keys.
 
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -33,7 +34,25 @@ async function main() {
     .select({ count: sql<number>`count(*)::int` })
     .from(schema.ledgerEntries)
   if (count > 0 && !force) {
-    throw new Error(`ledger_entries already has ${count} rows. Truncate first, or pass --force.`)
+    throw new Error(`ledger_entries already has ${count} rows. Re-run with --force to replace.`)
+  }
+
+  // --force means "replace everything", not "insert anyway". This is a full load, and the
+  // neon-http driver has no interactive transactions, so a mid-run failure leaves partial
+  // data behind — without truncating, the retry just collides on primary keys.
+  if (force) {
+    console.log('  --force: clearing existing data')
+    await db.execute(sql`
+      TRUNCATE TABLE
+        ledger_entries, package_redemptions, client_package_items, client_packages,
+        package_checkout_links, package_template_items, package_templates,
+        checkout_links, bookings, room_bookings, memberships,
+        training_enrollments, training_courses, clients,
+        provider_services, services, medical_director_credentials,
+        documents, invite_links, password_reset_tokens, webhook_events,
+        platform_settings, providers
+      RESTART IDENTITY CASCADE
+    `)
   }
 
   // ---- staged input ----
@@ -46,7 +65,10 @@ async function main() {
   const xClientPackages = load<T.XanoClientPackage>('xano', 'client_packages')
   const xPackageTransactions = load<T.XanoPackageTransaction>('xano', 'package_transactions')
   const xEnrollments = load<T.XanoTrainingEnrollment>('xano', 'training_enrollments')
-  const xCheckoutLinks = load<{ booking_id: string; status: string }>('xano', 'checkout_links')
+  const xCheckoutLinks = load<{ id: string; booking_id: string; status: string; tip_amount: number }>(
+    'xano',
+    'checkout_links',
+  )
   const xRedemptions = load<{ booking_id: string }>('xano', 'package_redemptions')
 
   const sPaymentIntents = load<T.StripePaymentIntent>('stripe', 'payment_intents')
@@ -54,9 +76,15 @@ async function main() {
   const sInvoices = load<T.StripeInvoice>('stripe', 'invoices')
 
   // ---- providers ----
-  const providerRows = xProviders.map(T.transformProvider).filter((r) => r !== null)
-  const skipped = xProviders.length - providerRows.length
-  if (skipped) console.log(`  skipped ${skipped} test_provider row(s) — not migrated by design`)
+  const providerRows = xProviders.map(T.transformProvider)
+  const testProviders = xProviders.filter(T.isTestProvider)
+  if (testProviders.length) {
+    console.log(
+      `  ${testProviders.length} test_provider account(s) imported as status=inactive — ` +
+        'they moved real money, so dropping them would orphan live ledger rows. ' +
+        'Purge after the v1 CLN cleanup.',
+    )
+  }
   await db.insert(schema.providers).values(providerRows)
 
   const mdRows = xProviders.map(T.transformMedicalDirectorCredentials).filter((r) => r !== null)
@@ -111,14 +139,64 @@ async function main() {
     xRoomTransactions.filter((t) => t.type === 'refund').map((t) => t.stripe_payment_intent_id),
   )
 
-  const ledger = [
+  // Stripe is authoritative for booking money. v1's `transactions` is missing at least one
+  // succeeded payment, so anything Stripe has that Xano does not gets rebuilt from Stripe.
+  const coveredPaymentIntentIds = new Set(xTransactions.map((t) => t.stripe_payment_intent_id))
+  const tipByCheckoutLinkId = new Map(
+    xCheckoutLinks.map((c) => [c.id, Number(c.tip_amount ?? 0)]),
+  )
+  const providerByStripeAccount = new Map(
+    xProviders
+      .filter((p) => p.stripe_account_id)
+      .map((p) => [p.stripe_account_id as string, p.id]),
+  )
+
+  const candidate = [
     ...T.ledgerFromTransactions(xTransactions, bookingServiceId, bookingClientId),
+    ...T.ledgerFromStripeBookingGaps(
+      sPaymentIntents,
+      coveredPaymentIntentIds,
+      tipByCheckoutLinkId,
+      bookingClientId,
+      bookingServiceId,
+      providerByStripeAccount,
+    ),
     ...T.ledgerFromPackageTransactions(xPackageTransactions, new Map()),
     ...T.ledgerFromRoomTransactions(xRoomTransactions),
     ...T.ledgerFromStripeInvoices(sInvoices, new Map()),
     ...T.ledgerFromTrainingEnrollments(xEnrollments, piIndex),
     ...T.ledgerFromStripeRefunds(sRefunds, piIndex, alreadyRecorded),
   ]
+
+  // A money row whose payment intent does not exist in LIVE Stripe is not real money.
+  //
+  // Xano has no test data source on the Free plan, so test records were written straight
+  // into production tables — `package_transactions` in particular carries test-mode rows
+  // whose PIs belong to a different Stripe account context. Importing them would invent
+  // platform revenue that was never collected.
+  //
+  // Rows with no payment intent at all (membership entries, built from Stripe invoices) are
+  // inherently live, since they came from Stripe rather than Xano.
+  const dropped = candidate.filter(
+    (r) => r.stripePaymentIntentId && !piIndex.has(r.stripePaymentIntentId),
+  )
+  const ledger = candidate.filter(
+    (r) => !r.stripePaymentIntentId || piIndex.has(r.stripePaymentIntentId),
+  )
+
+  if (dropped.length) {
+    // Loud, never silent — a dropped row is either test data or a real gap in Stripe, and
+    // the two need different responses.
+    const total = dropped.reduce((sum, r) => sum + Number(r.melaniteCut ?? 0), 0)
+    console.log(
+      `\n  DROPPED ${dropped.length} ledger row(s) with no live Stripe payment ` +
+        `(${total.toFixed(2)} of platform revenue not imported):`,
+    )
+    for (const r of dropped) {
+      console.log(`    ${r.source} ${r.entryType} cut=${r.melaniteCut} pi=${r.stripePaymentIntentId}`)
+    }
+    console.log('    Expected for known test records; investigate anything unfamiliar.\n')
+  }
 
   if (ledger.length) await db.insert(schema.ledgerEntries).values(ledger)
 

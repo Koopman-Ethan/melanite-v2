@@ -39,3 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Staged migration data — contains real client PII (names, phones, emails,
+# treatment notes) and live Stripe records. Never commit.
+scripts/etl/staged/

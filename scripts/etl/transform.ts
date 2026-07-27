@@ -49,19 +49,26 @@ const lower = (s: string | null | undefined) => s?.trim().toLowerCase() || null
 
 /** v1's `role` enum and `is_admin` boolean were independent and gated different endpoints.
  *  v2 collapses to `role`. `is_admin` wins where they disagree, since that is what
- *  /admin/* actually checked. `test_provider` has no v2 equivalent — Xano Free had no test
- *  data source, so test accounts lived in production; those rows are skipped, not mapped. */
-export function mapRole(xanoRole: string, isAdmin: boolean): (typeof providers.$inferInsert)['role'] | null {
-  if (xanoRole === 'test_provider') return null
+ *  /admin/* actually checked.
+ *
+ *  `test_provider` has no v2 role — it existed only because Xano Free has no test data
+ *  source, so test accounts lived in production. But those accounts moved REAL money (one
+ *  made a live $60 room rental), so dropping them orphans genuine ledger rows. They import
+ *  as ordinary providers forced to `inactive`, which keeps referential integrity and keeps
+ *  the money attributable. Purge them after the v1 CLN cleanup, not during the migration. */
+export function mapRole(xanoRole: string, isAdmin: boolean): (typeof providers.$inferInsert)['role'] {
   if (isAdmin || xanoRole === 'platform_owner') return 'platform_owner'
   if (xanoRole === 'developer') return 'developer'
   if (xanoRole === 'medical_director') return 'medical_director'
   return 'provider'
 }
 
-export function transformProvider(p: XanoProvider): typeof providers.$inferInsert | null {
+export function isTestProvider(p: XanoProvider): boolean {
+  return p.role === 'test_provider'
+}
+
+export function transformProvider(p: XanoProvider): typeof providers.$inferInsert {
   const role = mapRole(p.role, p.is_admin)
-  if (!role) return null // test_provider — deliberately not migrated
 
   return {
     id: p.id,
@@ -79,7 +86,8 @@ export function transformProvider(p: XanoProvider): typeof providers.$inferInser
     licenseExpiry: p.license_expiry,
     malpracticeInsurance: p.malpractice_insurance,
     role,
-    status: p.status,
+    // Test accounts must never be able to log in or take a booking in v2.
+    status: isTestProvider(p) ? 'inactive' : p.status,
     stripeAccountId: p.stripe_account_id,
     stripeOnboardingComplete: p.stripe_onboarding_complete,
     stripeBillingCustomerId: p.stripe_billing_customer_id,
@@ -437,6 +445,66 @@ export function ledgerFromTrainingEnrollments(
         payoutStatus: 'paid',
       })
     }
+  }
+
+  return rows
+}
+
+/** Booking purchases that Stripe has but v1's `transactions` does not.
+ *
+ *  `transactions` is not a complete record of booking payments — at least one live payment
+ *  (`pi_3TqmnZ…`, $17.25) succeeded in Stripe and never produced a ledger row, so v1's
+ *  revenue is understated as well as missing refunds. Stripe is authoritative; this fills
+ *  the gaps rather than trusting Xano to be complete.
+ *
+ *  The split is recoverable without Xano: `application_fee_amount` IS the platform's cut on
+ *  a destination charge, so payout is the remainder. Tip comes from the checkout link, which
+ *  is the only place v1 recorded it. */
+export function ledgerFromStripeBookingGaps(
+  paymentIntents: StripePaymentIntent[],
+  coveredPaymentIntentIds: Set<string>,
+  tipByCheckoutLinkId: Map<string, number>,
+  bookingClientId: Map<string, string>,
+  bookingServiceId: Map<string, string>,
+  providerByStripeAccount: Map<string, string>,
+): LedgerRow[] {
+  const rows: LedgerRow[] = []
+
+  for (const pi of paymentIntents) {
+    if (pi.metadata?.type !== 'booking_payment') continue
+    if (pi.status !== 'succeeded') continue
+    if (coveredPaymentIntentIds.has(pi.id)) continue
+
+    const bookingId = pi.metadata.booking_id
+    const checkoutLinkId = pi.metadata.checkout_link_id
+    if (!bookingId) throw new Error(`payment intent ${pi.id} has no booking_id in metadata`)
+
+    const tip = tipByCheckoutLinkId.get(checkoutLinkId ?? '') ?? 0
+    const total = pi.amount_received / 100
+    const cut = (pi.application_fee_amount ?? 0) / 100
+
+    const providerId = pi.transfer_data?.destination
+      ? (providerByStripeAccount.get(pi.transfer_data.destination) ?? null)
+      : null
+
+    rows.push({
+      createdAt: new Date(pi.created * 1000),
+      source: 'booking',
+      payer: 'client',
+      entryType: 'purchase',
+      subjectType: 'booking',
+      subjectId: bookingId,
+      providerId,
+      clientId: bookingClientId.get(bookingId) ?? null,
+      serviceId: bookingServiceId.get(bookingId) ?? null,
+      grossAmount: money(total - tip),
+      tipAmount: money(tip),
+      providerPayout: money(total - cut),
+      melaniteCut: money(cut),
+      stripePaymentIntentId: pi.id,
+      payoutStatus: 'paid',
+      note: 'Reconstructed from Stripe — v1 recorded no transaction for this payment.',
+    })
   }
 
   return rows

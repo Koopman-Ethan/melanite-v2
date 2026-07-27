@@ -7,15 +7,31 @@ transform instead. No staging layer.
 ## Shape
 
 ```
-staged/          JSON snapshots, committed so a run is reproducible and reviewable
-  xano/*.json    one file per Xano table, pulled via the read-only MCP
-  stripe/*.json  payment intents, refunds, subscriptions, invoices
+stage.ts         pulls Xano + Stripe into staged/. Re-runnable; this is the repeatable step.
+staged/          JSON snapshots — GITIGNORED, see below
+  xano/*.json    one file per Xano table, via the Metadata API
+  stripe/*.json  payment intents, refunds, charges, subscriptions, invoices
 transform.ts     pure functions: staged rows -> v2 rows. No I/O, unit-testable.
 load.ts          runs transform, inserts via Drizzle, in FK-safe order
 verify.ts        reconciles the loaded ledger against Stripe
 ```
 
-Run: `npx tsx scripts/etl/load.ts` then `npx tsx scripts/etl/verify.ts`.
+Run in order:
+
+```
+npx tsx scripts/etl/stage.ts     # needs XANO_PAT + STRIPE_SECRET_KEY (both read-only)
+npx tsx scripts/etl/load.ts
+npx tsx scripts/etl/verify.ts
+```
+
+**`staged/` is gitignored and must stay that way.** It holds real client names, phone
+numbers, email addresses and treatment notes, plus live Stripe records. Reproducibility comes
+from `stage.ts` being re-runnable, not from committing the data — committing it would put
+client PII into git history permanently, where deleting it later means rewriting history.
+
+Both credentials are read-only: a Xano Metadata API access token, and a Stripe **restricted**
+key (`rk_live_…`) with read scopes on Charges, PaymentIntents, Refunds, Invoices,
+Subscriptions and Customers.
 
 ## Rules this transform encodes
 
