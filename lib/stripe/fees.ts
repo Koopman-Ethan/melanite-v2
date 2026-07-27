@@ -12,6 +12,7 @@ import {
   providers,
 } from '@/lib/db/schema'
 import { feeChargedEmail, sendEmail } from '@/lib/email'
+import { splitFee, toCents, toMoney } from '@/lib/money'
 import { friendlyStripeError, stripePost, stripeWritesEnabled } from '@/lib/stripe/client'
 
 // No-show and late-cancellation fees.
@@ -76,21 +77,24 @@ export async function quoteFee(
 
   if (!booking) return null
 
-  const amountCents = feeCents(kind, Number(booking.price), policy)
+  const amountCents = feeCents(kind, booking.price, policy)
   if (amountCents <= 0) return null
 
-  const providerCents = Math.round(amountCents * policy.providerSharePct)
+  const { providerPayoutCents, melaniteCutCents } = splitFee({
+    amountCents,
+    providerSharePct: policy.providerSharePct,
+  })
 
   return {
-    amount: (amountCents / 100).toFixed(2),
-    providerShare: (providerCents / 100).toFixed(2),
-    melaniteShare: ((amountCents - providerCents) / 100).toFixed(2),
+    amount: toMoney(amountCents),
+    providerShare: toMoney(providerPayoutCents),
+    melaniteShare: toMoney(melaniteCutCents),
   }
 }
 
-function feeCents(kind: FeeKind, price: number, policy: FeePolicy): number {
+function feeCents(kind: FeeKind, price: string, policy: FeePolicy): number {
   return kind === 'no_show_fee'
-    ? Math.round(price * 100 * policy.noShowPct)
+    ? Math.round(toCents(price) * policy.noShowPct)
     : // A late cancellation is a flat amount, not a proportion: the cost is the empty slot,
       // which is the same whatever was booked into it.
       Math.round(policy.cancellationAmount * 100)
@@ -159,7 +163,7 @@ export async function chargeBookingFee(bookingId: string, kind: FeeKind): Promis
   }
 
   const policy = await feePolicy()
-  const amountCents = feeCents(kind, Number(booking.price), policy)
+  const amountCents = feeCents(kind, booking.price, policy)
   if (amountCents <= 0) {
     return { skipped: 'This appointment has no price to base a fee on.' }
   }
@@ -174,8 +178,10 @@ export async function chargeBookingFee(bookingId: string, kind: FeeKind): Promis
     .where(eq(providers.id, booking.providerId))
     .limit(1)
 
-  const providerCents = Math.round(amountCents * policy.providerSharePct)
-  const melaniteCents = amountCents - providerCents
+  const { providerPayoutCents: providerCents, melaniteCutCents: melaniteCents } = splitFee({
+    amountCents,
+    providerSharePct: policy.providerSharePct,
+  })
 
   const [svc] = await db
     .select({ serviceId: providerServices.serviceId })
@@ -241,10 +247,10 @@ export async function chargeBookingFee(bookingId: string, kind: FeeKind): Promis
     providerId: booking.providerId,
     clientId: booking.clientId,
     serviceId: svc?.serviceId ?? null,
-    grossAmount: (amountCents / 100).toFixed(2),
+    grossAmount: toMoney(amountCents),
     tipAmount: '0.00',
-    providerPayout: (providerCents / 100).toFixed(2),
-    melaniteCut: (melaniteCents / 100).toFixed(2),
+    providerPayout: toMoney(providerCents),
+    melaniteCut: toMoney(melaniteCents),
     paymentMethod: 'stripe',
     stripePaymentIntentId: intentId,
     payoutStatus: provider?.stripeAccountId ? 'pending' : 'paid',
@@ -261,7 +267,7 @@ export async function chargeBookingFee(bookingId: string, kind: FeeKind): Promis
           clientName: booking.clientName,
           providerName: `${provider?.firstName ?? 'your provider'} ${provider?.lastName ?? ''}`.trim(),
           reason: kind,
-          amount: `$${(amountCents / 100).toFixed(2)}`,
+          amount: `$${toMoney(amountCents)}`,
           when: booking.startTime.toLocaleDateString('en-US', {
             weekday: 'long',
             month: 'long',
@@ -282,7 +288,7 @@ export async function chargeBookingFee(bookingId: string, kind: FeeKind): Promis
     .set({ feeChargeFailedAt: null, feeChargeError: null })
     .where(eq(bookings.id, booking.id))
 
-  return { charged: true, amount: (amountCents / 100).toFixed(2) }
+  return { charged: true, amount: toMoney(amountCents) }
 }
 
 /** Stamps the booking so the failure surfaces in the admin queue. */

@@ -6,6 +6,7 @@ import { revalidatePath } from 'next/cache'
 import { requireAdmin } from '@/lib/auth/dal'
 import { db } from '@/lib/db'
 import { bookingHasPayment, getProviderSharePct } from '@/lib/db/queries/admin-tools'
+import { splitClientPayment, toCents, toMoney } from '@/lib/money'
 import { denverInstant, getLaserHours } from '@/lib/db/queries/availability'
 import {
   bookings,
@@ -24,9 +25,6 @@ export interface ToolState {
 
 const MANUAL_METHODS = ['cherry', 'groupon', 'cash', 'check', 'other'] as const
 type ManualMethod = (typeof MANUAL_METHODS)[number]
-
-/** Money in cents throughout — the same discipline as everywhere else money is touched. */
-const cents = (n: number) => Math.round(n * 100)
 
 /** Record a payment that reached Melanite outside Stripe.
  *
@@ -82,15 +80,15 @@ export async function recordBookingPayment(input: {
     .limit(1)
 
   const share = await getProviderSharePct()
-  const grossCents = cents(input.grossAmount)
-  const tipCents = cents(Math.max(input.tipAmount, 0))
+  const grossCents = toCents(input.grossAmount)
+  const tipCents = toCents(Math.max(input.tipAmount, 0))
 
-  // Default: the platform split, plus the whole tip to the provider — matching how a Stripe
-  // booking is calculated, so a Cherry booking and a card booking are comparable.
+  // Default: the platform split, via the same function the webhook uses, so a Cherry booking
+  // and a card booking are calculated identically and are genuinely comparable.
   const payoutCents =
     input.providerPayoutOverride !== null
-      ? cents(input.providerPayoutOverride)
-      : Math.round(grossCents * share) + tipCents
+      ? toCents(input.providerPayoutOverride)
+      : splitClientPayment({ grossCents, tipCents, providerSharePct: share }).providerPayoutCents
 
   if (payoutCents > grossCents + tipCents) {
     return { error: 'The provider payout cannot exceed what was collected.' }
@@ -107,10 +105,10 @@ export async function recordBookingPayment(input: {
     providerId: booking.providerId,
     clientId: booking.clientId,
     serviceId: svc?.serviceId ?? null,
-    grossAmount: (grossCents / 100).toFixed(2),
-    tipAmount: (tipCents / 100).toFixed(2),
-    providerPayout: (payoutCents / 100).toFixed(2),
-    melaniteCut: (cutCents / 100).toFixed(2),
+    grossAmount: toMoney(grossCents),
+    tipAmount: toMoney(tipCents),
+    providerPayout: toMoney(payoutCents),
+    melaniteCut: toMoney(cutCents),
     paymentMethod: input.method,
     externalReference: input.externalReference?.trim() || null,
     // Stripe Connect cannot pay out money it never received, so a manual payment implies a
@@ -196,7 +194,7 @@ export async function recordMembershipPayment(input: {
     membershipId = created.id
   }
 
-  const gross = input.amount.toFixed(2)
+  const gross = toMoney(toCents(input.amount))
 
   // Membership is provider-paid and unsplit — the whole amount is Melanite's, same as a
   // Stripe-billed one. The check constraint enforces it regardless.
@@ -322,7 +320,7 @@ export async function createManualBooking(input: {
     SELECT ${bookingId}::uuid, ${input.providerId}::uuid, ${input.providerServiceId}::uuid,
            ${clientId}, ${input.clientName.trim()}, ${input.clientPhone}, ${input.clientEmail},
            ${input.note}, ${svc.price}::numeric, 'none'::discount_type, 0::numeric,
-           ${input.price.toFixed(2)}::numeric, ${input.paymentSource}::booking_payment_source,
+           ${toMoney(toCents(input.price))}::numeric, ${input.paymentSource}::booking_payment_source,
            ${svc.durationMins}, ${startTime.toISOString()}::timestamptz,
            ${endTime.toISOString()}::timestamptz, ${status}::booking_status
     WHERE NOT EXISTS (

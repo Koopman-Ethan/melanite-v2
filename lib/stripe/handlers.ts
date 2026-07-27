@@ -22,6 +22,8 @@ import {
 
 import { refreshPaymentStatus } from '@/lib/db/queries/training'
 
+import { splitClientPayment, toCents, toMoney } from '@/lib/money'
+
 import { stripeGet } from './client'
 import type {
   StripeAccountObject,
@@ -55,7 +57,7 @@ export interface HandlerResult {
   detail: string
 }
 
-const money = (cents: number) => (cents / 100).toFixed(2)
+const money = toMoney
 
 /** True when a ledger row already exists for this payment intent and entry type. */
 async function alreadyRecorded(
@@ -187,14 +189,19 @@ async function bookingPaid(pi: StripePaymentIntentObject): Promise<HandlerResult
     .where(eq(checkoutLinks.bookingId, bookingId))
     .limit(1)
 
-  const tip = Number(link?.tipAmount ?? 0)
-  const gross = Number(booking.price)
+  const tipCents = toCents(link?.tipAmount ?? '0')
+  const grossCents = toCents(booking.price)
   const share = await providerShare()
 
-  // v1's split, kept exactly: the provider's share of the price PLUS the whole tip. Melanite
-  // takes no cut of a tip. gross excludes the tip in v2's convention.
-  const providerPayout = Number((gross * share + tip).toFixed(2))
-  const melaniteCut = Number((gross - gross * share).toFixed(2))
+  // One split implementation, in cents. This used to be computed here in float dollars while
+  // the PaymentIntent's application fee was computed in cents elsewhere — the two disagreed
+  // wherever price × share landed on a half cent, so Stripe took one amount and the ledger
+  // recorded another.
+  const { providerPayoutCents, melaniteCutCents } = splitClientPayment({
+    grossCents,
+    tipCents,
+    providerSharePct: share,
+  })
 
   const serviceId = await serviceIdFor(booking.providerServiceId)
 
@@ -207,10 +214,10 @@ async function bookingPaid(pi: StripePaymentIntentObject): Promise<HandlerResult
     providerId: booking.providerId,
     clientId: booking.clientId,
     serviceId,
-    grossAmount: gross.toFixed(2),
-    tipAmount: tip.toFixed(2),
-    providerPayout: providerPayout.toFixed(2),
-    melaniteCut: melaniteCut.toFixed(2),
+    grossAmount: toMoney(grossCents),
+    tipAmount: toMoney(tipCents),
+    providerPayout: toMoney(providerPayoutCents),
+    melaniteCut: toMoney(melaniteCutCents),
     paymentMethod: 'stripe',
     stripePaymentIntentId: pi.id,
     payoutStatus: 'pending',
@@ -335,13 +342,16 @@ async function packagePurchased(pi: StripePaymentIntentObject): Promise<HandlerR
     .from(packageTemplateItems)
     .where(eq(packageTemplateItems.packageTemplateId, templateId))
 
-  const tip = Number(pi.metadata?.tip_amount ?? 0)
+  const tipCents = toCents(pi.metadata?.tip_amount ?? '0')
   // v1's package ledger stored gross INCLUDING the tip; v2 normalised to gross excluding it,
   // so the tip is subtracted back out here rather than carried forward.
-  const gross = Number((pi.amount_received / 100 - tip).toFixed(2))
+  const grossCents = pi.amount_received - tipCents
   const share = await providerShare()
-  const providerPayout = Number((gross * share + tip).toFixed(2))
-  const melaniteCut = Number((gross - gross * share).toFixed(2))
+  const { providerPayoutCents, melaniteCutCents } = splitClientPayment({
+    grossCents,
+    tipCents,
+    providerSharePct: share,
+  })
 
   const [instance] = await db
     .insert(clientPackages)
@@ -377,10 +387,10 @@ async function packagePurchased(pi: StripePaymentIntentObject): Promise<HandlerR
     subjectId: instance.id,
     providerId,
     clientId: clientId ?? null,
-    grossAmount: gross.toFixed(2),
-    tipAmount: tip.toFixed(2),
-    providerPayout: providerPayout.toFixed(2),
-    melaniteCut: melaniteCut.toFixed(2),
+    grossAmount: toMoney(grossCents),
+    tipAmount: toMoney(tipCents),
+    providerPayout: toMoney(providerPayoutCents),
+    melaniteCut: toMoney(melaniteCutCents),
     paymentMethod: 'stripe',
     stripePaymentIntentId: pi.id,
     // A package purchase is a destination charge that settles immediately, so "pending"
@@ -498,10 +508,14 @@ export async function handleChargeRefunded(charge: StripeChargeObject): Promise<
       ),
     )
 
-  const target = charge.amount_refunded / 100
-  const delta = Number((target - Number(prior?.refunded ?? 0)).toFixed(2))
+  // Cents throughout. Stripe reports `amount_refunded` cumulatively, so the delta is what this
+  // event adds on top of what is already recorded — computed in integers so a partial refund
+  // cannot land a cent away from what Stripe actually returned.
+  const targetCents = charge.amount_refunded
+  const priorCents = toCents(prior?.refunded ?? '0')
+  const deltaCents = targetCents - priorCents
 
-  if (delta <= 0) return { handled: true, detail: 'refund already recorded' }
+  if (deltaCents <= 0) return { handled: true, detail: 'refund already recorded' }
 
   // VERIFIED against live data: transfer_reversal is null on the real refund, so the provider
   // KEEPS their share and the platform absorbs the whole amount. That deliberately breaks the
@@ -515,10 +529,10 @@ export async function handleChargeRefunded(charge: StripeChargeObject): Promise<
     providerId: original.providerId,
     clientId: original.clientId,
     serviceId: original.serviceId,
-    grossAmount: (-delta).toFixed(2),
+    grossAmount: toMoney(-deltaCents),
     tipAmount: '0.00',
     providerPayout: '0.00',
-    melaniteCut: (-delta).toFixed(2),
+    melaniteCut: toMoney(-deltaCents),
     paymentMethod: 'stripe',
     stripePaymentIntentId: paymentIntentId,
     stripeRefundId: charge.id,
@@ -526,7 +540,7 @@ export async function handleChargeRefunded(charge: StripeChargeObject): Promise<
     note: 'Refund recorded from Stripe.',
   })
 
-  return { handled: true, detail: `refund of ${delta.toFixed(2)} recorded` }
+  return { handled: true, detail: `refund of ${toMoney(deltaCents)} recorded` }
 }
 
 // ---------------------------------------------------------------------------

@@ -12,6 +12,7 @@ import {
   platformSettings,
   providers,
 } from '@/lib/db/schema'
+import { splitClientPayment, toCents, toMoney } from '@/lib/money'
 import { friendlyStripeError, stripePost } from '@/lib/stripe/client'
 
 // PUBLIC actions — reachable by anyone holding a link token. No session, no provider identity.
@@ -41,7 +42,6 @@ export interface IntentState {
  *  Card covers Apple Pay and Google Pay — those ride on the card rail, not separate types. */
 const PAYMENT_METHODS = ['card', 'link'] as const
 
-const cents = (v: number) => Math.round(v * 100)
 
 /** Creates (or re-creates) the PaymentIntent for a booking link.
  *
@@ -94,9 +94,15 @@ export async function createBookingIntent(input: {
   }
 
   const settings = await getSplitSettings()
-  const priceCents = cents(Number(booking.price))
-  const tipCents = cents(tip)
-  const feeCents = Math.round(priceCents * (1 - settings.providerSharePct))
+  const priceCents = toCents(booking.price)
+  const tipCents = toCents(tip)
+  // The SAME function the webhook uses to write the ledger row, so what Stripe takes and what
+  // the books record cannot drift apart.
+  const { melaniteCutCents: feeCents } = splitClientPayment({
+    grossCents: priceCents,
+    tipCents,
+    providerSharePct: settings.providerSharePct,
+  })
 
   try {
     const clientId = await ensureClientRow({
@@ -124,7 +130,7 @@ export async function createBookingIntent(input: {
         booking_id: booking.id,
         checkout_link_id: checkout.linkId,
         client_id: clientId,
-        tip_amount: tip.toFixed(2),
+        tip_amount: toMoney(toCents(tip)),
         save_card: input.saveCard ? '1' : '0',
         card_policy_version: settings.cardPolicyVersion,
       },
@@ -133,7 +139,7 @@ export async function createBookingIntent(input: {
     await db
       .update(checkoutLinks)
       .set({
-        tipAmount: tip.toFixed(2),
+        tipAmount: toMoney(toCents(tip)),
         stripeCustomerId: customerId,
         stripePaymentIntentId: intent.id,
       })
@@ -196,9 +202,13 @@ export async function createPackageIntent(input: {
   if (!email) return { error: 'Enter an email so your package can be tracked.' }
 
   const settings = await getSplitSettings()
-  const priceCents = cents(Number(checkout.price))
-  const tipCents = cents(tip)
-  const feeCents = Math.round(priceCents * (1 - settings.providerSharePct))
+  const priceCents = toCents(checkout.price)
+  const tipCents = toCents(tip)
+  const { melaniteCutCents: feeCents } = splitClientPayment({
+    grossCents: priceCents,
+    tipCents,
+    providerSharePct: settings.providerSharePct,
+  })
 
   try {
     const clientId = await ensureClientRow({
@@ -224,7 +234,7 @@ export async function createPackageIntent(input: {
         package_checkout_link_id: link.id,
         provider_id: link.providerId,
         client_id: clientId,
-        tip_amount: tip.toFixed(2),
+        tip_amount: toMoney(toCents(tip)),
         save_card: input.saveCard ? '1' : '0',
         card_policy_version: settings.cardPolicyVersion,
       },
@@ -233,7 +243,7 @@ export async function createPackageIntent(input: {
     await db
       .update(packageCheckoutLinks)
       .set({
-        tipAmount: tip.toFixed(2),
+        tipAmount: toMoney(toCents(tip)),
         clientId,
         clientName: name,
         clientEmail: email,
