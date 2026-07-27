@@ -685,3 +685,202 @@ export interface StripeInvoice {
   parent: { subscription_details?: { subscription: string; metadata?: Record<string, string> } } | null
   lines: { data: Array<{ metadata?: Record<string, string> }> }
 }
+
+// ---------------------------------------------------------------------------
+// Domain tables beyond the ledger
+// ---------------------------------------------------------------------------
+//
+// These were missing from the first load, which only carried what the revenue view needed.
+// `package_redemptions` in particular is load-bearing well beyond reporting: the appointments
+// page uses it to decide whether cancelling gives a prepaid session back or destroys it.
+
+export function transformCheckoutLink(c: XanoCheckoutLink) {
+  return {
+    id: c.id,
+    createdAt: msRequired(c.created_at, 'checkout_links.created_at'),
+    bookingId: c.booking_id,
+    token: c.token,
+    status: c.status,
+    tipAmount: money(c.tip_amount),
+    stripeCustomerId: c.stripe_customer_id,
+    stripePaymentIntentId: c.stripe_payment_intent_id,
+    paidAt: ms(c.paid_at),
+    expiresAt: msRequired(c.expires_at, 'checkout_links.expires_at'),
+  }
+}
+
+export function transformPackageTemplate(t: XanoPackageTemplate) {
+  return {
+    id: t.id,
+    createdAt: msRequired(t.created_at, 'package_templates.created_at'),
+    providerId: t.provider_id,
+    name: t.name,
+    description: t.description,
+    totalPrice: money(t.total_price),
+    expiresAfterDays: t.expires_after_days,
+    active: t.active,
+  }
+}
+
+export function transformPackageTemplateItem(i: XanoPackageTemplateItem) {
+  return {
+    id: i.id,
+    packageTemplateId: i.package_template_id,
+    serviceId: i.service_id,
+    quantity: i.quantity,
+    perSessionValue: money(i.per_session_value),
+  }
+}
+
+export function transformClientPackage(p: XanoClientPackage, clientId: string) {
+  return {
+    id: p.id,
+    createdAt: msRequired(p.created_at, 'client_packages.created_at'),
+    providerId: p.provider_id,
+    clientId,
+    packageTemplateId: p.package_template_id,
+    status: p.status as 'active' | 'exhausted' | 'expired' | 'refunded',
+    purchasedAt: ms(p.purchased_at),
+    expiresAt: ms(p.expires_at),
+  }
+}
+
+export function transformClientPackageItem(i: XanoClientPackageItem) {
+  return {
+    id: i.id,
+    clientPackageId: i.client_package_id,
+    serviceId: i.service_id,
+    perSessionValue: money(i.per_session_value),
+    qtyTotal: i.qty_total,
+    qtyUsed: i.qty_used ?? 0,
+  }
+}
+
+export function transformPackageRedemption(r: XanoPackageRedemption) {
+  return {
+    id: r.id,
+    createdAt: msRequired(r.created_at, 'package_redemptions.created_at'),
+    clientPackageId: r.client_package_id,
+    clientPackageItemId: r.client_package_item_id,
+    bookingId: r.booking_id,
+    overallIndex: r.overall_index,
+    serviceIndex: r.service_index,
+    redeemedAt: ms(r.redeemed_at) ?? msRequired(r.created_at, 'package_redemptions.created_at'),
+    // Null means the redemption stands; set means the booking was cancelled and the session
+    // was returned. Excluded from balance maths but kept for audit.
+    voidedAt: ms(r.voided_at),
+  }
+}
+
+export function transformRoomBooking(r: XanoRoomBooking) {
+  return {
+    id: r.id,
+    createdAt: msRequired(r.created_at, 'room_bookings.created_at'),
+    providerId: r.provider_id,
+    rentalDate: r.rental_date,
+    slotType: r.slot_type,
+    price: money(r.price),
+    status: r.status,
+    startAt: msRequired(r.start_at, 'room_bookings.start_at'),
+    endAt: msRequired(r.end_at, 'room_bookings.end_at'),
+    cancelledAt: ms(r.cancelled_at),
+  }
+}
+
+export function transformMembership(m: XanoMembership) {
+  return {
+    id: m.id,
+    createdAt: msRequired(m.created_at, 'memberships.created_at'),
+    providerId: m.provider_id,
+    plan: 'medical_director' as const,
+    status: m.status,
+    stripeSubscriptionId: m.stripe_subscription_id,
+    stripeCustomerId: m.stripe_customer_id,
+    cancelAtPeriodEnd: m.cancel_at_period_end ?? false,
+    startDate: ms(m.start_date),
+    renewalDate: ms(m.renewal_date),
+    cancelDate: ms(m.cancel_date),
+  }
+}
+
+export function transformTrainingCourse(c: XanoTrainingCourse) {
+  return {
+    id: c.id,
+    createdAt: msRequired(c.created_at, 'training_courses.created_at'),
+    day1Date: c.day1_date,
+    day1Start: c.day1_start,
+    day1End: c.day1_end,
+    day2Date: c.day2_date,
+    day2Start: c.day2_start,
+    day2End: c.day2_end,
+    maxStudents: c.max_students,
+    depositAmount: money(c.deposit_amount),
+    totalPrice: money(c.total_price),
+    googleCalendarEventIdDay1: c.google_calendar_event_id_day1,
+    googleCalendarEventIdDay2: c.google_calendar_event_id_day2,
+    status: c.status,
+  }
+}
+
+export function transformTrainingEnrollment(e: XanoTrainingEnrollment) {
+  return {
+    id: e.id,
+    createdAt: msRequired(e.created_at, 'training_enrollments.created_at'),
+    trainingCourseId: e.training_course_id,
+    providerId: e.provider_id,
+    inviteLinkId: null, // invite_links is not migrated; the FK would dangle.
+    firstName: e.first_name,
+    lastName: e.last_name,
+    email: e.email.trim().toLowerCase(),
+    phone: e.phone,
+    licenseNumber: e.license_number,
+    paymentStatus: e.payment_status,
+    balanceDueDate: e.balance_due_date,
+    courseCompletedAt: ms(e.course_completed_at),
+  }
+}
+
+export interface XanoCheckoutLink {
+  id: string; created_at: number; booking_id: string; token: string
+  status: 'pending' | 'paid' | 'expired' | 'cancelled'; tip_amount: number
+  stripe_customer_id: string | null; stripe_payment_intent_id: string | null
+  paid_at: number | null; expires_at: number
+}
+export interface XanoPackageTemplate {
+  id: string; created_at: number; provider_id: string; name: string
+  description: string | null; total_price: number; expires_after_days: number | null
+  active: boolean
+}
+export interface XanoPackageTemplateItem {
+  id: string; package_template_id: string; service_id: string
+  quantity: number; per_session_value: number
+}
+export interface XanoClientPackageItem {
+  id: string; client_package_id: string; service_id: string
+  per_session_value: number; qty_total: number; qty_used: number | null
+}
+export interface XanoPackageRedemption {
+  id: string; created_at: number; client_package_id: string; client_package_item_id: string
+  booking_id: string; overall_index: number; service_index: number
+  redeemed_at: number | null; voided_at: number | null
+}
+export interface XanoRoomBooking {
+  id: string; created_at: number; provider_id: string; rental_date: string
+  slot_type: 'full' | 'am' | 'pm'; price: number
+  status: 'confirmed' | 'cancellation_requested' | 'cancelled' | 'refunded'
+  start_at: number; end_at: number; cancelled_at: number | null
+}
+export interface XanoMembership {
+  id: string; created_at: number; provider_id: string
+  status: 'active' | 'past_due' | 'cancelled'
+  stripe_subscription_id: string | null; stripe_customer_id: string | null
+  cancel_at_period_end: boolean | null
+  start_date: number | null; renewal_date: number | null; cancel_date: number | null
+}
+export interface XanoTrainingCourse {
+  id: string; created_at: number; day1_date: string; day1_start: string; day1_end: string
+  day2_date: string | null; day2_start: string; day2_end: string; max_students: number
+  deposit_amount: number; total_price: number
+  google_calendar_event_id_day1: string | null; google_calendar_event_id_day2: string | null
+  status: 'scheduled' | 'completed' | 'cancelled'
+}

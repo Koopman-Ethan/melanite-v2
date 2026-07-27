@@ -69,7 +69,13 @@ async function main() {
     'xano',
     'checkout_links',
   )
-  const xRedemptions = load<{ booking_id: string }>('xano', 'package_redemptions')
+  const xRedemptions = load<T.XanoPackageRedemption>('xano', 'package_redemptions')
+  const xPackageTemplates = load<T.XanoPackageTemplate>('xano', 'package_templates')
+  const xPackageTemplateItems = load<T.XanoPackageTemplateItem>('xano', 'package_template_items')
+  const xClientPackageItems = load<T.XanoClientPackageItem>('xano', 'client_package_items')
+  const xRoomBookings = load<T.XanoRoomBooking>('xano', 'room_bookings')
+  const xMemberships = load<T.XanoMembership>('xano', 'memberships')
+  const xTrainingCourses = load<T.XanoTrainingCourse>('xano', 'training_courses')
 
   const sPaymentIntents = load<T.StripePaymentIntent>('stripe', 'payment_intents')
   const sRefunds = load<T.StripeRefund>('stripe', 'refunds')
@@ -122,6 +128,80 @@ async function main() {
     )
   })
   if (bookingRows.length) await db.insert(schema.bookings).values(bookingRows)
+
+  // ---- checkout links ----
+  const keptBookingIds = new Set(bookingRows.map((b) => b.id!))
+  const checkoutRows = xCheckoutLinks
+    .filter((c) => keptBookingIds.has(c.booking_id))
+    .map((c) => T.transformCheckoutLink(c as T.XanoCheckoutLink))
+  if (checkoutRows.length) await db.insert(schema.checkoutLinks).values(checkoutRows)
+
+  // ---- packages ----
+  // Ordered by dependency: templates -> template items -> purchased packages -> their items
+  // -> redemptions. package_redemptions is what tells the appointments page whether cancelling
+  // returns a prepaid session or destroys it, so leaving it out is not a reporting gap.
+  const templateRows = xPackageTemplates
+    .filter((t) => liveProviders.has(t.provider_id))
+    .map(T.transformPackageTemplate)
+  if (templateRows.length) await db.insert(schema.packageTemplates).values(templateRows)
+
+  const keptTemplateIds = new Set(templateRows.map((t) => t.id))
+  const templateItemRows = xPackageTemplateItems
+    .filter((i) => keptTemplateIds.has(i.package_template_id))
+    .map(T.transformPackageTemplateItem)
+  if (templateItemRows.length) {
+    await db.insert(schema.packageTemplateItems).values(templateItemRows)
+  }
+
+  const clientPackageRows = xClientPackages
+    .filter((p) => liveProviders.has(p.provider_id) && keptTemplateIds.has(p.package_template_id))
+    .map((p) => {
+      const key = T.clientKey({ email: p.client_email, fallback: p.id })
+      const clientId = byKey.get(key)
+      if (!clientId) throw new Error(`client_package ${p.id} has no resolvable client`)
+      return T.transformClientPackage(p, clientId)
+    })
+  if (clientPackageRows.length) await db.insert(schema.clientPackages).values(clientPackageRows)
+
+  const keptPackageIds = new Set(clientPackageRows.map((p) => p.id))
+  const packageItemRows = xClientPackageItems
+    .filter((i) => keptPackageIds.has(i.client_package_id))
+    .map(T.transformClientPackageItem)
+  if (packageItemRows.length) await db.insert(schema.clientPackageItems).values(packageItemRows)
+
+  const keptItemIds = new Set(packageItemRows.map((i) => i.id))
+  const redemptionRows = xRedemptions
+    .filter(
+      (r) =>
+        keptPackageIds.has(r.client_package_id) &&
+        keptItemIds.has(r.client_package_item_id) &&
+        keptBookingIds.has(r.booking_id),
+    )
+    .map(T.transformPackageRedemption)
+  if (redemptionRows.length) await db.insert(schema.packageRedemptions).values(redemptionRows)
+
+  // ---- room, membership, training ----
+  const roomRows = xRoomBookings
+    .filter((r) => liveProviders.has(r.provider_id))
+    .map(T.transformRoomBooking)
+  if (roomRows.length) await db.insert(schema.roomBookings).values(roomRows)
+
+  const membershipRows = xMemberships
+    .filter((m) => liveProviders.has(m.provider_id))
+    .map(T.transformMembership)
+  if (membershipRows.length) await db.insert(schema.memberships).values(membershipRows)
+
+  const courseRows = xTrainingCourses.map(T.transformTrainingCourse)
+  if (courseRows.length) await db.insert(schema.trainingCourses).values(courseRows)
+
+  const keptCourseIds = new Set(courseRows.map((c) => c.id))
+  const enrollmentRows = xEnrollments
+    .filter((e) => keptCourseIds.has(e.training_course_id))
+    .filter((e) => !e.provider_id || liveProviders.has(e.provider_id))
+    .map(T.transformTrainingEnrollment)
+  if (enrollmentRows.length) {
+    await db.insert(schema.trainingEnrollments).values(enrollmentRows)
+  }
 
   // ---- the ledger ----
   const psById = new Map(xProviderServices.map((ps) => [ps.id, ps.service_id]))
@@ -202,7 +282,10 @@ async function main() {
 
   console.log(
     `loaded: ${providerRows.length} providers, ${clientRows.length} clients, ` +
-      `${bookingRows.length} bookings, ${ledger.length} ledger entries`,
+      `${bookingRows.length} bookings, ${checkoutRows.length} checkout links, ` +
+      `${clientPackageRows.length} packages (${redemptionRows.length} redemptions), ` +
+      `${roomRows.length} room bookings, ${membershipRows.length} memberships, ` +
+      `${enrollmentRows.length} enrollments, ${ledger.length} ledger entries`,
   )
   console.log('run `npx tsx scripts/etl/verify.ts` to reconcile against Stripe')
 }
