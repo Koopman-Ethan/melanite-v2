@@ -16,7 +16,8 @@
     "etl:stage": "tsx scripts/etl/stage.ts",
     "etl:load": "tsx scripts/etl/load.ts",
     "etl:verify": "tsx scripts/etl/verify.ts",
-    "db:set-password": "tsx scripts/set-password.ts"
+    "db:set-password": "tsx --tsconfig scripts/tsconfig.json scripts/set-password.ts",
+    "db:reset-link": "tsx --tsconfig scripts/tsconfig.json scripts/reset-link.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",

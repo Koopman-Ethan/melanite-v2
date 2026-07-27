@@ -1,0 +1,2 @@
+ALTER TABLE "password_reset_tokens" ADD COLUMN "token_hash" text NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX "password_reset_tokens_token_hash_index" ON "password_reset_tokens" USING btree ("token_hash");

@@ -341,16 +341,21 @@ export const sessions = pgTable('sessions', {
   index().on(t.expiresAt),
 ])
 
+/** Single-use password reset tokens. Like sessions, only the hash is stored — a leak of this
+ *  table must not hand anyone a working reset link, which is exactly an account takeover.
+ *
+ *  v1 tracked a `status` enum (pending/used/expired); `usedAt` plus `expiresAt` says the same
+ *  thing without a field that can disagree with the timestamps. */
 export const passwordResetTokens = pgTable('password_reset_tokens', {
   id: uuid().primaryKey().defaultRandom(),
   providerId: uuid()
     .notNull()
     .references(() => providers.id, { onDelete: 'cascade' }),
-  token: text().notNull(),
+  tokenHash: text().notNull(),
   sentAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   expiresAt: timestamp({ withTimezone: true }).notNull(),
   usedAt: timestamp({ withTimezone: true }),
-}, (t) => [uniqueIndex().on(t.token), index().on(t.providerId)])
+}, (t) => [uniqueIndex().on(t.tokenHash), index().on(t.providerId)])
 
 // ---------------------------------------------------------------------------
 // Clients

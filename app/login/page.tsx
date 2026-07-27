@@ -11,14 +11,14 @@ export default async function LoginPage({
   searchParams,
 }: {
   // searchParams is a Promise in this version of Next.
-  searchParams: Promise<{ next?: string }>
+  searchParams: Promise<{ next?: string; reset?: string }>
 }) {
   // Verified here rather than in proxy.ts. Acting on the mere presence of a cookie would
   // loop forever once it expired: bounce to /app, DAL rejects, bounce back.
   const user = await getCurrentUser()
   if (user) redirect('/app')
 
-  const { next } = await searchParams
+  const { next, reset } = await searchParams
 
   return (
     <main className="flex min-h-full flex-1 items-center justify-center px-6 py-16">
@@ -27,6 +27,11 @@ export default async function LoginPage({
           <h1 className="text-2xl font-semibold tracking-tight">Melanite Laser Suite</h1>
           <p className="mt-1 text-sm opacity-60">Sign in to your provider account</p>
         </div>
+        {reset && (
+          <p className="mb-4 rounded-md border border-[#7fa87f]/30 bg-[#7fa87f]/10 px-3 py-2.5 text-sm">
+            Password updated. Sign in with your new password.
+          </p>
+        )}
         <LoginForm next={next} />
       </div>
     </main>

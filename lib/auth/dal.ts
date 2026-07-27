@@ -22,7 +22,11 @@ export async function requireProvider(): Promise<SessionUser> {
 
   // Imported accounts have no usable password hash — Xano's is not portable — so they are
   // forced through a reset before reaching anything else.
-  if (user.requiresPasswordReset) redirect('/reset-password')
+  //
+  // Sent to /forgot-password, not /reset-password: without a token the latter can only say
+  // "link expired", which is both wrong and a dead end. This is the page that can actually
+  // issue one.
+  if (user.requiresPasswordReset) redirect('/forgot-password?forced=1')
 
   return user
 }
