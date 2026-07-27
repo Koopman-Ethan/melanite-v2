@@ -54,7 +54,19 @@ export async function verifyPassword(password: string, stored: string | null): P
   if (scheme !== 'scrypt' || !saltB64 || !hashB64) return false
 
   const expected = Buffer.from(hashB64, 'base64')
-  const derived = await scrypt(password.normalize('NFKC'), Buffer.from(saltB64, 'base64'), expected.length, {
+
+  // The stored digest must be exactly the length we write. Deriving to `expected.length`
+  // instead — as this did — makes the comparison length a property of the stored value rather
+  // than of the algorithm, and scrypt's final PBKDF2 step is prefix-stable, so a digest
+  // truncated to 61 bytes still matches the first 61 bytes of the real one. A corrupted or
+  // truncated column then verifies successfully instead of failing closed.
+  //
+  // Not an authentication bypass — the correct password is still required — but a hash that
+  // has been damaged should be rejected, and the work factor should never be negotiable by
+  // whatever happens to be in the database.
+  if (expected.length !== KEY_LENGTH) return false
+
+  const derived = await scrypt(password.normalize('NFKC'), Buffer.from(saltB64, 'base64'), KEY_LENGTH, {
     N: Number(n),
     r: Number(r),
     p: Number(p),

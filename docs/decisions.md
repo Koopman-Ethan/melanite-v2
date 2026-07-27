@@ -512,6 +512,37 @@ cancelling. It never does — the list is filtered to upcoming, so the element c
 message is the one being removed. The test now asserts the card leaves that list AND appears
 under cancelled, which is both true and a stronger claim.
 
+### Password and signature tests — 2026-07-27
+
+Both are short, pure, and the kind of code that fails OPEN — a verifier that accidentally
+returns true is indistinguishable from one that works until someone forges a request. Neither
+had a single test.
+
+**One real defect found in `verifyPassword`.** It derived a key of length `expected.length`,
+taken from the stored value, and scrypt's final PBKDF2 step is prefix-stable — a 61-byte
+derivation is genuinely the first 61 bytes of the 64-byte one. So a stored digest that had been
+truncated still verified successfully.
+
+Worth stating precisely, because my first framing overstated it: this was **not an
+authentication bypass.** The correct password was still required, and a demonstration with a
+one-byte digest accepted 0 of 256 wrong passwords. The defect is that a damaged hash failed
+OPEN instead of closed, and that the work factor was negotiable by whatever happened to be in
+the column. `verifyPassword` now requires the digest to be exactly `KEY_LENGTH` and always
+derives at that length. All five existing hashes are 64 bytes, so nobody is locked out.
+
+Signature verification held up under everything: wrong secret, altered body, missing and
+malformed headers, expired and future timestamps, multiple `v1` values during a rotation
+(any match is valid — checking only the first would break every rotation), signatures of the
+wrong length (`timingSafeEqual` throws rather than returning false, so a truncated one must be
+caught before it reaches there), and a re-serialised body, which must fail because verification
+depends on the raw bytes.
+
+Two of my own test expectations were wrong and got corrected rather than the code: `needsRehash(null)`
+is correctly `false` — there is nothing to upgrade, and rehashing only happens after a
+successful login, which an account with no hash can never reach. And flipping the last base64
+character of a digest proves nothing, because trailing base64 characters can carry padding bits
+that decode to the same bytes.
+
 ## Backlog
 
 ### Multi-service bookings
