@@ -52,7 +52,7 @@ export async function startSubscription(): Promise<StripeRedirect> {
 
   // A provider still in setup returns to the medical-director step, not to Membership. Their
   // remaining steps are there, and Membership shows nothing they can act on yet.
-  const back = isOnboarding(user) ? '/app/onboarding/director' : '/app/membership'
+  const back = isOnboarding(user) ? '/onboarding/director' : '/app/membership'
 
   try {
     const session = await stripePost<{ url?: string }>(

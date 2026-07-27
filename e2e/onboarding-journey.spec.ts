@@ -89,7 +89,7 @@ test.describe('provider onboarding', () => {
     await page.getByRole('button', { name: 'Activate account' }).click()
 
     // --- Step 2: profile ------------------------------------------------------------------
-    await expect(page).toHaveURL(/\/app\/onboarding\/profile/)
+    await expect(page).toHaveURL(/\/onboarding\/profile/)
     await expect(page.getByText('Step 2 of 6')).toBeVisible()
     await expectAccessible(page, 'step 2 — profile')
 
@@ -99,7 +99,7 @@ test.describe('provider onboarding', () => {
     await page.getByRole('button', { name: /continue/i }).click()
 
     // --- Step 3: licence ------------------------------------------------------------------
-    await expect(page).toHaveURL(/\/app\/onboarding\/license/)
+    await expect(page).toHaveURL(/\/onboarding\/license/)
 
     await expectAccessible(page, 'step 3 — licence')
 
@@ -109,7 +109,7 @@ test.describe('provider onboarding', () => {
     await page.getByRole('button', { name: /continue to stripe/i }).click()
 
     // --- Step 4: Stripe -------------------------------------------------------------------
-    await expect(page).toHaveURL(/\/app\/onboarding\/stripe/)
+    await expect(page).toHaveURL(/\/onboarding\/stripe/)
 
     // Stripe's hosted onboarding is not automated here — it is Stripe's form, not this app's,
     // and driving it would test their product. What IS this app's logic is what happens when a
@@ -127,7 +127,7 @@ test.describe('provider onboarding', () => {
     await page.getByRole('button', { name: 'Next step' }).click()
 
     // --- Step 5: medical director ---------------------------------------------------------
-    await expect(page).toHaveURL(/\/app\/onboarding\/director/)
+    await expect(page).toHaveURL(/\/onboarding\/director/)
 
     // The own-director path, so a test run never opens a Stripe subscription.
     await page.getByRole('button', { name: /use my own director/i }).click()
@@ -136,7 +136,7 @@ test.describe('provider onboarding', () => {
     await page.getByRole('button', { name: /continue to services/i }).click()
 
     // --- Step 6: services -----------------------------------------------------------------
-    await expect(page).toHaveURL(/\/app\/onboarding\/services/)
+    await expect(page).toHaveURL(/\/onboarding\/services/)
 
     // Nothing selected means nothing to sell; the button stays disabled rather than failing on
     // submit.
@@ -152,7 +152,7 @@ test.describe('provider onboarding', () => {
     await finish.click()
 
     // --- Done -----------------------------------------------------------------------------
-    await expect(page).toHaveURL(/\/app\/onboarding\/done/)
+    await expect(page).toHaveURL(/\/onboarding\/done/)
     await expect(page.getByRole('heading', { name: /all set/i })).toBeVisible()
 
     // The point of that screen: finishing setup is not the same as being cleared to practise.
@@ -191,7 +191,7 @@ test.describe('provider onboarding', () => {
     // --- And setup does not re-open -------------------------------------------------------
     // Someone who bookmarked step 2 partway through must not be able to walk back in from a
     // stale tab and rewrite their whole service menu.
-    await page.goto('/app/onboarding/profile')
+    await page.goto('/onboarding/profile')
     await expect(page).toHaveURL(/\/app\/dashboard/)
   })
 

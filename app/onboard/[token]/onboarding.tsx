@@ -140,7 +140,7 @@ export function Onboarding({ token, email }: { token: string; email: string }) {
         return
       }
       // Signed in already — straight on to the profile step.
-      router.push('/app/onboarding/profile')
+      router.push('/onboarding/profile')
     })
   }
 

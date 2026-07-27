@@ -14,7 +14,10 @@ import { SESSION_COOKIE } from '@/lib/auth/session'
 // Its job is purely to save a round trip: send signed-out users to /login before rendering a
 // page they cannot see, and keep signed-in users off the login form.
 
-const PROTECTED_PREFIX = '/app'
+// `/onboarding` is a sibling of `/app`, not a child, so it needs listing separately — it is
+// signed-in but deliberately outside the app shell. Missing it would not be a hole (the DAL
+// still rejects the request) but it would cost a wasted render on every signed-out hit.
+const PROTECTED_PREFIXES = ['/app', '/onboarding']
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
@@ -31,7 +34,7 @@ export function proxy(request: NextRequest) {
   //
   // Redirecting an already-signed-in user away from /login now happens in the login page
   // itself, where the session has actually been verified.
-  if (pathname.startsWith(PROTECTED_PREFIX) && !hasSessionCookie) {
+  if (PROTECTED_PREFIXES.some((prefix) => pathname.startsWith(prefix)) && !hasSessionCookie) {
     const url = new URL('/login', request.url)
     // Preserve where they were going so login can return them there.
     url.searchParams.set('next', pathname)

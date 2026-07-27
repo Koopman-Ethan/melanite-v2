@@ -33,7 +33,7 @@ export async function requireOnboardingStep(slug: OnboardingSlug) {
     .limit(1)
 
   const step = row?.step ?? 1
-  if (!canOpenStep(slug, step)) redirect(`/app/onboarding/${nextStepSlug(step)}`)
+  if (!canOpenStep(slug, step)) redirect(`/onboarding/${nextStepSlug(step)}`)
 
   return user
 }

@@ -53,7 +53,7 @@ export async function saveProfile(input: {
     credentials: input.credentials.trim() || null,
   })
 
-  redirect('/app/onboarding/license')
+  redirect('/onboarding/license')
 }
 
 /** Step 3 — licence and insurance.
@@ -92,7 +92,7 @@ export async function saveLicense(input: {
     malpracticeInsurance: input.malpracticeInsurance.trim() || null,
   })
 
-  redirect('/app/onboarding/stripe')
+  redirect('/onboarding/stripe')
 }
 
 /** Step 4 — acknowledges that Stripe onboarding has been started or finished.
@@ -103,7 +103,7 @@ export async function saveLicense(input: {
 export async function completeStripeStep(): Promise<StepState> {
   const user = await requireProvider()
   await completeStep(user.id, 4, {})
-  redirect('/app/onboarding/director')
+  redirect('/onboarding/director')
 }
 
 /** Step 5 — medical director.
@@ -119,7 +119,7 @@ export async function saveDirectorChoice(choice: 'melanite' | 'own'): Promise<St
   if (choice !== 'melanite' && choice !== 'own') return { error: 'Choose an option to continue.' }
 
   await completeStep(user.id, 5, { medicalDirectorType: choice })
-  redirect('/app/onboarding/services')
+  redirect('/onboarding/services')
 }
 
 /** Step 6 — the services offered, and the last step.
@@ -160,11 +160,11 @@ export async function saveServices(
 
   await completeStep(user.id, 6, { status: 'active' as const })
 
-  redirect('/app/onboarding/done')
+  redirect('/onboarding/done')
 }
 
 /** Sends a provider back a step without losing what they have entered. */
 export async function goBack(currentStep: number): Promise<void> {
   await requireProvider()
-  redirect(`/app/onboarding/${nextStepSlug(Math.max(currentStep - 2, 1))}`)
+  redirect(`/onboarding/${nextStepSlug(Math.max(currentStep - 2, 1))}`)
 }

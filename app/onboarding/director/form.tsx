@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Notice } from '@/components/ui/field'
 import { cn } from '@/lib/cn'
 
-import { startSubscription } from '../../membership/actions'
+import { startSubscription } from '@/app/app/membership/actions'
 import { saveDirectorChoice } from '../actions'
 
 const CONTACT = 'melanitelasersuite@gmail.com'

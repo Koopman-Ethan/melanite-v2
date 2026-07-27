@@ -1,8 +1,14 @@
 import { Brand } from '@/components/app-shell/brand'
 import { requireProvider } from '@/lib/auth/dal'
 
-/** Setup shell. Deliberately outside the app sidebar — a provider mid-setup has nothing to
- *  navigate to yet, and showing them Earnings before they can take a booking is noise.
+/** Setup shell.
+ *
+ *  These routes live at `/onboarding/*`, a SIBLING of `/app`, and the location is the whole
+ *  point. Nested under `/app` they inherited the signed-in app layout, so a provider halfway
+ *  through setup got the full sidebar — Earnings, Packages, Book Laser Time, none of which they
+ *  can use yet — a second Melanite logo above the first, and a clipped identity block. The
+ *  comment here claimed they were outside the app shell; being one directory further out is
+ *  what actually makes that true.
  *
  *  The "already finished, go away" guard lives on the individual steps rather than here: the
  *  final screen is reached AFTER status flips to active, so a layout-level guard would bounce

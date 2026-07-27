@@ -91,7 +91,7 @@ export async function startStripeOnboarding(): Promise<StripeRedirect> {
     // Where Stripe sends them back to. A provider still in setup goes back to the SETUP step,
     // not to Account — landing them in the full app halfway through the flow, with their
     // progress still recorded as the previous step, is how someone gets stranded and gives up.
-    const back = isOnboarding(user) ? '/app/onboarding/stripe' : '/app/account'
+    const back = isOnboarding(user) ? '/onboarding/stripe' : '/app/account'
 
     // Deliberately no idempotency key: account links are single-use and expire in minutes, so
     // replaying a stale one for 24 hours would hand back a dead link.

@@ -5,7 +5,7 @@ import { useState, useTransition } from 'react'
 import { Button } from '@/components/ui/button'
 import { Notice } from '@/components/ui/field'
 
-import { startStripeOnboarding } from '../../account/stripe-actions'
+import { startStripeOnboarding } from '@/app/app/account/stripe-actions'
 import { completeStripeStep } from '../actions'
 
 export function StripeStepForm({

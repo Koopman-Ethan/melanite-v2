@@ -21,5 +21,5 @@ export default async function OnboardingIndex() {
     .where(eq(providers.id, user.id))
     .limit(1)
 
-  redirect(`/app/onboarding/${nextStepSlug(row?.step ?? 1)}`)
+  redirect(`/onboarding/${nextStepSlug(row?.step ?? 1)}`)
 }
