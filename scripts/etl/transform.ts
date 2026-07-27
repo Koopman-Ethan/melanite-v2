@@ -475,6 +475,7 @@ export function ledgerFromStripeBookingGaps(
   tipByCheckoutLinkId: Map<string, number>,
   bookingClientId: Map<string, string>,
   bookingServiceId: Map<string, string>,
+  bookingProviderId: Map<string, string>,
   providerByStripeAccount: Map<string, string>,
 ): LedgerRow[] {
   const rows: LedgerRow[] = []
@@ -492,9 +493,24 @@ export function ledgerFromStripeBookingGaps(
     const total = pi.amount_received / 100
     const cut = (pi.application_fee_amount ?? 0) / 100
 
-    const providerId = pi.transfer_data?.destination
-      ? (providerByStripeAccount.get(pi.transfer_data.destination) ?? null)
-      : null
+    // Resolve the provider from the BOOKING, not from the Connect account id.
+    //
+    // transfer_data.destination is a Stripe account that may not match any imported
+    // provider's stripe_account_id — a provider can reconnect Stripe, or the account can
+    // predate the record. The payment intent carries booking_id in its metadata and the
+    // booking always knows its provider, so that is the reliable key. The Connect account is
+    // kept only as a fallback.
+    const providerId =
+      bookingProviderId.get(bookingId) ??
+      (pi.transfer_data?.destination
+        ? (providerByStripeAccount.get(pi.transfer_data.destination) ?? null)
+        : null)
+
+    // A null provider here is not a bug to crash on: at least one live payment refers to a
+    // booking that has since been DELETED from Xano, which enforces no referential integrity.
+    // The money is real, so it belongs in the ledger — dropping it would understate platform
+    // revenue. It simply cannot be attributed to anyone, and the caller reports that loudly
+    // rather than letting it pass as an ordinary row.
 
     rows.push({
       createdAt: new Date(pi.created * 1000),
@@ -530,6 +546,9 @@ export function ledgerFromStripeRefunds(
   refunds: StripeRefund[],
   piIndex: Map<string, StripePaymentIntent>,
   alreadyRecorded: Set<string>,
+  bookingProviderId: Map<string, string> = new Map(),
+  bookingServiceId: Map<string, string> = new Map(),
+  bookingClientId: Map<string, string> = new Map(),
 ): LedgerRow[] {
   const rows: LedgerRow[] = []
 
@@ -561,14 +580,25 @@ export function ledgerFromStripeRefunds(
       )
     }
 
+    const subjectId =
+      pi.metadata?.booking_id ?? pi.metadata?.training_enrollment_id ?? r.payment_intent
+
+    // booking_payment metadata carries booking_id but NOT provider_id — only room_rental
+    // does. Reading provider_id off every intent leaves booking refunds unattributed, so the
+    // booking is the source of truth wherever there is one.
+    const refundProviderId =
+      bookingProviderId.get(subjectId) ?? pi.metadata?.provider_id ?? null
+
     rows.push({
       createdAt: new Date(r.created * 1000),
       source: m.source,
       payer: m.payer,
       entryType: 'refund',
       subjectType: m.subjectType,
-      subjectId: pi.metadata?.booking_id ?? pi.metadata?.training_enrollment_id ?? r.payment_intent,
-      providerId: pi.metadata?.provider_id ?? null,
+      subjectId,
+      providerId: refundProviderId,
+      clientId: bookingClientId.get(subjectId) ?? null,
+      serviceId: bookingServiceId.get(subjectId) ?? null,
       grossAmount: negate(amount),
       tipAmount: '0.00',
       providerPayout: '0.00',

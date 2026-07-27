@@ -211,6 +211,9 @@ async function main() {
   const bookingClientId = new Map(
     bookingRows.filter((b) => b.clientId).map((b) => [b.id as string, b.clientId as string]),
   )
+  const bookingProviderId = new Map(
+    bookingRows.map((b) => [b.id as string, b.providerId as string]),
+  )
   const piIndex = new Map(sPaymentIntents.map((pi) => [pi.id, pi]))
 
   // Payment intents whose refunds a v1 webhook already recorded — do not rebuild these
@@ -239,13 +242,21 @@ async function main() {
       tipByCheckoutLinkId,
       bookingClientId,
       bookingServiceId,
+      bookingProviderId,
       providerByStripeAccount,
     ),
     ...T.ledgerFromPackageTransactions(xPackageTransactions, new Map()),
     ...T.ledgerFromRoomTransactions(xRoomTransactions),
     ...T.ledgerFromStripeInvoices(sInvoices, new Map()),
     ...T.ledgerFromTrainingEnrollments(xEnrollments, piIndex),
-    ...T.ledgerFromStripeRefunds(sRefunds, piIndex, alreadyRecorded),
+    ...T.ledgerFromStripeRefunds(
+      sRefunds,
+      piIndex,
+      alreadyRecorded,
+      bookingProviderId,
+      bookingServiceId,
+      bookingClientId,
+    ),
   ]
 
   // A money row whose payment intent does not exist in LIVE Stripe is not real money.
@@ -276,6 +287,23 @@ async function main() {
       console.log(`    ${r.source} ${r.entryType} cut=${r.melaniteCut} pi=${r.stripePaymentIntentId}`)
     }
     console.log('    Expected for known test records; investigate anything unfamiliar.\n')
+  }
+
+  // Money that reached Stripe but cannot be tied to a provider — almost always a booking that
+  // was deleted from Xano after the payment. Platform revenue still counts it; provider
+  // earnings cannot. Reported every run so it stays visible rather than becoming background.
+  const unattributed = ledger.filter((r) => !r.providerId && r.source !== 'training')
+  if (unattributed.length) {
+    const cut = unattributed.reduce((s, r) => s + Number(r.melaniteCut ?? 0), 0)
+    const payout = unattributed.reduce((s, r) => s + Number(r.providerPayout ?? 0), 0)
+    console.log(
+      `\n  UNATTRIBUTED: ${unattributed.length} ledger row(s) with no provider ` +
+        `(${cut.toFixed(2)} platform cut, ${payout.toFixed(2)} provider payout):`,
+    )
+    for (const r of unattributed) {
+      console.log(`    ${r.source} ${r.entryType} subject=${r.subjectId} pi=${r.stripePaymentIntentId}`)
+    }
+    console.log('    Usually a booking deleted from Xano after the payment settled.\n')
   }
 
   if (ledger.length) await db.insert(schema.ledgerEntries).values(ledger)
