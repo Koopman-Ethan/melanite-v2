@@ -3,6 +3,7 @@ import 'server-only'
 import { cache } from 'react'
 import { redirect } from 'next/navigation'
 
+import { isAdmin } from './roles'
 import { getSessionUser, type SessionUser } from './session'
 
 // The Data Access Layer. Per the Next 16 authentication guide, `proxy.ts` performs only an
@@ -35,11 +36,9 @@ export async function requireProvider(): Promise<SessionUser> {
  *  ones in different places; v2 has only `role`. */
 export async function requireAdmin(): Promise<SessionUser> {
   const user = await requireProvider()
-  if (!ADMIN_ROLES.has(user.role)) redirect('/app')
+  if (!isAdmin(user.role)) redirect('/app')
   return user
 }
-
-const ADMIN_ROLES = new Set<SessionUser['role']>(['platform_owner', 'developer'])
 
 /** THREE booking gates, not two. v1 enforced them partly in page JS and partly per endpoint,
  *  with no single place that answered "may this provider book?" — which is how the licence

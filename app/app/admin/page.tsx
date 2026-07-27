@@ -32,6 +32,18 @@ export default async function AdminHome() {
         <div className="mt-4 text-sm text-gold">View the full breakdown →</div>
       </Link>
 
+      <Link
+        href="/app/admin/tools"
+        className="block rounded-card border border-line bg-surface p-6 transition-colors hover:border-line-strong"
+      >
+        <div className="text-xs uppercase tracking-wide text-ink-muted">Tools</div>
+        <div className="mt-1.5 text-sm text-ink-secondary">
+          Record a Cherry, Groupon, cash or check payment · log medical direction paid directly ·
+          add an appointment on a provider&rsquo;s behalf
+        </div>
+        <div className="mt-4 text-sm text-gold">Open tools →</div>
+      </Link>
+
       {/* v1's /app/admin carried the calendar, training links, training balances, room
           rentals, a cancellation queue and package sales in a single footer box. Those are
           distinct jobs and get distinct surfaces here — see Phase 6 in the migration plan. */}

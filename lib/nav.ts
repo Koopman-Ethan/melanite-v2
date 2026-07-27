@@ -1,3 +1,4 @@
+import { isAdmin } from '@/lib/auth/roles'
 import type { SessionUser } from '@/lib/auth/session'
 
 // The provider sidebar, ported from v1's nav wiring.
@@ -17,6 +18,10 @@ export interface NavItem {
   /** Hidden from admin-view roles. In v1 this was the BUG-15 HIDE array — an admin does not
    *  book, has no earnings, and holds no membership, so those surfaces are noise. */
   providerOnly?: boolean
+  /** Shown only to roles `requireAdmin()` actually admits. Gated on that same set rather than
+   *  on `isAdminView`, which is wider — a medical director sees the platform nav but would be
+   *  redirected straight back out of these. */
+  adminOnly?: boolean
 }
 
 /** Roles that see the platform rather than their own practice. Matches v1's "admin-view
@@ -46,15 +51,18 @@ const ITEMS: NavItem[] = [
   { label: 'Daily Room Rental', href: '/app/room-rental', providerOnly: true },
   { label: 'My Services', href: '/app/services', providerOnly: true },
   { label: 'Membership', href: '/app/membership', providerOnly: true },
+  { label: 'Revenue', href: '/app/admin/revenue', adminOnly: true },
+  { label: 'Tools', href: '/app/admin/tools', adminOnly: true },
   { label: 'Account', href: '/app/account' },
 ]
 
 export function navFor(user: SessionUser): NavItem[] {
   const adminView = isAdminView(user)
+  const admin = isAdmin(user.role)
 
-  return ITEMS.filter((item) => !(item.providerOnly && adminView)).map((item) =>
-    item.label === 'Dashboard' ? { ...item, href: dashboardHref(user) } : item,
-  )
+  return ITEMS.filter(
+    (item) => !(item.providerOnly && adminView) && !(item.adminOnly && !admin),
+  ).map((item) => (item.label === 'Dashboard' ? { ...item, href: dashboardHref(user) } : item))
 }
 
 /** Marks the active item. Exact match for `/app/dashboard` and `/app/admin` so that a nested
