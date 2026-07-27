@@ -5,8 +5,9 @@ import { headers } from 'next/headers'
 
 import { requireProvider } from '@/lib/auth/dal'
 import { db } from '@/lib/db'
-import { platformSettings, providers } from '@/lib/db/schema'
+import { providers } from '@/lib/db/schema'
 import { friendlyStripeError, stripePost } from '@/lib/stripe/client'
+import { medicalDirectorPriceId, modeMismatch } from '@/lib/stripe/config'
 
 export interface StripeRedirect {
   url?: string
@@ -36,15 +37,15 @@ export async function startSubscription(): Promise<StripeRedirect> {
     return { error: 'You already have a medical director subscription.' }
   }
 
-  const [settings] = await db
-    .select({ priceId: platformSettings.medicalDirectorPriceId })
-    .from(platformSettings)
-    .where(eq(platformSettings.id, 1))
-    .limit(1)
-
-  if (!settings?.priceId) {
+  const priceId = await medicalDirectorPriceId()
+  if (!priceId) {
     return { error: 'The medical director plan isn’t configured yet. Contact Melanite.' }
   }
+
+  // A test key with a live price (or the reverse) fails at Stripe with an opaque "No such
+  // price", which is a poor place to discover a config mistake. Say it here instead.
+  const mismatch = modeMismatch(priceId)
+  if (mismatch) console.warn(`[membership] ${mismatch}`)
 
   const [provider] = await db
     .select({
@@ -62,7 +63,7 @@ export async function startSubscription(): Promise<StripeRedirect> {
       '/checkout/sessions',
       {
         mode: 'subscription',
-        line_items: [{ price: settings.priceId, quantity: 1 }],
+        line_items: [{ price: priceId, quantity: 1 }],
         success_url: `${base}/app/membership?subscribed=1`,
         cancel_url: `${base}/app/membership`,
         // The webhook has no other way to know whose subscription this is. Set on BOTH the
