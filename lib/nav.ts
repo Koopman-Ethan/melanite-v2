@@ -52,6 +52,7 @@ const ITEMS: NavItem[] = [
   { label: 'My Services', href: '/app/services', providerOnly: true },
   { label: 'Membership', href: '/app/membership', providerOnly: true },
   { label: 'Calendar', href: '/app/admin/calendar', adminOnly: true },
+  { label: 'Providers', href: '/app/admin/providers', adminOnly: true },
   { label: 'Training', href: '/app/admin/training', adminOnly: true },
   { label: 'Queue', href: '/app/admin/queue', adminOnly: true },
   { label: 'Revenue', href: '/app/admin/revenue', adminOnly: true },
