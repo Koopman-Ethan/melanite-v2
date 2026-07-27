@@ -25,19 +25,19 @@ export default async function ResetPasswordPage({
           <>
             <div className="mb-8 text-center">
               <h1 className="text-2xl font-semibold tracking-tight">Set a new password</h1>
-              <p className="mt-1 text-sm opacity-60">for {owner.email}</p>
+              <p className="mt-1 text-sm text-ink-muted">for {owner.email}</p>
             </div>
             <ResetForm token={token!} />
           </>
         ) : (
           <div className="space-y-4 text-center">
             <h1 className="text-2xl font-semibold tracking-tight">Link expired</h1>
-            <p className="text-sm opacity-70">
+            <p className="text-sm text-ink-muted">
               Password reset links last one hour and can only be used once.
             </p>
             <Link
               href="/forgot-password"
-              className="inline-block rounded-md bg-[#B8965A] px-4 py-2.5 text-sm font-medium text-white transition-opacity hover:opacity-90"
+              className="inline-block rounded-control bg-gold px-[18px] py-3 text-[13px] font-bold tracking-[0.3px] text-gold-ink transition-all hover:bg-gold-hover"
             >
               Request a new link
             </Link>

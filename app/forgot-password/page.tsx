@@ -11,13 +11,13 @@ export default function ForgotPasswordPage() {
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
           <h1 className="text-2xl font-semibold tracking-tight">Reset your password</h1>
-          <p className="mt-1 text-sm opacity-60">
+          <p className="mt-1 text-sm text-ink-muted">
             We&rsquo;ll email you a link to set a new one.
           </p>
         </div>
         <ForgotForm />
         <p className="mt-6 text-center text-sm">
-          <Link href="/login" className="opacity-60 underline-offset-4 hover:underline">
+          <Link href="/login" className="text-ink-muted underline-offset-4 hover:text-ink-secondary hover:underline">
             Back to sign in
           </Link>
         </p>

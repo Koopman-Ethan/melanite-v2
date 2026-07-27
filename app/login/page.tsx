@@ -24,11 +24,12 @@ export default async function LoginPage({
     <main className="flex min-h-full flex-1 items-center justify-center px-6 py-16">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
-          <h1 className="text-2xl font-semibold tracking-tight">Melanite Laser Suite</h1>
-          <p className="mt-1 text-sm opacity-60">Sign in to your provider account</p>
+          <h1 className="text-[13px] font-bold tracking-[3px] text-ink">MELANITE</h1>
+          <p className="mt-0.5 text-[10px] tracking-[2px] text-gold">LASER SUITE</p>
+          <p className="mt-1 text-sm text-ink-muted">Sign in to your provider account</p>
         </div>
         {reset && (
-          <p className="mb-4 rounded-md border border-[#7fa87f]/30 bg-[#7fa87f]/10 px-3 py-2.5 text-sm">
+          <p className="mb-4 rounded-field border border-success/30 bg-success/10 px-3 py-2.5 text-sm text-ink-secondary">
             Password updated. Sign in with your new password.
           </p>
         )}

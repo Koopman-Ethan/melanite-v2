@@ -1,26 +1,75 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* Melanite design tokens.
+ *
+ * Derived from the v1 Webflow build rather than invented: the palette was sampled across the
+ * May mockups and the July production page code and held constant between them. Gold
+ * #b8965a is the brand accent by a wide margin — 337 occurrences against the next colour's
+ * 200 — and the app is dark-first, not light with a dark mode bolted on. The scaffold's
+ * light-first defaults were the opposite of the spec.
+ *
+ * This is a rebuild in Tailwind, not a port of v1's CSS. The values carry over; the `m-*`
+ * class library does not.
+ */
+
+@theme {
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  /* Brand. `gold-ink` is what sits ON gold — near-black, never white. */
+  --color-gold: #b8965a;
+  --color-gold-hover: #d4aa6a;
+  --color-gold-dim: #8a6f3f;
+  --color-gold-ink: #111111;
+
+  /* Surface ramp, darkest first. `canvas` is the page, `raised` a card, `overlay` a modal
+   * or popover sitting above a card. */
+  --color-canvas: #101010;
+  --color-surface: #141414;
+  --color-raised: #1a1a1a;
+  --color-overlay: #1f1f1f;
+  --color-line: #2a2a2a;
+  --color-line-strong: #3a3a3a;
+
+  /* Text ramp. `ink` for content, `ink-muted` for labels, `ink-faint` for metadata. */
+  --color-ink: #ffffff;
+  --color-ink-secondary: #dddddd;
+  --color-ink-muted: #9a9a9a;
+  --color-ink-faint: #666666;
+
+  /* Severity palette, carried from v1. */
+  --color-success: #4c9a5e;
+  --color-info: #64b5f6;
+  --color-warning: #d4a04e;
+  --color-danger: #c96565;
+  --color-critical: #c34848;
+
+  --radius-field: 6px;
+  --radius-control: 7px;
+  --radius-card: 10px;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  html {
+    /* Tells the browser to render form controls and scrollbars dark, which no amount of
+     * class-level styling can do on its own. */
+    color-scheme: dark;
   }
-}
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* One gold focus ring for the whole app, so keyboard navigation stays visible against the
+   * dark surfaces without every component restating it. */
+  :focus-visible {
+    outline: 2px solid var(--color-gold);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background-color: color-mix(in oklab, var(--color-gold) 35%, transparent);
+  }
 }

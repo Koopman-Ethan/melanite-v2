@@ -18,11 +18,11 @@ const SOURCE_LABELS: Record<string, string> = {
 }
 
 const SOURCE_COLORS: Record<string, string> = {
-  booking: 'bg-[#B8965A]',
-  package: 'bg-[#5a8ec7]',
-  room_rental: 'bg-[#d4a04e]',
-  membership: 'bg-[#7fa87f]',
-  training: 'bg-[#a87f9e]',
+  booking: 'bg-gold',
+  package: 'bg-info',
+  room_rental: 'bg-warning',
+  membership: 'bg-success',
+  training: 'bg-gold-dim',
 }
 
 const usd = (value: string | number) =>
@@ -39,10 +39,10 @@ const monthLabel = (ym: string) => {
 
 function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
-    <div className="rounded-lg border border-black/10 dark:border-white/15 p-5">
-      <div className="text-xs uppercase tracking-wide opacity-60">{label}</div>
+    <div className="rounded-card border border-line p-5">
+      <div className="text-xs uppercase tracking-wide text-ink-muted">{label}</div>
       <div className="mt-2 text-3xl font-semibold tabular-nums">{value}</div>
-      {hint && <div className="mt-1 text-xs opacity-60">{hint}</div>}
+      {hint && <div className="mt-1 text-xs text-ink-faint">{hint}</div>}
     </div>
   )
 }
@@ -70,16 +70,16 @@ export default async function AdminRevenuePage() {
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold">Revenue</h1>
-          <p className="mt-1 text-sm opacity-70">Every revenue stream, from one ledger.</p>
+          <p className="mt-1 text-sm text-ink-muted">Every revenue stream, from one ledger.</p>
         </div>
         <div className="flex items-center gap-3 text-sm">
-          <span className="opacity-60">
+          <span className="text-ink-muted">
             {user.firstName} {user.lastName}
           </span>
           <form action={logout}>
             <button
               type="submit"
-              className="rounded-md border border-black/15 px-3 py-1.5 text-xs transition-opacity hover:opacity-70 dark:border-white/20"
+              className="rounded-md border border-line-strong px-3 py-1.5 text-xs text-ink-secondary transition-colors hover:bg-overlay"
             >
               Sign out
             </button>
@@ -95,8 +95,8 @@ export default async function AdminRevenuePage() {
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-sm font-medium uppercase tracking-wide opacity-60">By source</h2>
-        <div className="rounded-lg border border-black/10 dark:border-white/15 divide-y divide-black/10 dark:divide-white/10">
+        <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">By source</h2>
+        <div className="rounded-card border border-line divide-y divide-line">
           {bySource.map((row) => {
             const revenue = Number(row.revenue)
             const share = lifetime > 0 ? (revenue / lifetime) * 100 : 0
@@ -113,13 +113,13 @@ export default async function AdminRevenuePage() {
                     </span>
                     <span className="tabular-nums text-sm font-semibold">{usd(row.revenue)}</span>
                   </div>
-                  <div className="mt-2 h-1.5 rounded-full bg-black/10 dark:bg-white/10">
+                  <div className="mt-2 h-1.5 rounded-full bg-line">
                     <div
                       className={`h-full rounded-full ${SOURCE_COLORS[row.source] ?? 'bg-neutral-400'}`}
                       style={{ width: `${Math.max(share, 0)}%` }}
                     />
                   </div>
-                  <div className="mt-1.5 flex gap-4 text-xs opacity-60 tabular-nums">
+                  <div className="mt-1.5 flex gap-4 text-xs text-ink-faint tabular-nums">
                     <span>{share.toFixed(1)}% of revenue</span>
                     <span>{usd(row.gross)} gross</span>
                     <span>
@@ -134,24 +134,24 @@ export default async function AdminRevenuePage() {
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-sm font-medium uppercase tracking-wide opacity-60">
+        <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">
           By payment method
         </h2>
         <div className="grid gap-3 sm:grid-cols-3">
           {byMethod.map((row) => (
             <div
               key={row.method}
-              className="rounded-lg border border-black/10 dark:border-white/15 p-4"
+              className="rounded-card border border-line p-4"
             >
-              <div className="text-xs opacity-60">{METHOD_LABELS[row.method] ?? row.method}</div>
+              <div className="text-xs text-ink-muted">{METHOD_LABELS[row.method] ?? row.method}</div>
               <div className="mt-1 text-xl font-semibold tabular-nums">{usd(row.revenue)}</div>
-              <div className="mt-0.5 text-xs opacity-60 tabular-nums">
+              <div className="mt-0.5 text-xs text-ink-faint tabular-nums">
                 {row.entries} {row.entries === 1 ? 'entry' : 'entries'}
               </div>
             </div>
           ))}
         </div>
-        <p className="text-xs opacity-60">
+        <p className="text-xs text-ink-faint">
           Only Stripe figures reconcile automatically. Cherry, Groupon, cash and check are
           recorded by hand — they are real revenue that never produced a Stripe charge, so they
           are reported here but cannot be verified against Stripe.
@@ -160,19 +160,19 @@ export default async function AdminRevenuePage() {
 
       {series.length > 0 && (
         <section className="space-y-3">
-          <h2 className="text-sm font-medium uppercase tracking-wide opacity-60">By month</h2>
-          <div className="rounded-lg border border-black/10 dark:border-white/15 p-5">
+          <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">By month</h2>
+          <div className="rounded-card border border-line p-5">
             <div className="flex h-40 items-end gap-2">
               {series.map((m) => (
                 <div key={m.month} className="flex flex-1 flex-col items-center gap-2">
                   <div className="flex w-full flex-1 items-end">
                     <div
-                      className="w-full rounded-t bg-[#B8965A]"
+                      className="w-full rounded-t bg-gold"
                       style={{ height: `${(Number(m.revenue) / peakMonth) * 100}%` }}
                       title={`${monthLabel(m.month)} — ${usd(m.revenue)}`}
                     />
                   </div>
-                  <span className="text-[10px] opacity-60">{monthLabel(m.month)}</span>
+                  <span className="text-[10px] text-ink-faint">{monthLabel(m.month)}</span>
                 </div>
               ))}
             </div>
@@ -182,22 +182,22 @@ export default async function AdminRevenuePage() {
 
       <div className="grid gap-6 lg:grid-cols-2">
         <section className="space-y-3">
-          <h2 className="text-sm font-medium uppercase tracking-wide opacity-60">By provider</h2>
-          <div className="overflow-x-auto rounded-lg border border-black/10 dark:border-white/15">
+          <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">By provider</h2>
+          <div className="overflow-x-auto rounded-card border border-line">
             <table className="w-full text-sm">
-              <thead className="text-xs uppercase tracking-wide opacity-60">
-                <tr className="border-b border-black/10 dark:border-white/15">
+              <thead className="text-xs uppercase tracking-wide text-ink-muted">
+                <tr className="border-b border-line">
                   <th className="p-3 text-left font-medium">Provider</th>
                   <th className="p-3 text-right font-medium">Revenue</th>
                   <th className="p-3 text-right font-medium">Payout</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-black/5 dark:divide-white/10">
+              <tbody className="divide-y divide-line">
                 {byProvider.map((row) => (
                   <tr key={row.providerId ?? 'unattributed'}>
                     <td className="p-3">{row.providerName}</td>
                     <td className="p-3 text-right tabular-nums">{usd(row.revenue)}</td>
-                    <td className="p-3 text-right tabular-nums opacity-70">{usd(row.payouts)}</td>
+                    <td className="p-3 text-right tabular-nums text-ink-muted">{usd(row.payouts)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -206,20 +206,20 @@ export default async function AdminRevenuePage() {
         </section>
 
         <section className="space-y-3">
-          <h2 className="text-sm font-medium uppercase tracking-wide opacity-60">By service</h2>
-          <div className="overflow-x-auto rounded-lg border border-black/10 dark:border-white/15">
+          <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">By service</h2>
+          <div className="overflow-x-auto rounded-card border border-line">
             <table className="w-full text-sm">
-              <thead className="text-xs uppercase tracking-wide opacity-60">
-                <tr className="border-b border-black/10 dark:border-white/15">
+              <thead className="text-xs uppercase tracking-wide text-ink-muted">
+                <tr className="border-b border-line">
                   <th className="p-3 text-left font-medium">Service</th>
                   <th className="p-3 text-right font-medium">Revenue</th>
                   <th className="p-3 text-right font-medium">Sessions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-black/5 dark:divide-white/10">
+              <tbody className="divide-y divide-line">
                 {byService.length === 0 && (
                   <tr>
-                    <td colSpan={3} className="p-3 text-xs opacity-60">
+                    <td colSpan={3} className="p-3 text-xs text-ink-faint">
                       No service-attributed revenue yet.
                     </td>
                   </tr>
@@ -228,13 +228,13 @@ export default async function AdminRevenuePage() {
                   <tr key={row.serviceId}>
                     <td className="p-3">{row.serviceName}</td>
                     <td className="p-3 text-right tabular-nums">{usd(row.revenue)}</td>
-                    <td className="p-3 text-right tabular-nums opacity-70">{row.entries}</td>
+                    <td className="p-3 text-right tabular-nums text-ink-muted">{row.entries}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          <p className="text-xs opacity-60">
+          <p className="text-xs text-ink-faint">
             Only bookings and packages attribute to a service. Memberships, room rental and
             training have none by nature, so they are excluded rather than bucketed as unknown.
           </p>
@@ -242,11 +242,11 @@ export default async function AdminRevenuePage() {
       </div>
 
       <section className="space-y-3">
-        <h2 className="text-sm font-medium uppercase tracking-wide opacity-60">Recent entries</h2>
-        <div className="overflow-x-auto rounded-lg border border-black/10 dark:border-white/15">
+        <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">Recent entries</h2>
+        <div className="overflow-x-auto rounded-card border border-line">
           <table className="w-full text-sm">
-            <thead className="text-xs uppercase tracking-wide opacity-60">
-              <tr className="border-b border-black/10 dark:border-white/15">
+            <thead className="text-xs uppercase tracking-wide text-ink-muted">
+              <tr className="border-b border-line">
                 <th className="p-3 text-left font-medium">Date</th>
                 <th className="p-3 text-left font-medium">Source</th>
                 <th className="p-3 text-left font-medium">Provider</th>
@@ -254,7 +254,7 @@ export default async function AdminRevenuePage() {
                 <th className="p-3 text-right font-medium">Platform</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-black/5 dark:divide-white/10">
+            <tbody className="divide-y divide-line">
               {recent.map((entry) => (
                 <tr key={entry.id} className={entry.entryType === 'refund' ? 'opacity-70' : undefined}>
                   <td className="p-3 whitespace-nowrap tabular-nums">
@@ -269,12 +269,12 @@ export default async function AdminRevenuePage() {
                       {SOURCE_LABELS[entry.source] ?? entry.source}
                     </span>
                     {entry.entryType === 'refund' && (
-                      <span className="ml-2 rounded bg-[#c75c5c]/15 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[#c75c5c]">
+                      <span className="ml-2 rounded bg-danger/15 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-danger">
                         refund
                       </span>
                     )}
                   </td>
-                  <td className="p-3 opacity-70">{entry.providerName ?? '—'}</td>
+                  <td className="p-3 text-ink-muted">{entry.providerName ?? '—'}</td>
                   <td className="p-3 text-right tabular-nums">{usd(entry.gross)}</td>
                   <td className="p-3 text-right tabular-nums font-medium">{usd(entry.melaniteCut)}</td>
                 </tr>
