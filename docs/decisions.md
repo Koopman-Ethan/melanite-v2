@@ -168,6 +168,58 @@ Trade-off: without a transaction, a failure halfway leaves the schema partly cha
 statement is logged as it runs, and a migration is recorded only after all of its statements
 succeed. For a migration with no enum changes, `db:migrate:kit` is the safer of the two.
 
+### Client checkout `/pay/*` — 2026-07-27
+
+Inline Stripe Elements on a Melanite-branded page, not a hosted redirect. Every other Stripe
+flow in v2 (membership, room rental) redirects, and those stay as they are — they are
+provider-facing. This is the only page a paying client sees, and four things pushed it the
+other way:
+
+1. **The card mandate is the point.** Storing a card to charge someone who is not present makes
+   the consent wording a legal artifact: it has to name the fees, sit next to the pay button,
+   and be recorded with a version stamp. Stripe's hosted page offers a constrained
+   `terms_of_service_acceptance` slot and little control.
+2. **A client following a texted link should land somewhere recognisably Melanite.**
+3. **Tips only work inline.** A hosted session fixes the amount at creation, so the client
+   cannot reconsider the tip on the payment screen without backing out.
+4. **Cherry belongs beside "pay by card"**, not behind a redirect.
+
+PCI position is unchanged: Elements iframes the card fields from Stripe, so no card number
+touches this origin. Both approaches are SAQ-A.
+
+**Card on file.** `setup_future_usage: 'off_session'` saves the card to a Customer on the
+PLATFORM account — not the provider's connected account, which would be unusable for the one
+thing it was collected for. `clients.cardOnFileConsentAt` + `cardOnFileConsentVersion` record
+what was agreed and when; `chargeBookingFee` refuses to charge a card that has no consent row,
+whatever Stripe would technically allow.
+
+**Fees are split evenly** via `feeProviderSharePct`, deliberately separate from
+`providerSharePct`. A missed appointment costs the provider their chair time and Melanite the
+laser slot; neither absorbs it alone, and a fee is not a service, so the two rates should be
+able to diverge. `no_show_fee` and `late_cancellation_fee` are their own ledger entry types —
+Keoni needs penalty income separately from service income, and a free-text note is not
+something you can group by. v1 charged neither: no-show fees were "deferred to Phase 3" and it
+saved no card to charge.
+
+**Charging is opt-in per action.** `markNoShow` and `cancelBooking` take an explicit flag and
+default to not charging. Every ambiguous case declines and says why — no card, no consent, no
+price to work from, a fee already charged on that booking.
+
+**The split verified against Stripe**, not just asserted: a $200 service with a 20% tip
+produced `amount: 24000` and `application_fee_amount: 10000`. The fee is 50% of the service
+only, so the whole $40 tip reaches the provider — v1's rule, and the one providers were told.
+
+Testing this needed a sandbox Connect account, because the imported provider rows hold LIVE
+`acct_` ids and a test key cannot pay them ("No such destination"). Express and Standard test
+accounts cannot have their ToS accepted by the platform, so the working shape was a
+`controller[requirement_collection]=application` account, which activates `transfers`
+immediately.
+
+Still open: `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` is unset, so the card form degrades to "card
+payments aren't configured yet" — verified, but the card step itself is untested end to end.
+`platform_settings.cherry_apply_url` is null, so the Cherry button is hidden until the real URL
+is set.
+
 ## Backlog
 
 ### Multi-service bookings
@@ -185,10 +237,6 @@ Scope when unblocked — this is a model change, not a UI change:
   check.
 - Earnings attribution per service has to split across the line items.
 - Package redemption has to decide whether one booking can consume sessions from several lines.
-
-### Stripe writes still unbuilt
-
-- Package checkout link generation (needs `/pay/package/*`).
 
 ### v1 questions still open, carried forward
 

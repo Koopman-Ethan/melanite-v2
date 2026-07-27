@@ -152,7 +152,15 @@ export const ledgerSource = pgEnum('ledger_source', [
  *  across all five sources — see the note on `ledgerEntries`. */
 export const ledgerPayer = pgEnum('ledger_payer', ['client', 'provider', 'student'])
 
-export const ledgerEntryType = pgEnum('ledger_entry_type', ['purchase', 'refund'])
+/** Fees are their own entry types rather than purchases with an explanatory note. Keoni needs
+ *  to see penalty income separately from service income, and a `note` is not something you can
+ *  group by. v1 charged neither — no-show fees were "deferred to Phase 3" and never built. */
+export const ledgerEntryType = pgEnum('ledger_entry_type', [
+  'purchase',
+  'refund',
+  'no_show_fee',
+  'late_cancellation_fee',
+])
 
 export const ledgerSubjectType = pgEnum('ledger_subject_type', [
   'booking',
@@ -209,6 +217,18 @@ export const platformSettings = pgTable('platform_settings', {
   tipToProviderPct: numeric({ precision: 4, scale: 3 }).notNull().default('1.000'),
   noShowFeePctOfPrice: numeric({ precision: 4, scale: 3 }).notNull().default('0.500'),
   cancellationFeeAmount: money().notNull().default('50.00'),
+  /** A cancellation inside this many hours is "late" and chargeable. */
+  lateCancellationHours: integer().notNull().default(24),
+  /** The provider's share of a penalty fee. Separate from `providerSharePct` on purpose: a
+   *  fee is not a service, and the two policies should be able to diverge without one silently
+   *  changing the other. Melanite splits fees evenly. */
+  feeProviderSharePct: numeric({ precision: 4, scale: 3 }).notNull().default('0.500'),
+  /** Stamped onto the client's consent record, so a later wording change does not rewrite what
+   *  someone actually agreed to. */
+  cardPolicyVersion: text().notNull().default('2026-07-27.v1'),
+  /** Cherry patient-financing application link. The button is hidden until this is set —
+   *  better absent than pointing nowhere. */
+  cherryApplyUrl: text(),
   stripePlatformAccountId: text().notNull(),
   medicalDirectorPriceId: text(),
   laserOpenTime: text().notNull().default('08:00'),
@@ -391,8 +411,26 @@ export const clients = pgTable('clients', {
   email: text(),
   name: text(),
   phone: text(),
-  /** Stripe Customer for card-on-file. Distinct from `providers.stripeBillingCustomerId`. */
+  /** Stripe Customer for card-on-file. Distinct from `providers.stripeBillingCustomerId`.
+   *  Lives on the PLATFORM account, not the provider's connected account, because Melanite is
+   *  the party that charges no-show fees and splits them. */
   stripeCustomerId: text(),
+
+  /** The saved card, for charging no-shows and late cancellations off-session.
+   *
+   *  Brand and last four are stored only to show the client and Keoni WHICH card is on file.
+   *  Nothing else about the card is retained, and none of it ever reaches this server as raw
+   *  data — Stripe Elements collects it directly. */
+  defaultPaymentMethodId: text(),
+  cardBrand: text(),
+  cardLast4: text(),
+  cardExpMonth: integer(),
+  cardExpYear: integer(),
+  /** When the client authorised future charges, and to what wording. This is the artifact that
+   *  makes an off-session charge defensible — without it there is a card on file and no record
+   *  that anyone agreed to it being used. */
+  cardOnFileConsentAt: timestamp({ withTimezone: true }),
+  cardOnFileConsentVersion: text(),
 }, (t) => [uniqueIndex().on(t.email), index().on(t.phone)])
 
 // ---------------------------------------------------------------------------
@@ -608,10 +646,19 @@ export const packageCheckoutLinks = pgTable('package_checkout_links', {
   clientId: uuid().references(() => clients.id, { onDelete: 'set null' }),
   clientName: text(),
   clientEmail: text(),
+  clientPhone: text(),
+  /** The price quoted when the link was sent, snapshotted from the template.
+   *
+   *  Without this, editing a template between sending a link and the client paying silently
+   *  changes what they are charged — the client sees one number in a text message and another
+   *  at checkout, and nothing records that it moved. */
+  price: money().notNull().default('0.00'),
   status: checkoutLinkStatus().notNull().default('pending'),
   tipAmount: money().notNull().default('0.00'),
   stripeCustomerId: text(),
   stripePaymentIntentId: text(),
+  /** The package this link produced, once paid. */
+  clientPackageId: uuid().references(() => clientPackages.id, { onDelete: 'set null' }),
   paidAt: timestamp({ withTimezone: true }),
   expiresAt: timestamp({ withTimezone: true }).notNull(),
 }, (t) => [
@@ -828,7 +875,7 @@ export const ledgerEntries = pgTable('ledger_entries', {
   // cumulative total against what is already recorded, not from an index.
   uniqueIndex()
     .on(t.stripePaymentIntentId)
-    .where(sql`${t.stripePaymentIntentId} IS NOT NULL AND ${t.entryType} = 'purchase'`),
+    .where(sql`${t.stripePaymentIntentId} IS NOT NULL AND ${t.entryType} <> 'refund'`),
   // A Stripe-funded entry must carry its payment intent — that link is what makes
   // reconciliation possible, and an entry claiming to be Stripe without one is either a data
   // error or a manual entry mislabelled. Membership entries are the exception: they come

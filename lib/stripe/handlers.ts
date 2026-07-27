@@ -8,8 +8,10 @@ import {
   checkoutLinks,
   clientPackageItems,
   clientPackages,
+  clients,
   ledgerEntries,
   memberships,
+  packageCheckoutLinks,
   packageTemplateItems,
   packageTemplates,
   platformSettings,
@@ -18,12 +20,14 @@ import {
   roomBookings,
 } from '@/lib/db/schema'
 
+import { stripeGet } from './client'
 import type {
   StripeAccountObject,
   StripeChargeObject,
   StripeEvent,
   StripeInvoiceObject,
   StripePaymentIntentObject,
+  StripePaymentMethodObject,
   StripePayoutObject,
   StripeSubscriptionObject,
 } from './types'
@@ -84,10 +88,48 @@ async function providerShare(): Promise<number> {
 // payment_intent.succeeded
 // ---------------------------------------------------------------------------
 
+/** Records the card the client agreed to leave on file.
+ *
+ *  Done here, from the webhook, rather than on the page: the payment is only real once Stripe
+ *  says so, and a card recorded from a client-side success callback would survive a payment
+ *  that later failed. The consent timestamp is written in the same breath as the card, because
+ *  a card with no record of consent is not usable for the thing it was collected for.
+ *
+ *  A failure here must never fail the payment — the money moved regardless. It is logged and
+ *  swallowed, leaving the client without a card on file, which is recoverable; throwing would
+ *  make Stripe retry an event whose ledger entry is already written.
+ */
+async function persistSavedCard(pi: StripePaymentIntentObject): Promise<void> {
+  const clientId = pi.metadata?.client_id
+  if (!clientId || pi.metadata?.save_card !== '1' || !pi.payment_method) return
+
+  try {
+    const pm = await stripeGet<StripePaymentMethodObject>(`/payment_methods/${pi.payment_method}`)
+
+    await db
+      .update(clients)
+      .set({
+        defaultPaymentMethodId: pm.id,
+        cardBrand: pm.card?.brand ?? null,
+        cardLast4: pm.card?.last4 ?? null,
+        cardExpMonth: pm.card?.exp_month ?? null,
+        cardExpYear: pm.card?.exp_year ?? null,
+        cardOnFileConsentAt: new Date(),
+        cardOnFileConsentVersion: pi.metadata?.card_policy_version ?? null,
+        ...(pi.customer ? { stripeCustomerId: pi.customer } : {}),
+      })
+      .where(eq(clients.id, clientId))
+  } catch (err) {
+    console.error('[stripe] could not record saved card for client', clientId, err)
+  }
+}
+
 export async function handlePaymentIntentSucceeded(
   pi: StripePaymentIntentObject,
 ): Promise<HandlerResult> {
   const kind = pi.metadata?.type
+
+  await persistSavedCard(pi)
 
   switch (kind) {
     case 'booking_payment':
@@ -99,6 +141,12 @@ export async function handlePaymentIntentSucceeded(
     case 'training_deposit':
     case 'training_balance':
       return trainingPaid(pi, kind)
+    // Fees are charged synchronously and their ledger entry is written at that moment, so the
+    // webhook has nothing to add. Acknowledged explicitly rather than falling through to
+    // "unrecognised", which would log an error for something working exactly as designed.
+    case 'no_show_fee':
+    case 'late_cancellation_fee':
+      return { handled: true, detail: `${kind} recorded at charge time` }
     default:
       // Never guess. An unrecognised intent is logged and left alone rather than being
       // shoehorned into a source, which would put money against the wrong stream.
@@ -334,6 +382,21 @@ async function packagePurchased(pi: StripePaymentIntentObject): Promise<HandlerR
     // would be false — v1 keeps these out of pending payout for the same reason.
     payoutStatus: 'paid',
   })
+
+  // Close the link out and point it at what it produced. Without this a paid link stays
+  // "pending" forever, so the client could open it again and be shown a second payment form.
+  const linkId = pi.metadata?.package_checkout_link_id
+  if (linkId) {
+    await db
+      .update(packageCheckoutLinks)
+      .set({
+        status: 'paid',
+        paidAt: new Date(),
+        stripePaymentIntentId: pi.id,
+        clientPackageId: instance.id,
+      })
+      .where(eq(packageCheckoutLinks.id, linkId))
+  }
 
   return { handled: true, detail: `package instance ${instance.id} created` }
 }

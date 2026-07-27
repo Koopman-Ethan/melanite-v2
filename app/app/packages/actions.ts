@@ -1,5 +1,7 @@
 'use server'
 
+import { randomBytes } from 'node:crypto'
+
 import { and, eq, sql } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 
@@ -9,12 +11,18 @@ import { denverInstant, getLaserHours } from '@/lib/db/queries/availability'
 import {
   clientPackageItems,
   clientPackages,
+  packageCheckoutLinks,
   packageRedemptions,
   packageTemplateItems,
   packageTemplates,
   providerServices,
   services,
 } from '@/lib/db/schema'
+import { appOrigin } from '@/lib/stripe/config'
+
+/** Package links live longer than booking links: a four-figure package is a decision, not a
+ *  formality, and clients routinely think about it over a weekend. */
+const PACKAGE_LINK_TTL_DAYS = 14
 
 export interface PackageState {
   error?: string
@@ -396,4 +404,75 @@ export async function bookFromPackage(input: {
   revalidatePath('/app/packages')
   revalidatePath('/app/appointments')
   return { success: 'Session booked from the package.' }
+}
+
+/** Creates a payment link for a package template.
+ *
+ *  The price is snapshotted onto the link rather than read from the template at pay time.
+ *  Without that, editing a template between sending a link and the client paying silently
+ *  changes what they are charged — they see one number in a text message and another at
+ *  checkout, and nothing records that it moved.
+ *
+ *  Any existing pending link for this template and client is cancelled first, so a provider who
+ *  clicks twice does not leave two live links quoting different prices.
+ */
+export async function createPackageLink(input: {
+  templateId: string
+  clientName: string | null
+  clientEmail: string | null
+  clientPhone: string | null
+}): Promise<PackageState & { url?: string }> {
+  const user = await requireProvider()
+
+  const [template] = await db
+    .select({
+      id: packageTemplates.id,
+      name: packageTemplates.name,
+      totalPrice: packageTemplates.totalPrice,
+      isActive: packageTemplates.active,
+    })
+    .from(packageTemplates)
+    .where(and(eq(packageTemplates.id, input.templateId), eq(packageTemplates.providerId, user.id)))
+    .limit(1)
+
+  if (!template) return { error: 'That package does not exist.' }
+  if (!template.isActive) return { error: 'That package is inactive. Reactivate it first.' }
+  if (Number(template.totalPrice) <= 0) return { error: 'That package has no price set.' }
+
+  const email = input.clientEmail?.trim().toLowerCase() || null
+
+  await db
+    .update(packageCheckoutLinks)
+    .set({ status: 'cancelled' })
+    .where(
+      and(
+        eq(packageCheckoutLinks.packageTemplateId, template.id),
+        eq(packageCheckoutLinks.providerId, user.id),
+        eq(packageCheckoutLinks.status, 'pending'),
+        email ? eq(packageCheckoutLinks.clientEmail, email) : sql`false`,
+      ),
+    )
+
+  const token = randomBytes(24).toString('base64url')
+
+  const [link] = await db
+    .insert(packageCheckoutLinks)
+    .values({
+      token,
+      packageTemplateId: template.id,
+      providerId: user.id,
+      clientName: input.clientName?.trim() || null,
+      clientEmail: email,
+      clientPhone: input.clientPhone?.trim() || null,
+      price: template.totalPrice,
+      expiresAt: new Date(Date.now() + PACKAGE_LINK_TTL_DAYS * 24 * 60 * 60 * 1000),
+    })
+    .returning({ token: packageCheckoutLinks.token })
+
+  revalidatePath('/app/packages')
+
+  return {
+    success: `Link created for ${template.name}.`,
+    url: `${await appOrigin()}/pay/package/${link.token}`,
+  }
 }

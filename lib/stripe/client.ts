@@ -117,6 +117,37 @@ export async function stripePost<T>(
   return body
 }
 
+/** Reads an object back from Stripe.
+ *
+ *  Needed because the webhook payload does not carry everything: a PaymentIntent reports
+ *  `payment_method` as a bare id, and showing the client which card is on file means fetching
+ *  the brand and last four. */
+export async function stripeGet<T>(
+  path: string,
+  options: Pick<StripePostOptions, 'stripeAccount'> = {},
+): Promise<T> {
+  const key = writeKey()
+  if (!key) throw new StripeNotConfiguredError()
+
+  const headers: Record<string, string> = { Authorization: `Bearer ${key}` }
+  if (options.stripeAccount) headers['Stripe-Account'] = options.stripeAccount
+
+  const res = await fetch(`${API}${path}`, { headers })
+  const body = (await res.json()) as {
+    error?: { message?: string; code?: string; type?: string }
+  } & T
+
+  if (!res.ok) {
+    throw new StripeApiError(
+      res.status,
+      body.error?.code,
+      body.error?.message ?? `Stripe returned ${res.status}`,
+    )
+  }
+
+  return body
+}
+
 /** Turns a Stripe failure into something safe to show a provider.
  *
  *  Stripe's own messages are written for developers and occasionally leak account details, so

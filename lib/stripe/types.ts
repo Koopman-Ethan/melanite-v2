@@ -22,6 +22,20 @@ export interface StripePaymentIntentObject {
   application_fee_amount: number | null
   transfer_data: { destination: string } | null
   metadata: Record<string, string> | null
+  /** Present once the intent has a confirmed payment method. A bare id — the card's brand and
+   *  last four have to be fetched separately. */
+  payment_method?: string | null
+  customer?: string | null
+}
+
+export interface StripePaymentMethodObject {
+  id: string
+  card?: {
+    brand?: string
+    last4?: string
+    exp_month?: number
+    exp_year?: number
+  } | null
 }
 
 export interface StripeChargeObject {
