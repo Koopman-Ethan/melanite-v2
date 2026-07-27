@@ -1,0 +1,399 @@
+'use server'
+
+import { and, eq, sql } from 'drizzle-orm'
+import { revalidatePath } from 'next/cache'
+
+import { canBook, bookingBlockedReasons, requireProvider } from '@/lib/auth/dal'
+import { db } from '@/lib/db'
+import { denverInstant, getLaserHours } from '@/lib/db/queries/availability'
+import {
+  clientPackageItems,
+  clientPackages,
+  packageRedemptions,
+  packageTemplateItems,
+  packageTemplates,
+  providerServices,
+  services,
+} from '@/lib/db/schema'
+
+export interface PackageState {
+  error?: string
+  success?: string
+}
+
+export interface TemplateLineInput {
+  serviceId: string
+  quantity: number
+  perSessionValue: number
+}
+
+/** Money is compared in INTEGER CENTS, never as floats.
+ *
+ *  v1 is explicit about this: "sum(per_session_value × quantity) == total_price, compared in
+ *  integer cents". With floats, 3 × 116.67 is 350.00999999999996 and a perfectly valid
+ *  package is rejected — or worse, a mismatched one slips through. */
+const cents = (n: number) => Math.round(n * 100)
+
+function validateTemplate(
+  name: string,
+  totalPrice: number,
+  lines: TemplateLineInput[],
+  offeredServiceIds: Set<string>,
+): string | null {
+  if (!name.trim()) return 'Give the package a name.'
+  if (!Number.isFinite(totalPrice) || totalPrice <= 0) return 'Total price must be more than zero.'
+  if (lines.length === 0) return 'Add at least one service.'
+
+  // One line per service — quantity expresses multiples. v1: DUPLICATE_SERVICE_LINE.
+  const ids = lines.map((l) => l.serviceId)
+  if (new Set(ids).size !== ids.length) {
+    return 'Each service can only appear once. Use quantity for multiples.'
+  }
+
+  for (const line of lines) {
+    if (!offeredServiceIds.has(line.serviceId)) {
+      return 'Every line must be a service you currently offer.'
+    }
+    if (!Number.isInteger(line.quantity) || line.quantity < 1) {
+      return 'Each line needs a quantity of at least 1.'
+    }
+    if (!Number.isFinite(line.perSessionValue) || line.perSessionValue <= 0) {
+      return 'Each line needs a per-session value above zero.'
+    }
+  }
+
+  const sum = lines.reduce((s, l) => s + cents(l.perSessionValue) * l.quantity, 0)
+  if (sum !== cents(totalPrice)) {
+    const diff = ((sum - cents(totalPrice)) / 100).toFixed(2)
+    return `Line items add up to ${(sum / 100).toFixed(2)}, which is ${diff} off the total. They must match exactly.`
+  }
+
+  return null
+}
+
+async function offeredServiceIds(providerId: string): Promise<Set<string>> {
+  const rows = await db
+    .select({ serviceId: providerServices.serviceId })
+    .from(providerServices)
+    .innerJoin(services, eq(providerServices.serviceId, services.id))
+    .where(
+      and(
+        eq(providerServices.providerId, providerId),
+        eq(providerServices.isActive, true),
+        eq(services.active, true),
+      ),
+    )
+
+  return new Set(rows.map((r) => r.serviceId))
+}
+
+export async function createTemplate(input: {
+  name: string
+  description: string | null
+  totalPrice: number
+  expiresAfterDays: number | null
+  lines: TemplateLineInput[]
+}): Promise<PackageState> {
+  const user = await requireProvider()
+
+  const problem = validateTemplate(
+    input.name,
+    input.totalPrice,
+    input.lines,
+    await offeredServiceIds(user.id),
+  )
+  if (problem) return { error: problem }
+
+  const [template] = await db
+    .insert(packageTemplates)
+    .values({
+      providerId: user.id,
+      name: input.name.trim(),
+      description: input.description?.trim() || null,
+      totalPrice: input.totalPrice.toFixed(2),
+      expiresAfterDays: input.expiresAfterDays,
+      active: true,
+    })
+    .returning({ id: packageTemplates.id })
+
+  await db.insert(packageTemplateItems).values(
+    input.lines.map((l) => ({
+      packageTemplateId: template.id,
+      serviceId: l.serviceId,
+      quantity: l.quantity,
+      perSessionValue: l.perSessionValue.toFixed(2),
+    })),
+  )
+
+  revalidatePath('/app/packages')
+  return { success: `${input.name.trim()} created.` }
+}
+
+/** Editing replaces the line set wholesale, as v1 does.
+ *
+ *  Templates are only a blueprint — `client_package_items` are snapshotted at purchase, so
+ *  editing one never rewrites a package someone already bought. That is what makes a full
+ *  replace safe here.
+ */
+export async function updateTemplate(
+  templateId: string,
+  input: {
+    name: string
+    description: string | null
+    totalPrice: number
+    expiresAfterDays: number | null
+    lines: TemplateLineInput[]
+  },
+): Promise<PackageState> {
+  const user = await requireProvider()
+
+  const [owned] = await db
+    .select({ id: packageTemplates.id })
+    .from(packageTemplates)
+    .where(and(eq(packageTemplates.id, templateId), eq(packageTemplates.providerId, user.id)))
+    .limit(1)
+
+  if (!owned) return { error: 'That package is not yours.' }
+
+  const problem = validateTemplate(
+    input.name,
+    input.totalPrice,
+    input.lines,
+    await offeredServiceIds(user.id),
+  )
+  if (problem) return { error: problem }
+
+  await db
+    .update(packageTemplates)
+    .set({
+      name: input.name.trim(),
+      description: input.description?.trim() || null,
+      totalPrice: input.totalPrice.toFixed(2),
+      expiresAfterDays: input.expiresAfterDays,
+    })
+    .where(eq(packageTemplates.id, templateId))
+
+  await db
+    .delete(packageTemplateItems)
+    .where(eq(packageTemplateItems.packageTemplateId, templateId))
+
+  await db.insert(packageTemplateItems).values(
+    input.lines.map((l) => ({
+      packageTemplateId: templateId,
+      serviceId: l.serviceId,
+      quantity: l.quantity,
+      perSessionValue: l.perSessionValue.toFixed(2),
+    })),
+  )
+
+  revalidatePath('/app/packages')
+  return { success: 'Package updated.' }
+}
+
+/** Soft delete, and its reverse. Never a hard delete — sold packages reference the template. */
+export async function setTemplateActive(
+  templateId: string,
+  active: boolean,
+): Promise<PackageState> {
+  const user = await requireProvider()
+
+  const result = await db
+    .update(packageTemplates)
+    .set({ active })
+    .where(and(eq(packageTemplates.id, templateId), eq(packageTemplates.providerId, user.id)))
+    .returning({ id: packageTemplates.id })
+
+  if (result.length === 0) return { error: 'That package is not yours.' }
+
+  revalidatePath('/app/packages')
+  return { success: active ? 'Package reactivated.' : 'Package retired.' }
+}
+
+/** Book a prepaid session against a client's package balance.
+ *
+ *  v1's create-from-package, which is its most intricate endpoint. The rules kept verbatim:
+ *
+ *   - The same four booking gates as a paid booking. A redemption is still laser time.
+ *   - NOT gated on the packages feature flag. v1's D2: "paid value must always be
+ *     redeemable" — switching the feature off must never strand sessions a client bought.
+ *   - The package must be the caller's, and must be active. Expiry is checked against the
+ *     date, so a package past its expiry cannot be redeemed even if the status still says
+ *     active.
+ *   - The service must be a line on that package (SERVICE_NOT_IN_PACKAGE).
+ *   - Global collision check against the shared laser, in the same statement as the insert.
+ *   - The booking is $0 with original_price set to the per-session value, and gets NO
+ *     checkout link — there is nothing to pay.
+ *   - REDEMPTIONS MOVE NO MONEY. No ledger entry: the split settled at purchase.
+ */
+export async function bookFromPackage(input: {
+  clientPackageId: string
+  itemId: string
+  providerServiceId: string
+  startTime: string
+  treatmentArea: string | null
+  notes: string | null
+}): Promise<PackageState> {
+  const user = await requireProvider()
+
+  if (!canBook(user)) {
+    const gates = bookingBlockedReasons(user)
+    return { error: gates.map((g) => g.message).join(' ') || 'Your account cannot book.' }
+  }
+
+  const [pkg] = await db
+    .select({
+      id: clientPackages.id,
+      clientId: clientPackages.clientId,
+      clientName: sql<string | null>`(select name from clients where id = ${clientPackages.clientId})`,
+      clientEmail: sql<string | null>`(select email from clients where id = ${clientPackages.clientId})`,
+      status: clientPackages.status,
+      expiresAt: clientPackages.expiresAt,
+    })
+    .from(clientPackages)
+    .where(
+      and(eq(clientPackages.id, input.clientPackageId), eq(clientPackages.providerId, user.id)),
+    )
+    .limit(1)
+
+  if (!pkg) return { error: 'That package does not exist.' }
+  if (pkg.status === 'expired' || (pkg.expiresAt && pkg.expiresAt < new Date())) {
+    return { error: 'This package has expired and can no longer be redeemed.' }
+  }
+  if (pkg.status !== 'active') {
+    return { error: 'This package is not active — it may be used up or refunded.' }
+  }
+
+  // The chosen service must be a line on THIS package, and the provider must still offer it.
+  const [line] = await db
+    .select({
+      itemId: clientPackageItems.id,
+      qtyTotal: clientPackageItems.qtyTotal,
+      qtyUsed: clientPackageItems.qtyUsed,
+      perSessionValue: clientPackageItems.perSessionValue,
+      serviceId: clientPackageItems.serviceId,
+    })
+    .from(clientPackageItems)
+    .where(
+      and(
+        eq(clientPackageItems.id, input.itemId),
+        eq(clientPackageItems.clientPackageId, input.clientPackageId),
+      ),
+    )
+    .limit(1)
+
+  if (!line) return { error: 'That service is not part of this package.' }
+  if (line.qtyUsed >= line.qtyTotal) {
+    return { error: 'No sessions left for that service on this package.' }
+  }
+
+  const [svc] = await db
+    .select({ durationMins: providerServices.durationMins, serviceId: providerServices.serviceId })
+    .from(providerServices)
+    .innerJoin(services, eq(providerServices.serviceId, services.id))
+    .where(
+      and(
+        eq(providerServices.id, input.providerServiceId),
+        eq(providerServices.providerId, user.id),
+        eq(providerServices.isActive, true),
+        eq(services.active, true),
+      ),
+    )
+    .limit(1)
+
+  if (!svc) return { error: 'That service is not available on your profile.' }
+  if (svc.serviceId !== line.serviceId) {
+    return { error: 'That service does not match the package line you picked.' }
+  }
+
+  const startTime = new Date(input.startTime)
+  if (Number.isNaN(startTime.getTime())) return { error: 'That time is not valid.' }
+  if (startTime <= new Date()) return { error: 'Choose a time in the future.' }
+
+  const endTime = new Date(startTime.getTime() + svc.durationMins * 60_000)
+
+  const hours = await getLaserHours()
+  const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(startTime)
+  if (
+    startTime < denverInstant(day, hours.openTime) ||
+    endTime > denverInstant(day, hours.closeTime)
+  ) {
+    return { error: 'That time is outside laser operating hours.' }
+  }
+
+  // Session indices, computed before the write. v1 does this inside the transaction; the
+  // unique index on package_redemptions.booking_id is the real guard against a double insert,
+  // and a stale index here would only mislabel a display string, not lose a session.
+  const live = await db
+    .select({
+      overall: sql<number>`count(*)::int`,
+      forService: sql<number>`count(*) filter (where ${packageRedemptions.clientPackageItemId} = ${input.itemId})::int`,
+    })
+    .from(packageRedemptions)
+    .where(
+      and(
+        eq(packageRedemptions.clientPackageId, input.clientPackageId),
+        sql`${packageRedemptions.voidedAt} is null`,
+      ),
+    )
+
+  const bookingId = crypto.randomUUID()
+
+  // Collision check fused to the insert, exactly as in a paid booking — the laser does not
+  // care that this session was prepaid.
+  const booked = await db.execute(sql`
+    INSERT INTO bookings
+      (id, provider_id, provider_service_id, client_id, client_name, client_email,
+       treatment_area, notes, original_price, discount_pct, price, payment_source,
+       duration_mins, start_time, end_time, status)
+    SELECT ${bookingId}::uuid, ${user.id}::uuid, ${input.providerServiceId}::uuid,
+           ${pkg.clientId}::uuid, ${pkg.clientName ?? 'Client'}, ${pkg.clientEmail},
+           ${input.treatmentArea}, ${input.notes},
+           ${line.perSessionValue}::numeric, 0::numeric, 0::numeric,
+           'package_redemption'::booking_payment_source,
+           ${svc.durationMins}, ${startTime.toISOString()}::timestamptz,
+           ${endTime.toISOString()}::timestamptz, 'upcoming'::booking_status
+    WHERE NOT EXISTS (
+      SELECT 1 FROM bookings b
+      WHERE b.status IN ('upcoming', 'completed')
+        AND b.start_time < ${endTime.toISOString()}::timestamptz
+        AND b.end_time   > ${startTime.toISOString()}::timestamptz
+    )
+    RETURNING id
+  `)
+
+  if ((booked.rows?.length ?? 0) === 0) {
+    return { error: 'Someone just booked that slot. Pick another time.' }
+  }
+
+  await db.insert(packageRedemptions).values({
+    clientPackageId: input.clientPackageId,
+    clientPackageItemId: input.itemId,
+    bookingId,
+    overallIndex: (live[0]?.overall ?? 0) + 1,
+    serviceIndex: (live[0]?.forService ?? 0) + 1,
+  })
+
+  // Guarded in SQL rather than read-modify-write, so two concurrent redemptions cannot both
+  // read the same qty_used and oversell the package.
+  await db
+    .update(clientPackageItems)
+    .set({ qtyUsed: sql`least(${clientPackageItems.qtyUsed} + 1, ${clientPackageItems.qtyTotal})` })
+    .where(eq(clientPackageItems.id, input.itemId))
+
+  // Exhausted once every line is used up.
+  const remaining = await db
+    .select({ left: sql<number>`sum(${clientPackageItems.qtyTotal} - ${clientPackageItems.qtyUsed})::int` })
+    .from(clientPackageItems)
+    .where(eq(clientPackageItems.clientPackageId, input.clientPackageId))
+
+  if ((remaining[0]?.left ?? 0) <= 0) {
+    await db
+      .update(clientPackages)
+      .set({ status: 'exhausted' })
+      .where(eq(clientPackages.id, input.clientPackageId))
+  }
+
+  revalidatePath('/app/packages')
+  revalidatePath('/app/appointments')
+  return { success: 'Session booked from the package.' }
+}
