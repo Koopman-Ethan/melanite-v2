@@ -8,6 +8,7 @@ import { Field, Notice } from '@/components/ui/field'
 import { cn } from '@/lib/cn'
 
 import { createBooking, type BookState } from './actions'
+import { MonthCalendar, type DayView } from './month-calendar'
 
 export interface SlotView {
   startTime: string
@@ -32,6 +33,18 @@ const time = (iso: string) =>
 const usd = (v: string | number) =>
   Number(v).toLocaleString('en-US', { style: 'currency', currency: 'USD' })
 
+/** Built from the date parts as UTC, not parsed as an instant — `new Date('2026-07-27')` is
+ *  midnight UTC, which is the 26th in Denver. */
+const dayHeading = (date: string) => {
+  const [y, m, d] = date.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    timeZone: 'UTC',
+  })
+}
+
 function SubmitButton({ disabled }: { disabled: boolean }) {
   const { pending } = useFormStatus()
   return (
@@ -47,14 +60,22 @@ export function BookForm({
   selectedServiceId,
   onServiceChange,
   onDateChange,
+  onMonthChange,
   date,
+  month,
+  today,
+  days,
 }: {
   services: ServiceView[]
   slots: SlotView[]
   selectedServiceId: string
   onServiceChange: (id: string) => void
   onDateChange: (date: string) => void
+  onMonthChange: (month: string) => void
   date: string
+  month: string
+  today: string
+  days: DayView[]
 }) {
   const [state, formAction] = useActionState<BookState, FormData>(createBooking, {})
   const [selectedSlot, setSelectedSlot] = useState<string>('')
@@ -100,17 +121,24 @@ export function BookForm({
 
       <section className="space-y-3">
         <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">Date &amp; time</h2>
-        <input
-          type="date"
-          value={date}
-          min={new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(new Date())}
-          onChange={(e) => {
-            onDateChange(e.target.value)
+
+        <MonthCalendar
+          month={month}
+          days={days}
+          selected={date}
+          today={today}
+          onSelect={(d) => {
+            onDateChange(d)
             setSelectedSlot('')
           }}
-          aria-label="Date"
-          className="rounded-field border border-line bg-surface px-3 py-2 text-sm text-ink"
+          onMonthChange={onMonthChange}
         />
+
+        <p className="text-xs text-ink-faint">
+          {dayHeading(date)} · {openSlots.length}{' '}
+          {openSlots.length === 1 ? 'opening' : 'openings'} for a {service?.durationMins}-minute
+          appointment
+        </p>
 
         {openSlots.length === 0 ? (
           <p className="rounded-field border border-dashed border-line px-3 py-6 text-center text-sm text-ink-muted">

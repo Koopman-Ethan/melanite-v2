@@ -80,6 +80,32 @@ Week grid, all providers on one timeline, at `/app/admin/calendar`.
   further queries per row to resolve the provider and service names. Replaced with one joined
   query over a week window.
 
+### Booking calendar — 2026-07-27
+
+The Book page opened with a native date field and a slot grid. That was a Phase-1 shortcut, not
+a design decision, and it was wrong for this business specifically.
+
+**Why a calendar earns its place here:** the laser is shared. "Is the 14th any good?" is not a
+question a provider can answer from their own schedule — the day may be full because of someone
+else entirely. A date field makes them pick a day, wait for a render, read an empty grid, and
+try again. The calendar answers it for the whole month at once.
+
+- **Counts are duration-specific.** A 30-minute service and a two-hour one get genuinely
+  different calendars, which is why `getMonthAvailability` takes a duration rather than
+  reporting a generic "busy" score. A day with three scattered 30-minute gaps is wide open for
+  one service and useless for the other.
+- **One slot loop, shared.** `buildSlots` backs both the day grid and the month counts. Two
+  implementations of "how many slots are free" is exactly how a calendar ends up promising a day
+  that turns out to be full.
+- **Three bands, not a gradient** — wide open / some room / nearly full. The provider is
+  choosing between days, and that is the distinction that changes the choice.
+- Month is its own URL parameter so the calendar can be browsed ahead of the selected day.
+  Picking a day sets both, so the two cannot drift apart.
+
+Note that today's dot reflects *bookable* slots, so a quiet afternoon still reads "nearly full"
+by evening. That is intended: what the provider needs to know is how many openings remain, and
+the heading below the calendar gives the exact count.
+
 ## Backlog
 
 ### Multi-service bookings

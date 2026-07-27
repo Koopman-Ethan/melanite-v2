@@ -3,7 +3,11 @@ import Link from 'next/link'
 
 import { BookingGates } from '@/components/booking-gates'
 import { bookingBlockedReasons, canBook, requireProvider } from '@/lib/auth/dal'
-import { getAvailability, getBookableServices } from '@/lib/db/queries/availability'
+import {
+  getAvailability,
+  getBookableServices,
+  getMonthAvailability,
+} from '@/lib/db/queries/availability'
 
 import { BookPanel } from './book-panel'
 
@@ -16,7 +20,7 @@ const todayInDenver = () =>
 export default async function BookPage({
   searchParams,
 }: {
-  searchParams: Promise<{ date?: string; service?: string }>
+  searchParams: Promise<{ date?: string; service?: string; month?: string }>
 }) {
   const user = await requireProvider()
   const params = await searchParams
@@ -61,9 +65,16 @@ export default async function BookPage({
 
   const selected =
     services.find((s) => s.providerServiceId === params.service) ?? services[0]
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(params.date ?? '') ? params.date! : todayInDenver()
+  const today = todayInDenver()
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(params.date ?? '') ? params.date! : today
+  // The calendar can be browsed ahead of the selected day, so the month is its own parameter
+  // and only falls back to the selected date's month.
+  const month = /^\d{4}-\d{2}$/.test(params.month ?? '') ? params.month! : date.slice(0, 7)
 
-  const { slots, hours } = await getAvailability(date, selected.durationMins)
+  const [{ slots, hours }, monthAvailability] = await Promise.all([
+    getAvailability(date, selected.durationMins),
+    getMonthAvailability(month, selected.durationMins),
+  ])
 
   return (
     <main className="mx-auto w-full max-w-2xl px-6 py-10 space-y-6">
@@ -89,6 +100,9 @@ export default async function BookPage({
         }))}
         selectedServiceId={selected.providerServiceId}
         date={date}
+        month={month}
+        today={today}
+        days={monthAvailability.days}
       />
     </main>
   )
