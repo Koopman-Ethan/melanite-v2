@@ -10,7 +10,12 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "db:sql": "tsx scripts/sql.ts",
+    "db:seed": "tsx scripts/seed.ts",
+    "etl:stage": "tsx scripts/etl/stage.ts",
+    "etl:load": "tsx scripts/etl/load.ts",
+    "etl:verify": "tsx scripts/etl/verify.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
@@ -30,7 +35,8 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.11",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "tsx": "^4.23.1"
   },
   "allowScripts": {
     "esbuild@0.18.20": true,
