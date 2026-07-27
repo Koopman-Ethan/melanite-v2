@@ -13,8 +13,12 @@
  */
 
 @theme {
-  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  /* Excon and Erode are the real Melanite typefaces, read from the live Webflow site.
+   * The v1 HTML mockups all say Arial — that was a placeholder the published build never
+   * used. Excon is the UI sans; Erode is the display serif, Medium only. */
+  --font-sans: var(--font-excon), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-erode), ui-serif, Georgia, serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* Brand. `gold-ink` is what sits ON gold — near-black, never white. */
   --color-gold: #b8965a;
@@ -57,6 +61,7 @@
   }
 
   body {
+    font-family: var(--font-sans);
     background-color: var(--color-canvas);
     color: var(--color-ink);
     -webkit-font-smoothing: antialiased;
