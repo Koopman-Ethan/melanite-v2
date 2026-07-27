@@ -1,0 +1,2 @@
+DROP INDEX "ledger_entries_stripe_payment_intent_id_entry_type_index";--> statement-breakpoint
+CREATE UNIQUE INDEX "ledger_entries_stripe_payment_intent_id_index" ON "ledger_entries" USING btree ("stripe_payment_intent_id") WHERE "ledger_entries"."stripe_payment_intent_id" IS NOT NULL AND "ledger_entries"."entry_type" = 'purchase';

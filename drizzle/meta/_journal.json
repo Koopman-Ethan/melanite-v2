@@ -36,6 +36,13 @@
       "when": 1785123329033,
       "tag": "0004_dear_lyja",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1785130186584,
+      "tag": "0005_petite_oracle",
+      "breakpoints": true
     }
   ]
 }

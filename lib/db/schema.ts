@@ -781,9 +781,18 @@ export const ledgerEntries = pgTable('ledger_entries', {
   index().on(t.clientId),
   index().on(t.payoutStatus),
   index().on(t.paymentMethod),
+  // One PURCHASE per payment intent — the guard against a Stripe retry writing the same
+  // payment twice.
+  //
+  // Deliberately NOT extended to refunds. Stripe reports `amount_refunded` cumulatively, so a
+  // partially refunded charge produces a second, third, nth refund event, each of which must
+  // write the delta as its own row. An earlier version keyed this on (intent, entry_type),
+  // which allowed exactly one refund and made the second one fail — caught by sending two
+  // partial refunds through the webhook. Refund idempotency comes from comparing the
+  // cumulative total against what is already recorded, not from an index.
   uniqueIndex()
-    .on(t.stripePaymentIntentId, t.entryType)
-    .where(sql`${t.stripePaymentIntentId} IS NOT NULL`),
+    .on(t.stripePaymentIntentId)
+    .where(sql`${t.stripePaymentIntentId} IS NOT NULL AND ${t.entryType} = 'purchase'`),
   // A Stripe-funded entry must carry its payment intent — that link is what makes
   // reconciliation possible, and an entry claiming to be Stripe without one is either a data
   // error or a manual entry mislabelled. Membership entries are the exception: they come
