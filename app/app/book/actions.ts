@@ -41,13 +41,26 @@ export async function createBooking(_prev: BookState, formData: FormData): Promi
   const clientEmail = String(formData.get('clientEmail') ?? '').trim().toLowerCase() || null
   const treatmentArea = String(formData.get('treatmentArea') ?? '').trim() || null
   const notes = String(formData.get('notes') ?? '').trim() || null
-  const discountPct = Number(formData.get('discountPct') ?? 0)
+  const discountTypeRaw = String(formData.get('discountType') ?? 'none')
+  const discountValue = Number(formData.get('discountValue') ?? 0)
 
   if (!clientName) return { error: 'Enter the client’s name.' }
   if (!providerServiceId) return { error: 'Choose a service.' }
   if (!startTimeRaw) return { error: 'Choose a time.' }
-  if (!Number.isFinite(discountPct) || discountPct < 0 || discountPct >= 100) {
-    return { error: 'Discount must be between 0 and 99 percent.' }
+  if (!['none', 'percent', 'amount'].includes(discountTypeRaw)) {
+    return { error: 'That discount type is not valid.' }
+  }
+  const discountType = discountTypeRaw as 'none' | 'percent' | 'amount'
+
+  if (discountType !== 'none') {
+    if (!Number.isFinite(discountValue) || discountValue <= 0) {
+      return { error: 'Enter a discount greater than zero, or choose no discount.' }
+    }
+    // v1 capped percentages below 100. The same intent applies to a flat amount, but the
+    // ceiling depends on the price, so it is checked once the service is known.
+    if (discountType === 'percent' && discountValue >= 100) {
+      return { error: 'A percentage discount must be under 100%.' }
+    }
   }
 
   const startTime = new Date(startTimeRaw)
@@ -94,7 +107,30 @@ export async function createBooking(_prev: BookState, formData: FormData): Promi
   }
 
   const originalPrice = Number(svc.price)
-  const price = Number((originalPrice * (1 - discountPct / 100)).toFixed(2))
+
+  // Computed in cents so a percentage discount cannot land a fraction of a penny off — the
+  // same reasoning as the package builder's total check.
+  const originalCents = Math.round(originalPrice * 100)
+  const discountCents =
+    discountType === 'percent'
+      ? Math.round(originalCents * (discountValue / 100))
+      : discountType === 'amount'
+        ? Math.round(discountValue * 100)
+        : 0
+
+  // A discount may not exceed the price. Comping an appointment is a different thing with a
+  // different payment source, so this refuses rather than clamping to zero — silently turning
+  // an over-discount into a free session would misprice it and hide the mistake.
+  if (discountCents > originalCents) {
+    return {
+      error: `That discount is more than the ${originalPrice.toFixed(2)} price. Use a smaller amount.`,
+    }
+  }
+  if (discountCents === originalCents) {
+    return { error: 'That would make the appointment free. Book it as comped instead.' }
+  }
+
+  const price = (originalCents - discountCents) / 100
 
   const bookingId = crypto.randomUUID()
   const token = randomBytes(24).toString('base64url')
@@ -114,12 +150,13 @@ export async function createBooking(_prev: BookState, formData: FormData): Promi
     WITH new_booking AS (
       INSERT INTO bookings
         (id, provider_id, provider_service_id, client_name, client_phone, client_email,
-         treatment_area, notes, original_price, discount_pct, price, payment_source,
-         duration_mins, start_time, end_time, status)
+         treatment_area, notes, original_price, discount_type, discount_value, price,
+         payment_source, duration_mins, start_time, end_time, status)
       SELECT ${bookingId}::uuid, ${user.id}::uuid, ${providerServiceId}::uuid, ${clientName},
              ${clientPhone}, ${clientEmail}, ${treatmentArea}, ${notes},
-             ${originalPrice.toFixed(2)}::numeric, ${discountPct.toFixed(2)}::numeric,
-             ${price.toFixed(2)}::numeric, 'checkout_link'::booking_payment_source,
+             ${originalPrice.toFixed(2)}::numeric, ${discountType}::discount_type,
+             ${discountValue.toFixed(2)}::numeric, ${price.toFixed(2)}::numeric,
+             'checkout_link'::booking_payment_source,
              ${svc.durationMins}, ${startTime.toISOString()}::timestamptz,
              ${endTime.toISOString()}::timestamptz, 'upcoming'::booking_status
       WHERE NOT EXISTS (

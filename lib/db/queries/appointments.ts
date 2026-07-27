@@ -29,7 +29,8 @@ export interface Appointment {
   notes: string | null
   price: string
   originalPrice: string
-  discountPct: string
+  discountType: (typeof bookings.discountType.enumValues)[number]
+  discountValue: string
   paymentSource: (typeof bookings.paymentSource.enumValues)[number]
   durationMins: number
   startTime: Date
@@ -76,7 +77,8 @@ export async function getAppointments(
       notes: bookings.notes,
       price: bookings.price,
       originalPrice: bookings.originalPrice,
-      discountPct: bookings.discountPct,
+      discountType: bookings.discountType,
+      discountValue: bookings.discountValue,
       paymentSource: bookings.paymentSource,
       durationMins: bookings.durationMins,
       startTime: bookings.startTime,
@@ -120,7 +122,8 @@ async function getAppointmentsById(providerId: string, bookingId: string) {
       notes: bookings.notes,
       price: bookings.price,
       originalPrice: bookings.originalPrice,
-      discountPct: bookings.discountPct,
+      discountType: bookings.discountType,
+      discountValue: bookings.discountValue,
       paymentSource: bookings.paymentSource,
       durationMins: bookings.durationMins,
       startTime: bookings.startTime,

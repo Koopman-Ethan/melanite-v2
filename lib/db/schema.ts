@@ -79,6 +79,11 @@ export const bookingStatus = pgEnum('booking_status', [
   'no_show',
 ])
 
+/** How a discount was expressed. Kept rather than collapsing to a single percentage: "10% off"
+ *  and "$25 off" can produce the same price today and diverge the moment the service is
+ *  repriced, so the intent is worth storing alongside the result. */
+export const discountType = pgEnum('discount_type', ['none', 'percent', 'amount'])
+
 /** v1 gap: package redemptions arrived as ordinary $0 bookings with no marker, so three
  *  separate surfaces inferred payment method from price. Now explicit. */
 export const bookingPaymentSource = pgEnum('booking_payment_source', [
@@ -437,8 +442,10 @@ export const bookings = pgTable('bookings', {
   notes: text(),
 
   originalPrice: money().notNull(),
-  /** Percent off applied by the provider, e.g. 10 = 10%. */
-  discountPct: numeric({ precision: 5, scale: 2 }).notNull().default('0'),
+  /** What kind of discount the provider applied, and the figure they typed. `price` is the
+   *  result; these two record how it was arrived at. */
+  discountType: discountType().notNull().default('none'),
+  discountValue: numeric({ precision: 10, scale: 2 }).notNull().default('0'),
   price: money().notNull(),
   paymentSource: bookingPaymentSource().notNull(),
 

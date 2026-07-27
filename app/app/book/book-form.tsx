@@ -58,11 +58,21 @@ export function BookForm({
 }) {
   const [state, formAction] = useActionState<BookState, FormData>(createBooking, {})
   const [selectedSlot, setSelectedSlot] = useState<string>('')
-  const [discount, setDiscount] = useState(0)
+  const [discountType, setDiscountType] = useState<'none' | 'percent' | 'amount'>('none')
+  const [discountValue, setDiscountValue] = useState(0)
 
   const service = services.find((s) => s.providerServiceId === selectedServiceId)
   const openSlots = slots.filter((s) => s.available)
-  const price = service ? Number(service.price) * (1 - discount / 100) : 0
+  // Mirrors the server's cents arithmetic so the figure shown is the figure charged.
+  const originalCents = service ? Math.round(Number(service.price) * 100) : 0
+  const discountCents =
+    discountType === 'percent'
+      ? Math.round(originalCents * (discountValue / 100))
+      : discountType === 'amount'
+        ? Math.round(discountValue * 100)
+        : 0
+  const overDiscounted = discountCents >= originalCents && discountType !== 'none'
+  const price = Math.max(originalCents - discountCents, 0) / 100
 
   return (
     <form action={formAction} className="space-y-6">
@@ -160,34 +170,72 @@ export function BookForm({
 
       <section className="space-y-3">
         <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">Price</h2>
-        <div className="flex items-end gap-3">
-          <div className="w-32">
-            <Field
-              id="discountPct"
-              name="discountPct"
-              label="Discount %"
-              type="number"
-              min={0}
-              max={99}
-              step={1}
-              value={discount}
-              onChange={(e) => setDiscount(Number(e.target.value) || 0)}
-            />
+
+        <input type="hidden" name="discountType" value={discountType} />
+        <input type="hidden" name="discountValue" value={discountValue} />
+
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="flex gap-1.5">
+            {(['none', 'percent', 'amount'] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => {
+                  setDiscountType(t)
+                  if (t === 'none') setDiscountValue(0)
+                }}
+                aria-pressed={discountType === t}
+                className={cn(
+                  'rounded-field border px-3 py-2 text-xs transition-colors',
+                  discountType === t
+                    ? 'border-gold bg-gold/10 text-gold'
+                    : 'border-line text-ink-muted hover:border-line-strong hover:text-ink-secondary',
+                )}
+              >
+                {t === 'none' ? 'No discount' : t === 'percent' ? '% off' : '$ off'}
+              </button>
+            ))}
           </div>
+
+          {discountType !== 'none' && (
+            <label className="text-xs">
+              <span className="block text-ink-faint">
+                {discountType === 'percent' ? 'Percent' : 'Amount'}
+              </span>
+              <input
+                type="number"
+                min={0}
+                max={discountType === 'percent' ? 99 : undefined}
+                step={discountType === 'percent' ? 1 : 0.01}
+                value={discountValue || ''}
+                onChange={(e) => setDiscountValue(Number(e.target.value) || 0)}
+                className="w-28 rounded-field border border-line bg-surface px-3 py-2 text-sm text-ink"
+              />
+            </label>
+          )}
+
           <div className="pb-1">
             <div className="text-2xl font-semibold tabular-nums">{usd(price)}</div>
-            {discount > 0 && service && (
+            {discountType !== 'none' && discountValue > 0 && service && (
               <div className="text-xs text-ink-faint tabular-nums line-through">
                 {usd(service.price)}
               </div>
             )}
           </div>
         </div>
+
+        {/* Refused rather than clamped: a free appointment is a comp, which is a different
+            payment source, and silently zeroing the price would hide the mistake. */}
+        {overDiscounted && (
+          <p className="text-xs text-danger">
+            That discount is more than the price. Book it as comped if it&rsquo;s free.
+          </p>
+        )}
       </section>
 
       {state.error && <Notice>{state.error}</Notice>}
 
-      <SubmitButton disabled={!selectedSlot} />
+      <SubmitButton disabled={!selectedSlot || overDiscounted} />
 
       <p className="text-center text-xs text-ink-faint">
         A payment link is created with the booking and expires in 7 days.

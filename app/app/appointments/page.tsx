@@ -56,7 +56,7 @@ const timeLabel = (d: Date) =>
   })
 
 function AppointmentCard({ appointment }: { appointment: Appointment }) {
-  const discounted = Number(appointment.discountPct) > 0
+  const discounted = appointment.discountType !== 'none' && Number(appointment.discountValue) > 0
 
   return (
     <li className="rounded-card border border-line bg-surface p-5">
@@ -106,9 +106,16 @@ function AppointmentCard({ appointment }: { appointment: Appointment }) {
         <div className="text-right">
           <div className="text-lg font-semibold tabular-nums">{usd(appointment.price)}</div>
           {discounted && (
-            <div className="text-xs text-ink-faint tabular-nums line-through">
-              {usd(appointment.originalPrice)}
-            </div>
+            <>
+              <div className="text-xs text-ink-faint tabular-nums line-through">
+                {usd(appointment.originalPrice)}
+              </div>
+              <div className="text-xs text-ink-faint tabular-nums">
+                {appointment.discountType === 'percent'
+                  ? `${Number(appointment.discountValue)}% off`
+                  : `${usd(appointment.discountValue)} off`}
+              </div>
+            </>
           )}
         </div>
       </div>

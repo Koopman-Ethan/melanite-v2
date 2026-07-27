@@ -276,7 +276,10 @@ export function transformBooking(
     treatmentArea: b.treatment_area,
     notes: b.notes,
     originalPrice: money(b.original_price ?? b.price),
-    discountPct: (b.discount_pct ?? 0).toFixed(2),
+    // v1 only ever offered a percentage; a flat-amount discount has no v1 equivalent, so
+    // every imported row is either 'percent' or 'none'.
+    discountType: (b.discount_pct ?? 0) > 0 ? ('percent' as const) : ('none' as const),
+    discountValue: (b.discount_pct ?? 0).toFixed(2),
     price: money(b.price),
     paymentSource,
     durationMins: b.duration_mins,
