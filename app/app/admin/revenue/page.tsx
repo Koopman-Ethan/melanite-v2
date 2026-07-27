@@ -1,7 +1,6 @@
 import type { Metadata } from 'next'
 
 import { requireAdmin } from '@/lib/auth/dal'
-import { logout } from '@/app/login/actions'
 import { getAdminRevenue } from '@/lib/db/queries/revenue'
 
 export const metadata: Metadata = { title: 'Revenue · Melanite Admin' }
@@ -58,7 +57,7 @@ const METHOD_LABELS: Record<string, string> = {
 
 export default async function AdminRevenuePage() {
   // Authorization happens here, not in proxy.ts — the DAL is the boundary.
-  const user = await requireAdmin()
+  await requireAdmin()
   const { totals, bySource, byMethod, byProvider, byService, series, recent } =
     await getAdminRevenue()
 
@@ -67,24 +66,9 @@ export default async function AdminRevenuePage() {
 
   return (
     <main className="mx-auto w-full max-w-5xl px-6 py-10 space-y-10">
-      <header className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold">Revenue</h1>
-          <p className="mt-1 text-sm text-ink-muted">Every revenue stream, from one ledger.</p>
-        </div>
-        <div className="flex items-center gap-3 text-sm">
-          <span className="text-ink-muted">
-            {user.firstName} {user.lastName}
-          </span>
-          <form action={logout}>
-            <button
-              type="submit"
-              className="rounded-md border border-line-strong px-3 py-1.5 text-xs text-ink-secondary transition-colors hover:bg-overlay"
-            >
-              Sign out
-            </button>
-          </form>
-        </div>
+      <header>
+        <h1 className="text-2xl font-semibold">Revenue</h1>
+        <p className="mt-1 text-sm text-ink-muted">Every revenue stream, from one ledger.</p>
       </header>
 
       <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
