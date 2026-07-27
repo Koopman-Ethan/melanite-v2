@@ -11,7 +11,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { sql } from 'drizzle-orm'
+import { eq, isNotNull, sql } from 'drizzle-orm'
 
 import { db } from '../db'
 import * as schema from '@/lib/db/schema'
@@ -36,6 +36,24 @@ async function main() {
   if (count > 0 && !force) {
     throw new Error(`ledger_entries already has ${count} rows. Re-run with --force to replace.`)
   }
+
+  // Passwords are the one thing worth carrying across a reload.
+  //
+  // Xano's hashes are not portable, so every provider imports with a null hash and
+  // requires_password_reset set. That is correct for a first load — but during development
+  // this script gets re-run constantly, and each run silently signs out anyone who had set a
+  // password, which reads as "the password stopped working" rather than "the ETL ran".
+  // Snapshot them by email and put them back afterwards.
+  const carriedPasswords = force
+    ? await db
+        .select({
+          email: schema.providers.email,
+          passwordHash: schema.providers.passwordHash,
+          requiresPasswordReset: schema.providers.requiresPasswordReset,
+        })
+        .from(schema.providers)
+        .where(isNotNull(schema.providers.passwordHash))
+    : []
 
   // --force means "replace everything", not "insert anyway". This is a full load, and the
   // neon-http driver has no interactive transactions, so a mid-run failure leaves partial
@@ -92,6 +110,19 @@ async function main() {
     )
   }
   await db.insert(schema.providers).values(providerRows)
+
+  for (const carried of carriedPasswords) {
+    await db
+      .update(schema.providers)
+      .set({
+        passwordHash: carried.passwordHash,
+        requiresPasswordReset: carried.requiresPasswordReset,
+      })
+      .where(eq(schema.providers.email, carried.email))
+  }
+  if (carriedPasswords.length) {
+    console.log(`  carried ${carriedPasswords.length} existing password(s) across the reload`)
+  }
 
   const mdRows = xProviders.map(T.transformMedicalDirectorCredentials).filter((r) => r !== null)
   if (mdRows.length) await db.insert(schema.medicalDirectorCredentials).values(mdRows)
