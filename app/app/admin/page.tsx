@@ -44,6 +44,18 @@ export default async function AdminHome() {
       </Link>
 
       <Link
+        href="/app/admin/queue"
+        className="block rounded-card border border-line bg-surface p-6 transition-colors hover:border-line-strong"
+      >
+        <div className="text-xs uppercase tracking-wide text-ink-muted">Queue</div>
+        <div className="mt-1.5 text-sm text-ink-secondary">
+          Money waiting on a decision — late room cancellations, fees that failed to charge,
+          deposits on cancelled courses
+        </div>
+        <div className="mt-4 text-sm text-gold">Open the queue →</div>
+      </Link>
+
+      <Link
         href="/app/admin/training"
         className="block rounded-card border border-line bg-surface p-6 transition-colors hover:border-line-strong"
       >
@@ -70,7 +82,7 @@ export default async function AdminHome() {
           rentals, a cancellation queue and package sales in a single footer box. Those are
           distinct jobs and get distinct surfaces here — see Phase 6 in the migration plan. */}
       <p className="text-xs text-ink-faint">
-        Room rentals and the cancellation queue are not built yet.
+        Room rental admin views are not built yet.
       </p>
     </main>
   )

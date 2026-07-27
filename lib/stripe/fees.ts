@@ -147,12 +147,15 @@ export async function chargeBookingFee(bookingId: string, kind: FeeKind): Promis
 
   const card = await getClientCard(booking.clientId)
   if (!card?.defaultPaymentMethodId || !card.stripeCustomerId) {
-    return { skipped: `${booking.clientName} has no card on file.` }
+    return recordFailure(booking.id, `${booking.clientName} has no card on file.`)
   }
   if (!card.consentAt) {
     // A card can exist without consent if it was attached by some other route. Stripe would
     // accept the charge; we should not.
-    return { skipped: `${booking.clientName} did not authorise charges to their card.` }
+    return recordFailure(
+      booking.id,
+      `${booking.clientName} did not authorise charges to their card.`,
+    )
   }
 
   const policy = await feePolicy()
@@ -219,7 +222,11 @@ export async function chargeBookingFee(bookingId: string, kind: FeeKind): Promis
     )
     intentId = intent.id
   } catch (err) {
-    return { error: friendlyStripeError(err, 'The card was declined. Melanite has been notified.') }
+    // The provider gets a message; the queue gets a row. Without the second, a declined card is
+    // a toast that disappears and a fee nobody ever collects.
+    const reason = friendlyStripeError(err, 'The card was declined.')
+    const failed = await recordFailure(booking.id, reason)
+    return { error: failed.skipped }
   }
 
   // Written here rather than waiting for the webhook: this call is synchronous and already
@@ -268,7 +275,24 @@ export async function chargeBookingFee(bookingId: string, kind: FeeKind): Promis
     }
   }
 
+  // A successful charge clears any earlier failure, so a retry that works removes the item from
+  // the queue rather than leaving a resolved problem sitting in it.
+  await db
+    .update(bookings)
+    .set({ feeChargeFailedAt: null, feeChargeError: null })
+    .where(eq(bookings.id, booking.id))
+
   return { charged: true, amount: (amountCents / 100).toFixed(2) }
+}
+
+/** Stamps the booking so the failure surfaces in the admin queue. */
+async function recordFailure(bookingId: string, reason: string): Promise<FeeResult> {
+  await db
+    .update(bookings)
+    .set({ feeChargeFailedAt: new Date(), feeChargeError: reason })
+    .where(eq(bookings.id, bookingId))
+
+  return { skipped: reason }
 }
 
 /** How to name the saved payment method in a ledger note.

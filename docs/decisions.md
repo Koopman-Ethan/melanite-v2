@@ -289,6 +289,44 @@ competing BNPL button beside it splits the one route the business has a relation
 `card` covers Apple Pay and Google Pay, which ride the card rail rather than being separate
 types.
 
+### The admin queue — 2026-07-27
+
+`/app/admin/queue`. One list of everything waiting on a human decision about money.
+
+Three situations exist where the system deliberately stops short of deciding, because deciding
+would be wrong:
+
+1. **A room rental cancelled inside 24 hours.** The block is freed either way; whether the
+   provider gets their money back is Keoni's call.
+2. **A no-show or late-cancellation fee that failed to charge** — declined card, no card on
+   file, no consent recorded. The appointment status is recorded; the money is not.
+3. **A cancelled course with deposits already taken.** Refundable or transferable to another
+   date, which is a conversation rather than a rule.
+
+Only the first existed in v1, surfaced through a room-rentals endpoint filtered on
+`cancellation_requested`. The other two could not exist there: v1 never charged a fee and never
+cancelled a course in software. In v2 all three could already happen and **none of them were
+visible anywhere** — a provider cancels late and the refund decision has nowhere to live.
+
+**Derived, not stored.** Every item comes from the state of the thing itself — a rental's
+status, a booking's `feeChargeFailedAt`, a course's status plus its ledger. A separate
+work-queue table is one more store that can disagree with reality, and an item lingering after
+it has been resolved is worse than no queue. The corollary is enforced: every action ends with
+the item leaving the queue, either because money moved or because someone recorded a decision
+that it should not.
+
+**Failed fees are stamped on the booking**, not queued elsewhere: `feeChargeFailedAt`,
+`feeChargeError`, and `feeWaivedAt` + `feeWaivedBy`. Waiving keeps the record — it distinguishes
+"handled, no" from "nobody looked", which is the entire point. A later successful charge clears
+the failure, so a retry that works removes the row rather than leaving a solved problem in view.
+
+**Sorted oldest first.** Age is what matters in a queue: the thing waiting longest is the thing
+most likely to have been forgotten.
+
+Transferring a student between courses moves the enrolment row rather than refunding and
+re-charging. The ledger entries key on the enrolment id, so the money follows it and their
+balance stays correct against the new course's price.
+
 ## Backlog
 
 ### Multi-service bookings

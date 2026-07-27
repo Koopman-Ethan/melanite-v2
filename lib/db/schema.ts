@@ -515,6 +515,19 @@ export const bookings = pgTable('bookings', {
   googleCalendarEventId: text(),
   policyAckAt: timestamp({ withTimezone: true }),
   policyAckVersion: text(),
+
+  /** A no-show or late-cancellation fee that was attempted and did not go through — a declined
+   *  card, no card on file, no consent.
+   *
+   *  Stamped on the booking rather than kept in a separate queue table: the fact belongs to this
+   *  appointment, and a parallel work-queue store is one more thing that can disagree with
+   *  reality. Cleared when the fee is later charged or deliberately waived. */
+  feeChargeFailedAt: timestamp({ withTimezone: true }),
+  feeChargeError: text(),
+  /** Set when someone decides not to pursue the fee. Distinguishes "handled, no" from "nobody
+   *  has looked at it", which is the entire point of a review queue. */
+  feeWaivedAt: timestamp({ withTimezone: true }),
+  feeWaivedBy: uuid().references(() => providers.id, { onDelete: 'set null' }),
 }, (t) => [
   index().on(t.providerId, t.startTime),
   index().on(t.startTime, t.endTime),
