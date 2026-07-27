@@ -415,6 +415,105 @@ export async function inviteProvider(email: string): Promise<ToolState & { url?:
   }
 }
 
+/** Reads back the link for an invite that already exists.
+ *
+ *  Fetched on demand rather than listed with the invites, deliberately. A token is a bearer
+ *  credential — whoever holds it can create that provider's account — so shipping every
+ *  outstanding one to the browser on every page load, into a tab that may sit open on a desk
+ *  all day, costs more than it saves. This crosses the wire when an admin asks for it.
+ *
+ *  Without this the link was recoverable exactly once, in the response to creating it. If the
+ *  email did not send and the admin reloaded the page, the only way back was revoke-and-reinvite
+ *  — and the provider then holds two links, one of which silently no longer works.
+ */
+export async function inviteUrl(inviteId: string): Promise<ToolState & { url?: string }> {
+  await requireAdmin()
+
+  const [invite] = await db
+    .select({
+      token: inviteLinks.token,
+      status: inviteLinks.status,
+      expiresAt: inviteLinks.expiresAt,
+    })
+    .from(inviteLinks)
+    .where(eq(inviteLinks.id, inviteId))
+    .limit(1)
+
+  if (!invite) return { error: 'That invite does not exist.' }
+  if (invite.status !== 'pending') {
+    // Handing out a dead link is worse than refusing: it gets sent, and the provider hits a
+    // wall with no idea why.
+    return { error: 'That invite is no longer live, so its link would not work.' }
+  }
+  if (invite.expiresAt < new Date()) {
+    return { error: 'That invite has expired. Revoke it and send a new one.' }
+  }
+
+  return { url: `${await appOrigin()}/onboard/${invite.token}` }
+}
+
+/** Sends the same invite again, to the same address.
+ *
+ *  The same token, not a new one. "I never got the email" is the common case and it does not
+ *  mean the link is compromised — minting a fresh token would quietly kill the first one, so
+ *  anyone who did eventually find the original email would then be told their invite is
+ *  invalid. The deadline is not extended either: the seven days started when it was sent, and
+ *  moving that would make the expiry a fiction. A genuinely stale invite gets revoked and
+ *  reissued, which is a different button.
+ */
+export async function resendInvite(inviteId: string): Promise<ToolState & { url?: string }> {
+  const admin = await requireAdmin()
+
+  const [invite] = await db
+    .select({
+      email: inviteLinks.email,
+      token: inviteLinks.token,
+      status: inviteLinks.status,
+      expiresAt: inviteLinks.expiresAt,
+    })
+    .from(inviteLinks)
+    .where(eq(inviteLinks.id, inviteId))
+    .limit(1)
+
+  if (!invite) return { error: 'That invite does not exist.' }
+  if (invite.status === 'accepted') {
+    return { error: 'That invite has already been accepted — the account exists.' }
+  }
+  if (invite.status !== 'pending' || invite.expiresAt < new Date()) {
+    return { error: 'That invite is no longer live. Revoke it and send a new one.' }
+  }
+
+  const url = `${await appOrigin()}/onboard/${invite.token}`
+  const daysLeft = Math.max(
+    1,
+    Math.ceil((invite.expiresAt.getTime() - Date.now()) / (24 * 60 * 60 * 1000)),
+  )
+
+  const sent = await sendEmail({
+    to: invite.email,
+    ...providerInviteEmail({
+      invitedBy: `${admin.firstName} ${admin.lastName}`,
+      url,
+      // What is actually left, not the full seven days — the original clock is still running.
+      expiresInDays: daysLeft,
+    }),
+  })
+
+  if (!sent.delivered) {
+    return {
+      error:
+        sent.reason === 'not-configured'
+          ? 'Email is not set up yet. Copy the link and send it yourself.'
+          : `The email didn’t send — ${sent.detail}. Copy the link and send it yourself.`,
+      url,
+    }
+  }
+
+  return {
+    success: `Invite re-sent to ${invite.email}. It still expires in ${daysLeft} day${daysLeft === 1 ? '' : 's'}.`,
+  }
+}
+
 /** Revokes an outstanding invite. */
 export async function revokeInvite(inviteId: string): Promise<ToolState> {
   await requireAdmin()

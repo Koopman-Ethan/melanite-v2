@@ -10,8 +10,10 @@ import type { ServiceOption } from '@/lib/db/queries/admin-tools'
 import {
   createManualBooking,
   inviteProvider,
+  inviteUrl,
   recordBookingPayment,
   recordMembershipPayment,
+  resendInvite,
   revokeInvite,
   type ToolState,
 } from './actions'
@@ -630,7 +632,9 @@ function InviteTool({ invites }: { invites: InviteView[] }) {
     <div className="space-y-5">
       <p className="text-sm text-ink-muted">
         Sends a one-time link that expires in 7 days. The provider sets their own password —
-        nobody here ever sees it.
+        nobody here ever sees it. If the email doesn&rsquo;t arrive, use Show link or Resend
+        rather than sending a second invite: two live links for one person means whichever they
+        happen to click decides their account.
       </p>
 
       <div className="flex flex-wrap items-end gap-3">
@@ -662,7 +666,11 @@ function InviteTool({ invites }: { invites: InviteView[] }) {
       {state?.success && <Notice tone="success">{state.success}</Notice>}
       {/* Shown whichever way it went — email may not be configured, and a link the admin cannot
           see is a link nobody can send. */}
-      {state?.url && <p className="break-all text-xs text-ink-faint">{state.url}</p>}
+      {state?.url && (
+        <p className="break-all rounded-field border border-line bg-overlay p-3 text-xs text-ink-secondary">
+          {state.url}
+        </p>
+      )}
 
       <section className="space-y-2">
         <h3 className="text-sm font-medium uppercase tracking-wide text-ink-muted">
@@ -690,14 +698,32 @@ function InviteTool({ invites }: { invites: InviteView[] }) {
                     {invite.invitedBy && ` · invited by ${invite.invitedBy}`}
                   </span>
                 </div>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={pending}
-                  onClick={() => start(async () => setState(await revokeInvite(invite.id)))}
-                >
-                  Revoke
-                </Button>
+                <div className="flex flex-wrap items-center gap-1">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={pending}
+                    onClick={() => start(async () => setState(await inviteUrl(invite.id)))}
+                  >
+                    Show link
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={pending}
+                    onClick={() => start(async () => setState(await resendInvite(invite.id)))}
+                  >
+                    Resend
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={pending}
+                    onClick={() => start(async () => setState(await revokeInvite(invite.id)))}
+                  >
+                    Revoke
+                  </Button>
+                </div>
               </li>
             ))}
           </ul>
