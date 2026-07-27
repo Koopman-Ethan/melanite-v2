@@ -41,6 +41,43 @@ const STATUS_STYLES: Record<string, string> = {
   refunded: 'border-info/40 bg-info/10 text-info',
 }
 
+/** Which half-days are free, as two marks — not a coloured dot.
+ *
+ *  WCAG 1.4.1 again: the previous green/amber/blue dot put the whole meaning in hue. A room day
+ *  has two bookable halves, so showing them directly is both accessible and more informative
+ *  than "part taken" ever was — you can see WHICH half is gone.
+ *
+ *  `mine` is drawn as an outline rather than another colour, so it survives greyscale too.
+ */
+function SlotMarks({
+  amFree,
+  pmFree,
+  mine,
+  selected,
+}: {
+  amFree: boolean
+  pmFree: boolean
+  mine: boolean
+  selected: boolean
+}) {
+  const fill = (free: boolean) =>
+    selected
+      ? free
+        ? 'bg-gold-ink/70'
+        : 'bg-gold-ink/20'
+      : free
+        ? 'bg-success'
+        : 'bg-ink-disabled'
+
+  return (
+    <span className="mt-1 flex items-center gap-[3px]" aria-hidden>
+      <span className={cn('h-[4px] w-[7px] rounded-[1px]', fill(amFree))} />
+      <span className={cn('h-[4px] w-[7px] rounded-[1px]', fill(pmFree))} />
+      {mine && <span className="ml-[1px] text-[8px] leading-none text-info">●</span>}
+    </span>
+  )
+}
+
 const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
 
 const usd = (v: string) => Number(v).toLocaleString('en-US', { style: 'currency', currency: 'USD' })
@@ -200,7 +237,7 @@ export function RentalPanel({
                     isSelected
                       ? 'border-gold bg-gold text-gold-ink'
                       : none
-                        ? 'cursor-not-allowed border-transparent text-ink-faint/40'
+                        ? 'cursor-not-allowed border-transparent text-ink-disabled'
                         : 'border-line text-ink-secondary hover:border-gold hover:text-gold',
                     isToday && !isSelected && 'ring-1 ring-inset ring-line-strong',
                   )}
@@ -209,20 +246,11 @@ export function RentalPanel({
                     {Number(d.date.slice(-2))}
                   </span>
                   {!d.past && (
-                    <span
-                      aria-hidden
-                      className={cn(
-                        'mt-1 size-1.5 rounded-full',
-                        isSelected
-                          ? 'bg-gold-ink/60'
-                          : isMine
-                            ? 'bg-info'
-                            : none
-                              ? 'bg-transparent'
-                              : d.partiallyTaken
-                                ? 'bg-warning'
-                                : 'bg-success',
-                      )}
+                    <SlotMarks
+                      amFree={d.open.includes('am')}
+                      pmFree={d.open.includes('pm')}
+                      mine={isMine}
+                      selected={isSelected}
                     />
                   )}
                 </button>
@@ -232,16 +260,16 @@ export function RentalPanel({
 
           <div className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[10px] text-ink-faint">
             <span className="flex items-center gap-1">
-              <span className="size-1.5 rounded-full bg-success" aria-hidden /> Whole day free
+              <SlotMarks amFree pmFree mine={false} selected={false} /> Morning · afternoon free
             </span>
             <span className="flex items-center gap-1">
-              <span className="size-1.5 rounded-full bg-warning" aria-hidden /> Part taken
+              <SlotMarks amFree={false} pmFree mine={false} selected={false} /> One half taken
             </span>
             <span className="flex items-center gap-1">
-              <span className="size-1.5 rounded-full bg-info" aria-hidden /> Yours
+              <SlotMarks amFree pmFree mine selected={false} /> Yours
             </span>
             <span className="flex items-center gap-1">
-              <span className="text-ink-faint/40 line-through">00</span> Fully booked
+              <span className="text-ink-disabled line-through">00</span> Fully booked
             </span>
           </div>
         </div>
@@ -267,7 +295,7 @@ export function RentalPanel({
                       ? 'border-gold bg-gold/10 text-gold'
                       : available
                         ? 'border-line text-ink-muted hover:border-line-strong hover:text-ink-secondary'
-                        : 'cursor-not-allowed border-line/40 text-ink-faint/40 line-through',
+                        : 'cursor-not-allowed border-line/40 text-ink-disabled line-through',
                   )}
                 >
                   <span className="block font-medium">{SLOT_LABELS[s]}</span>

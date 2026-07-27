@@ -30,9 +30,13 @@ export function Field({ id, label, hint, error, ...props }: FieldProps) {
         aria-invalid={error ? true : undefined}
         {...props}
         className={cn(
-          'w-full rounded-field border bg-surface px-3 py-2 text-sm text-ink',
+          // min-h-11 is a 44px touch target — the size a fingertip actually needs.
+        'w-full min-h-11 rounded-field border bg-surface px-3 py-2 text-sm text-ink',
           'placeholder:text-ink-faint',
-          error ? 'border-danger' : 'border-line focus:border-gold',
+          // `line-control`, not `line`: an empty input bounded by a #2a2a2a hairline is
+          // genuinely hard to locate on a dark page, and WCAG 1.4.11 asks for 3:1 on anything
+          // needed to identify a component.
+          error ? 'border-danger' : 'border-line-control focus:border-gold',
         )}
       />
       {hint && (

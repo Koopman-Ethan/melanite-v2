@@ -8,14 +8,16 @@ import { cn } from '@/lib/cn'
 
 const VARIANTS = {
   gold: 'bg-gold text-gold-ink border-gold hover:bg-gold-hover',
-  outline: 'bg-transparent text-ink-secondary border-line-strong hover:bg-overlay hover:border-ink-faint',
+  outline: 'bg-transparent text-ink-secondary border-line-control hover:bg-overlay hover:border-ink-muted',
   danger: 'bg-critical text-ink border-critical hover:brightness-110',
   ghost: 'bg-transparent text-ink-muted border-transparent hover:text-ink-secondary hover:bg-raised',
 } as const
 
+/** Both sizes clear a 44x44px touch target. `sm` was 27px tall — fine with a mouse, a poor
+ *  target for a provider tapping between clients with one hand. */
 const SIZES = {
-  sm: 'px-3 py-1.5 text-xs',
-  md: 'px-[18px] py-3 text-[13px]',
+  sm: 'min-h-11 px-3 py-1.5 text-xs',
+  md: 'min-h-11 px-[18px] py-3 text-[13px]',
 } as const
 
 export interface ButtonProps extends Omit<ComponentProps<'button'>, 'className'> {
@@ -38,7 +40,7 @@ export function Button({
     <button
       {...props}
       className={cn(
-        'rounded-control border font-bold tracking-[0.3px] transition-all duration-150',
+        'inline-flex items-center justify-center rounded-control border font-bold tracking-[0.3px] transition-all duration-150',
         'disabled:cursor-not-allowed disabled:opacity-50',
         VARIANTS[variant],
         SIZES[size],

@@ -34,12 +34,28 @@
   --color-overlay: #1f1f1f;
   --color-line: #2a2a2a;
   --color-line-strong: #3a3a3a;
+  /* The boundary of an interactive control — a text input's edge, an outline button. WCAG
+   * 1.4.11 wants 3:1 for anything needed to identify a component, and an empty input with a
+   * #2a2a2a border is genuinely hard to find on a dark page. Decorative card edges keep using
+   * `line`, which does not carry that burden. */
+  --color-line-control: #6a6a6a;
 
-  /* Text ramp. `ink` for content, `ink-muted` for labels, `ink-faint` for metadata. */
+  /* Text ramp. `ink` for content, `ink-muted` for labels, `ink-faint` for metadata.
+   *
+   * Every step clears WCAG AA (4.5:1) against canvas, surface AND overlay — verified by
+   * `npm run a11y:contrast`, which reads these values rather than duplicating them.
+   *
+   * `ink-faint` was #666666, which measured 2.87:1 on overlay. It is used for hints, legends
+   * and captions at 10–12px, so the smallest text in the app was also the least readable —
+   * the classic dark-theme failure, invisible to anyone with good eyes on a good monitor.
+   * `ink-muted` moved up with it to keep the ramp's steps apart. */
   --color-ink: #ffffff;
   --color-ink-secondary: #dddddd;
-  --color-ink-muted: #9a9a9a;
-  --color-ink-faint: #666666;
+  --color-ink-muted: #a8a8a8;
+  --color-ink-faint: #8a8a8a;
+  /* Genuinely disabled controls. WCAG exempts these from contrast, so this is allowed to be
+   * dim — but it is a named token so "disabled" is a decision rather than an opacity guess. */
+  --color-ink-disabled: #5a5a5a;
 
   /* Severity palette, carried from v1. */
   --color-success: #4c9a5e;

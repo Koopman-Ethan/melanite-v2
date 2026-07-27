@@ -350,6 +350,52 @@ a send.
 `getBookingLink` is scoped to the provider. A link token is a bearer credential for someone
 else's payment page, and reading one by guessing booking ids must not be possible.
 
+### Design tokens, measured — 2026-07-27
+
+`npm run a11y:contrast` reads the tokens straight out of `globals.css` and checks each against
+the surfaces it actually appears on. Contrast is the one accessibility property that cannot be
+eyeballed, and a dark theme looks fine to anyone with good eyes on a good monitor right up until
+it doesn't.
+
+What it found:
+
+- **`ink-faint` was #666666 — 2.87:1 on `overlay`**, against a 4.5:1 requirement. It is used for
+  hints, legends and captions at 10–12px, so the smallest text in the app was also the least
+  readable. Now #8a8a8a, clearing AA on canvas, surface and overlay. `ink-muted` moved to
+  #a8a8a8 to keep the ramp's steps distinct.
+- **Control borders had no token.** `--color-line-control` (#6a6a6a, 3.4:1) now bounds inputs
+  and outline buttons — WCAG 1.4.11 asks 3:1 for anything needed to identify a component, and an
+  empty input edged in #2a2a2a is genuinely hard to find. Decorative card borders keep `line`;
+  holding those to 3:1 would mean drawing every card in near-grey for no benefit.
+- **`--color-ink-disabled`** replaces scattered `text-ink-faint/40`. Disabled controls are exempt
+  from contrast rules, so this is allowed to be dim — but naming it makes "disabled" a decision
+  rather than an opacity guess.
+
+Two corrections to my own earlier audit, both from checking rather than assuming:
+
+- **Focus rings already existed** — a global `:focus-visible` gold outline in `globals.css`, with
+  nothing overriding it on interactive elements. I claimed they were missing.
+- **`critical` "failing" was a bad check.** It is a background with white text on it, so the pair
+  that matters is ink ON critical (4.84:1, passes). Measuring it as a foreground measured the
+  wrong direction. Same for `danger`, which is only ever a tint or a dot — that check was removed
+  rather than "fixed", because a threshold on a combination that does not exist trains you to
+  ignore the output.
+
+### Colour is never the only signal — 2026-07-27
+
+The booking and room-rental calendars encoded availability as a green/amber/red dot. The legend
+mapped colour to meaning, so a red-green colourblind provider — roughly 1 in 12 men — could not
+read the busiest control in the app at all. Straight WCAG 1.4.1 failure.
+
+- **Booking calendar:** a three-bar meter. The *count* of filled bars carries the level; colour
+  only reinforces it. Works in greyscale.
+- **Room rental:** two marks, one per bookable half-day. Better than the dot it replaced, not
+  merely more accessible — you can now see *which* half is gone rather than just "part taken".
+  "Yours" is an added glyph rather than a fourth hue.
+
+Touch targets on inputs and both button sizes are now 44px minimum. `sm` buttons were 27px —
+fine with a mouse, poor for a provider tapping between clients one-handed.
+
 ## Backlog
 
 ### Multi-service bookings

@@ -18,7 +18,8 @@
     "etl:verify": "tsx scripts/etl/verify.ts",
     "db:set-password": "tsx --tsconfig scripts/tsconfig.json scripts/set-password.ts",
     "db:reset-link": "tsx --tsconfig scripts/tsconfig.json scripts/reset-link.ts",
-    "db:migrate:kit": "drizzle-kit migrate"
+    "db:migrate:kit": "drizzle-kit migrate",
+    "a11y:contrast": "tsx scripts/contrast.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",

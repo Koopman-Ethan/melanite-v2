@@ -20,6 +20,31 @@ export interface DayView {
   past: boolean
 }
 
+/** Availability as a three-bar meter, not a coloured dot.
+ *
+ *  WCAG 1.4.1: colour must never be the only carrier of information. A green/amber/red dot is
+ *  exactly that — the legend maps colour to meaning, so a red-green colourblind provider (about
+ *  1 in 12 men) cannot use it at all. This is the busiest control in the app, so that mattered.
+ *
+ *  The number of filled bars carries the meaning; colour reinforces it. Works in greyscale.
+ */
+function Meter({ level, tone }: { level: 1 | 2 | 3; tone: string }) {
+  return (
+    <span className="mt-1 flex items-end gap-[2px]" aria-hidden>
+      {[1, 2, 3].map((bar) => (
+        <span
+          key={bar}
+          className={cn(
+            'w-[3px] rounded-[1px]',
+            bar === 1 ? 'h-[3px]' : bar === 2 ? 'h-[5px]' : 'h-[7px]',
+            bar <= level ? tone : 'bg-ink-disabled',
+          )}
+        />
+      ))}
+    </span>
+  )
+}
+
 const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
 
 const monthLabel = (month: string) => {
@@ -127,7 +152,7 @@ export function MonthCalendar({
                 isSelected
                   ? 'border-gold bg-gold text-gold-ink'
                   : disabled
-                    ? 'cursor-not-allowed border-transparent text-ink-faint/40'
+                    ? 'cursor-not-allowed border-transparent text-ink-disabled'
                     : 'border-line text-ink-secondary hover:border-gold hover:text-gold',
                 isToday && !isSelected && 'ring-1 ring-inset ring-line-strong',
               )}
@@ -137,18 +162,17 @@ export function MonthCalendar({
               </span>
 
               {!disabled && (
-                <span
-                  aria-hidden
-                  className={cn(
-                    'mt-1 size-1.5 rounded-full',
+                <Meter
+                  level={band === 'high' ? 3 : band === 'mid' ? 2 : 1}
+                  tone={
                     isSelected
-                      ? 'bg-gold-ink/60'
+                      ? 'bg-gold-ink/70'
                       : band === 'high'
                         ? 'bg-success'
                         : band === 'mid'
                           ? 'bg-warning'
-                          : 'bg-danger',
-                  )}
+                          : 'bg-danger'
+                  }
                 />
               )}
             </button>
@@ -158,16 +182,16 @@ export function MonthCalendar({
 
       <div className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[10px] text-ink-faint">
         <span className="flex items-center gap-1">
-          <span className="size-1.5 rounded-full bg-success" aria-hidden /> Wide open
+          <Meter level={3} tone="bg-success" /> Wide open
         </span>
         <span className="flex items-center gap-1">
-          <span className="size-1.5 rounded-full bg-warning" aria-hidden /> Some room
+          <Meter level={2} tone="bg-warning" /> Some room
         </span>
         <span className="flex items-center gap-1">
-          <span className="size-1.5 rounded-full bg-danger" aria-hidden /> Nearly full
+          <Meter level={1} tone="bg-danger" /> Nearly full
         </span>
         <span className="flex items-center gap-1">
-          <span className="text-ink-faint/40 line-through">00</span> Fully booked
+          <span className="text-ink-disabled line-through">00</span> Fully booked
         </span>
       </div>
     </div>
