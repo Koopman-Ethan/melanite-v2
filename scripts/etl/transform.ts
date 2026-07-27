@@ -914,3 +914,62 @@ export interface XanoTrainingCourse {
   google_calendar_event_id_day1: string | null; google_calendar_event_id_day2: string | null
   status: 'scheduled' | 'completed' | 'cancelled'
 }
+
+/** The singleton config row — laser hours, the provider share, feature flags, and the
+ *  medical-director price id.
+ *
+ *  Was missing from the first load, which meant the app silently fell back to hardcoded
+ *  defaults. Those happened to match production (08:00–20:00, 15-minute stride), so nothing
+ *  looked wrong — the medical-director price id was simply absent, which disables the
+ *  subscribe button with no visible reason. Defaults that coincidentally agree with reality
+ *  are worse than ones that do not, because nothing surfaces the gap. */
+export function transformPlatformSettings(s: XanoPlatformSettings) {
+  return {
+    id: 1,
+    providerSharePct: (s.provider_share_pct ?? 0.5).toFixed(3),
+    tipToProviderPct: (s.tip_to_provider_pct ?? 1).toFixed(3),
+    noShowFeePctOfPrice: (s.noshow_fee_pct_of_price ?? 0.5).toFixed(3),
+    cancellationFeeAmount: money(s.cancellation_fee_amount),
+    stripePlatformAccountId: s.stripe_platform_account_id,
+    medicalDirectorPriceId: s.medical_director_price_id,
+    laserOpenTime: s.laser_open_time,
+    laserCloseTime: s.laser_close_time,
+    slotStrideMins: s.slot_stride_mins,
+    roomRentalEnabled: s.room_rental_enabled ?? false,
+    packagesEnabled: s.packages_enabled ?? false,
+    updatedAt: ms(s.updated_at) ?? new Date(),
+    updatedBy: null,
+  }
+}
+
+/** Renewal dates by Stripe subscription id.
+ *
+ *  Xano's memberships.renewal_date is null on every row — the webhook that would set it never
+ *  populated it — but Stripe knows, on the subscription item's current_period_end. Without
+ *  this the membership page can say a subscription is active but not when it renews, which is
+ *  the one thing a provider actually wants from that screen. */
+export function renewalDatesFromStripe(
+  subscriptions: StripeSubscription[],
+): Map<string, Date> {
+  const byId = new Map<string, Date>()
+  for (const sub of subscriptions) {
+    const end = sub.items?.data?.[0]?.current_period_end
+    if (end) byId.set(sub.id, new Date(end * 1000))
+  }
+  return byId
+}
+
+export interface XanoPlatformSettings {
+  id: number; provider_share_pct: number; tip_to_provider_pct: number
+  noshow_fee_pct_of_price: number; cancellation_fee_amount: number
+  stripe_platform_account_id: string; medical_director_price_id: string | null
+  laser_open_time: string; laser_close_time: string; slot_stride_mins: number
+  room_rental_enabled: boolean | null; packages_enabled: boolean | null
+  updated_at: number | null
+}
+
+export interface StripeSubscription {
+  id: string
+  status: string
+  items: { data: Array<{ current_period_end: number }> }
+}

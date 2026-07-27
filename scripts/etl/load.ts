@@ -94,10 +94,12 @@ async function main() {
   const xRoomBookings = load<T.XanoRoomBooking>('xano', 'room_bookings')
   const xMemberships = load<T.XanoMembership>('xano', 'memberships')
   const xTrainingCourses = load<T.XanoTrainingCourse>('xano', 'training_courses')
+  const xPlatformSettings = load<T.XanoPlatformSettings>('xano', 'platform_settings')
 
   const sPaymentIntents = load<T.StripePaymentIntent>('stripe', 'payment_intents')
   const sRefunds = load<T.StripeRefund>('stripe', 'refunds')
   const sInvoices = load<T.StripeInvoice>('stripe', 'invoices')
+  const sSubscriptions = load<T.StripeSubscription>('stripe', 'subscriptions')
 
   // ---- providers ----
   const providerRows = xProviders.map(T.transformProvider)
@@ -122,6 +124,13 @@ async function main() {
   }
   if (carriedPasswords.length) {
     console.log(`  carried ${carriedPasswords.length} existing password(s) across the reload`)
+  }
+
+  // ---- platform settings ----
+  // Drives laser hours, the provider share and the medical-director price. Without it the app
+  // falls back to defaults that happen to match, which hides the gap rather than showing it.
+  if (xPlatformSettings[0]) {
+    await db.insert(schema.platformSettings).values(T.transformPlatformSettings(xPlatformSettings[0]))
   }
 
   const mdRows = xProviders.map(T.transformMedicalDirectorCredentials).filter((r) => r !== null)
@@ -217,9 +226,17 @@ async function main() {
     .map(T.transformRoomBooking)
   if (roomRows.length) await db.insert(schema.roomBookings).values(roomRows)
 
+  // Xano never populated renewal_date; Stripe has it on the subscription item.
+  const renewals = T.renewalDatesFromStripe(sSubscriptions)
   const membershipRows = xMemberships
     .filter((m) => liveProviders.has(m.provider_id))
     .map(T.transformMembership)
+    .map((m) => ({
+      ...m,
+      renewalDate:
+        m.renewalDate ??
+        (m.stripeSubscriptionId ? (renewals.get(m.stripeSubscriptionId) ?? null) : null),
+    }))
   if (membershipRows.length) await db.insert(schema.memberships).values(membershipRows)
 
   const courseRows = xTrainingCourses.map(T.transformTrainingCourse)
