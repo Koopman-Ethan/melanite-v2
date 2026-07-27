@@ -51,6 +51,7 @@ const ITEMS: NavItem[] = [
   { label: 'Daily Room Rental', href: '/app/room-rental', providerOnly: true },
   { label: 'My Services', href: '/app/services', providerOnly: true },
   { label: 'Membership', href: '/app/membership', providerOnly: true },
+  { label: 'Calendar', href: '/app/admin/calendar', adminOnly: true },
   { label: 'Revenue', href: '/app/admin/revenue', adminOnly: true },
   { label: 'Tools', href: '/app/admin/tools', adminOnly: true },
   { label: 'Account', href: '/app/account' },

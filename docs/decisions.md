@@ -60,6 +60,26 @@ Deliberate choices worth keeping:
 - **`recorded_by` makes it all attributable**, and the page lists those entries back. A
   hand-entered figure should always be traceable to a person.
 
+### Admin calendar — 2026-07-27
+
+A **resource** calendar, not a per-person one. There is one laser, so the question the page
+answers is "what is the machine doing and who has it" — which no provider-scoped view can show.
+Week grid, all providers on one timeline, at `/app/admin/calendar`.
+
+- **All positioning is computed server-side in Denver wall-clock** and shipped as minutes-from-
+  midnight. The client does layout only and never touches a timestamp. Same reasoning as the
+  admin tools' date/time split: an admin in another timezone must see the laser's calendar, not
+  their own.
+- **Overlapping bookings are laid out side by side and counted in a warning.** On a single-laser
+  business `lanes > 1` cannot legitimately happen; drawing them stacked would hide one behind
+  the other, and drawing them side by side silently would read as normal.
+- **Cancelled and no-shows are fetched but hidden behind a toggle.** They do not occupy the
+  laser, but "did that get cancelled?" is a question this page should answer. They are excluded
+  from lane assignment so a cancellation cannot push a real appointment sideways.
+- v1's `GET /admin/bookings` returned **every booking ever** with no date filter, then ran two
+  further queries per row to resolve the provider and service names. Replaced with one joined
+  query over a week window.
+
 ## Backlog
 
 ### Multi-service bookings
