@@ -436,6 +436,47 @@ mechanical ones. It cannot tell you whether a flow makes sense to someone who ca
 manual screen reader pass is still outstanding, and treating a clean axe run as "accessible" is
 the standard mistake.
 
+### Tests, and the bug they found immediately — 2026-07-27
+
+Vitest for units and database invariants (`npm test`); Playwright already covers accessibility
+and will carry end-to-end journeys.
+
+The priority was never coverage percentage. It was: **test where being wrong is expensive AND
+silent.** v1's revenue was $2,000 out for months because nothing crashed — the numbers were just
+wrong. So the suite starts with timezone conversion, the booking gates, and properties asserted
+over every row in the ledger.
+
+**Invariants run against the development database, not fixtures.** A fixture only contains the
+shapes you thought to create, and the rows that break an invariant are by definition the ones
+nobody thought of. That decision paid for itself on the first run.
+
+**What it found, within minutes of existing:**
+
+All four membership ledger entries pointed at a **provider id** where a **membership id**
+belonged. `subject_type = 'membership'`, `subject_id` = a provider — a polymorphic reference
+that looks populated and joins to nothing. It had survived every ETL run, the reconciliation to
+$2,052.75, and my own manual review, because no total is wrong when the pointer is: the money
+adds up either way.
+
+Two causes, both the same shape:
+
+- `subjectId: membershipIdByProvider.get(providerId) ?? providerId` — a "defensive" fallback
+  that turns a missing mapping into a confidently wrong answer. The identical pattern existed in
+  `ledgerFromPackageTransactions` (`?? t.id`) and, earlier today, in `roomRentalPaid`
+  (`?? pi.id`). Three instances of the same instinct.
+- The loader passed `new Map()`, so the lookup could only ever miss.
+
+Both fallbacks are gone — a missing mapping now throws and stops the import — and the loader
+builds the map from the rows it just inserted. The four existing rows were repointed; the
+platform total is unchanged at $2,052.75, which is precisely why nobody had noticed.
+
+**One deliberate exception, bounded.** Two entries reconstructed from Stripe legitimately point
+at nothing: the ETL found payments v1 had recorded no transaction for, so it built the ledger row
+from the charge with no booking to attach it to. Inventing a link would be worse than admitting
+there isn't one. The exclusion is narrow, their count and net value are pinned by a second test,
+and a third test guards the predicate itself — a first attempt at the exclusion accidentally
+skipped every entry with a NULL note, which is most of them, and still passed.
+
 ## Backlog
 
 ### Multi-service bookings

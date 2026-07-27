@@ -22,7 +22,9 @@
     "a11y:contrast": "tsx scripts/contrast.ts",
     "a11y:lint": "eslint app components lib",
     "a11y": "playwright test",
-    "a11y:report": "playwright test --reporter=list"
+    "a11y:report": "playwright test --reporter=list",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
@@ -49,7 +51,8 @@
     "eslint-plugin-jsx-a11y": "^6.10.2",
     "tailwindcss": "^4",
     "tsx": "^4.23.1",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.10"
   },
   "allowScripts": {
     "esbuild@0.18.20": true,

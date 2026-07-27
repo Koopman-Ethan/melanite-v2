@@ -342,7 +342,14 @@ export function ledgerFromPackageTransactions(
       payer: 'client',
       entryType: isRefund ? 'refund' : 'purchase',
       subjectType: 'client_package',
-      subjectId: clientPackageIdByTxn.get(t.id) ?? t.id,
+      // Same reasoning as memberships: pointing a package entry at a Xano transaction id
+      // rather than a client package produces a reference that joins to nothing.
+      //
+      // This throws if the map is empty. `client_packages` had no rows to import, so the path
+      // is currently unexercised — but if package transactions ever appear, the caller must
+      // supply the mapping rather than have the import quietly write wrong pointers, which is
+      // exactly what the membership entries did for four runs.
+      subjectId: requirePackageId(clientPackageIdByTxn, t.id),
       providerId: t.provider_id,
       clientId: null,
       serviceId: null,
@@ -386,6 +393,28 @@ export function ledgerFromRoomTransactions(txns: XanoRoomTransaction[]): LedgerR
   })
 }
 
+function requireMembershipId(map: Map<string, string>, providerId: string): string {
+  const id = map.get(providerId)
+  if (!id) {
+    throw new Error(
+      `No membership for provider ${providerId}. A membership ledger entry must point at a ` +
+        `membership row; pointing it at the provider produces a reference that joins to nothing.`,
+    )
+  }
+  return id
+}
+
+function requirePackageId(map: Map<string, string>, transactionId: string): string {
+  const id = map.get(transactionId)
+  if (!id) {
+    throw new Error(
+      `No client package for transaction ${transactionId}. Pointing the ledger entry at the ` +
+        `transaction id instead would resolve to nothing.`,
+    )
+  }
+  return id
+}
+
 /** Membership revenue exists ONLY in Stripe — no Xano table holds it.
  *  Built from paid invoices, joined to providers by `metadata.provider_id`. */
 export function ledgerFromStripeInvoices(
@@ -408,7 +437,12 @@ export function ledgerFromStripeInvoices(
         payer: 'provider',
         entryType: 'purchase',
         subjectType: 'membership',
-        subjectId: membershipIdByProvider.get(providerId) ?? providerId,
+        // No fallback to `providerId`. A `subject_type = 'membership'` row pointing at a
+        // provider is a polymorphic reference that resolves to the wrong table — it looks
+        // populated, joins to nothing, and survived four ETL runs unnoticed until an invariant
+        // test went looking. If the mapping is missing, that is a bug in the caller and should
+        // stop the import rather than be papered over.
+        subjectId: requireMembershipId(membershipIdByProvider, providerId),
         providerId,
         grossAmount: gross,
         tipAmount: '0.00',
