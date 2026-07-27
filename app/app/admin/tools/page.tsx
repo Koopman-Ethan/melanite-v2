@@ -8,6 +8,7 @@ import {
   getProviderSharePct,
   getUnpaidBookings,
 } from '@/lib/db/queries/admin-tools'
+import { getInvites } from '@/lib/db/queries/invites'
 
 import { Tools } from './tools'
 
@@ -36,12 +37,13 @@ const SOURCE_LABELS: Record<string, string> = {
 export default async function AdminToolsPage() {
   await requireAdmin()
 
-  const [unpaid, providers, serviceMap, sharePct, manualEntries] = await Promise.all([
+  const [unpaid, providers, serviceMap, sharePct, manualEntries, invites] = await Promise.all([
     getUnpaidBookings(),
     getActiveProviders(),
     getProviderServiceMap(),
     getProviderSharePct(),
     getManualEntries(),
+    getInvites(),
   ])
 
   return (
@@ -58,6 +60,11 @@ export default async function AdminToolsPage() {
         providers={providers}
         serviceMap={serviceMap}
         sharePct={sharePct}
+        invites={invites.map((i) => ({
+          ...i,
+          sentAt: i.sentAt.toISOString(),
+          expiresAt: i.expiresAt.toISOString(),
+        }))}
       />
 
       <section className="space-y-3">

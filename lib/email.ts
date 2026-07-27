@@ -17,7 +17,29 @@ export interface EmailMessage {
   text: string
 }
 
-export async function sendEmail(message: EmailMessage): Promise<{ delivered: boolean }> {
+export interface SendResult {
+  delivered: boolean
+  /** Why it did not go. `not-configured` and `failed` need DIFFERENT things said to a human —
+   *  one is "set the key", the other is "that address was rejected" — and reporting both as a
+   *  bare `delivered: false` told an admin the wrong thing. */
+  reason?: 'not-configured' | 'failed'
+  /** Provider detail, for an admin-facing message. Never shown to a client. */
+  detail?: string
+}
+
+/** Turns a Resend rejection into something an admin can act on. */
+function friendlyReason(status: number, body: string): string {
+  if (body.includes('testing email address')) {
+    return 'Resend refuses example.com and other reserved domains — use a real address'
+  }
+  if (status === 403 || body.includes('not verified')) {
+    return 'the sending domain is not verified in Resend'
+  }
+  if (status === 429) return 'the email service is rate limiting — try again shortly'
+  return `the email service returned ${status}`
+}
+
+export async function sendEmail(message: EmailMessage): Promise<SendResult> {
   const apiKey = process.env.RESEND_API_KEY
   const from = process.env.RESEND_FROM ?? 'Melanite Laser Suite <noreply@melanitesuite.com>'
 
@@ -28,25 +50,39 @@ export async function sendEmail(message: EmailMessage): Promise<{ delivered: boo
         `  subject: ${message.subject}\n` +
         `  ${message.text.replace(/\n/g, '\n  ')}\n`,
     )
-    return { delivered: false }
+    return { delivered: false, reason: 'not-configured' }
   }
 
-  const res = await fetch(RESEND_ENDPOINT, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ from, to: message.to, subject: message.subject, html: message.html, text: message.text }),
-  })
+  // Returns rather than throws. Every caller is reporting something that has ALREADY happened —
+  // a booking made, a fee charged, an invite issued — so a failed email must never be mistaken
+  // for a failed operation. Throwing invited exactly that.
+  try {
+    const res = await fetch(RESEND_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from,
+        to: message.to,
+        subject: message.subject,
+        html: message.html,
+        text: message.text,
+      }),
+    })
 
-  if (!res.ok) {
-    // Surface the provider's reason; the caller decides whether to expose anything to the
-    // user, which for a reset flow it should not.
-    throw new Error(`Resend ${res.status}: ${(await res.text()).slice(0, 300)}`)
+    if (!res.ok) {
+      const body = (await res.text()).slice(0, 300)
+      console.error(`[email] Resend ${res.status} sending to ${message.to}: ${body}`)
+      return { delivered: false, reason: 'failed', detail: friendlyReason(res.status, body) }
+    }
+
+    return { delivered: true }
+  } catch (err) {
+    console.error(`[email] could not reach Resend for ${message.to}`, err)
+    return { delivered: false, reason: 'failed', detail: 'the email service could not be reached' }
   }
-
-  return { delivered: true }
 }
 
 export function passwordResetEmail(firstName: string, url: string): Omit<EmailMessage, 'to'> {
@@ -301,6 +337,40 @@ export function trainingEnrolledEmail(input: {
         p(`Deposit paid: <strong>${input.deposit}</strong><br>Balance remaining: <strong>${input.balance}</strong>`) +
         p('Melanite will be in touch with joining details before the course.'),
       { label: `Pay the balance — ${input.balance}`, url: input.url },
+    ),
+  }
+}
+
+export function providerInviteEmail(input: {
+  invitedBy: string
+  url: string
+  expiresInDays: number
+}): Omit<EmailMessage, 'to'> {
+  return {
+    subject: "You're invited to join Melanite Laser Suite",
+    text: [
+      'Hi,',
+      '',
+      `${input.invitedBy} has invited you to join the Melanite provider network.`,
+      '',
+      'Set up your account here:',
+      input.url,
+      '',
+      `This link expires in ${input.expiresInDays} days and can only be used once.`,
+      '',
+      'Setup takes about 10 minutes: create a password, add your licence details, connect',
+      'your bank account for payouts, and choose the services you offer.',
+    ].join('\n'),
+    html: wrap(
+      'Join the Melanite provider network',
+      p(`${input.invitedBy} has invited you to join Melanite Laser Suite.`) +
+        p(
+          'Setup takes about 10 minutes: create a password, add your licence details, connect your bank account for payouts, and choose the services you offer.',
+        ) +
+        p(
+          `<strong>This link expires in ${input.expiresInDays} days</strong> and can only be used once.`,
+        ),
+      { label: 'Set up your account', url: input.url },
     ),
   }
 }

@@ -1,22 +1,28 @@
 'use server'
 
+import { randomBytes } from 'node:crypto'
+
 import { and, eq, sql } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 
 import { requireAdmin } from '@/lib/auth/dal'
 import { db } from '@/lib/db'
 import { bookingHasPayment, getProviderSharePct } from '@/lib/db/queries/admin-tools'
+import { INVITE_TTL_DAYS, providerExists } from '@/lib/db/queries/invites'
 import { splitClientPayment, toCents, toMoney } from '@/lib/money'
 import { denverInstant, getLaserHours } from '@/lib/db/queries/availability'
 import {
   bookings,
   clients,
+  inviteLinks,
   ledgerEntries,
   memberships,
   providerServices,
   providers,
   services,
 } from '@/lib/db/schema'
+import { providerInviteEmail, sendEmail } from '@/lib/email'
+import { appOrigin } from '@/lib/stripe/config'
 
 export interface ToolState {
   error?: string
@@ -343,4 +349,91 @@ export async function createManualBooking(input: {
       ? `Appointment created as ${status} — note it falls outside laser hours.`
       : `Appointment created as ${status}.`,
   }
+}
+
+/** Invite a provider.
+ *
+ *  The only route into the system — there is no self-service signup, and there should not be:
+ *  a provider is someone Keoni has met, usually at a training course. The `invite_links` table
+ *  has existed since the first migration with nothing driving it; this is what drives it.
+ */
+export async function inviteProvider(email: string): Promise<ToolState & { url?: string }> {
+  const admin = await requireAdmin()
+  const address = email.trim().toLowerCase()
+
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(address)) {
+    return { error: 'Enter a valid email address.' }
+  }
+
+  if (await providerExists(address)) {
+    // Inviting someone who already has an account would create a token that can never be
+    // accepted — the acceptance path refuses to make a second provider for one email.
+    return { error: 'Someone already has an account with that email.' }
+  }
+
+  // Any outstanding invite for this address is superseded. Two live tokens for one person means
+  // whichever they happen to click decides their account, and the other lingers as a loose
+  // credential.
+  await db
+    .update(inviteLinks)
+    .set({ status: 'expired' })
+    .where(and(eq(inviteLinks.email, address), eq(inviteLinks.status, 'pending')))
+
+  const token = randomBytes(24).toString('base64url')
+  const expiresAt = new Date(Date.now() + INVITE_TTL_DAYS * 24 * 60 * 60 * 1000)
+
+  await db.insert(inviteLinks).values({
+    email: address,
+    invitedByAdminId: admin.id,
+    token,
+    status: 'pending',
+    expiresAt,
+  })
+
+  const url = `${await appOrigin()}/onboard/${token}`
+
+  const sent = await sendEmail({
+    to: address,
+    ...providerInviteEmail({
+      invitedBy: `${admin.firstName} ${admin.lastName}`,
+      url,
+      expiresInDays: INVITE_TTL_DAYS,
+    }),
+  })
+
+  revalidatePath('/app/admin/tools')
+
+  // The invite exists either way — say which happened rather than collapsing "no key
+  // configured" and "the address was rejected" into one vague sentence.
+  return {
+    success: sent.delivered
+      ? `Invite emailed to ${address}. It expires in ${INVITE_TTL_DAYS} days.`
+      : sent.reason === 'not-configured'
+        ? `Invite created for ${address}. Email isn't set up yet, so send this link yourself.`
+        : `Invite created, but the email didn't send — ${sent.detail}. Send this link yourself.`,
+    url,
+  }
+}
+
+/** Revokes an outstanding invite. */
+export async function revokeInvite(inviteId: string): Promise<ToolState> {
+  await requireAdmin()
+
+  const [invite] = await db
+    .select({ id: inviteLinks.id, status: inviteLinks.status })
+    .from(inviteLinks)
+    .where(eq(inviteLinks.id, inviteId))
+    .limit(1)
+
+  if (!invite) return { error: 'That invite does not exist.' }
+  if (invite.status === 'accepted') {
+    // The account already exists; revoking the invite now would achieve nothing except making
+    // the list lie about what happened.
+    return { error: 'That invite has already been accepted. Deactivate the provider instead.' }
+  }
+
+  await db.update(inviteLinks).set({ status: 'expired' }).where(eq(inviteLinks.id, invite.id))
+
+  revalidatePath('/app/admin/tools')
+  return { success: 'Invite revoked. The link no longer works.' }
 }

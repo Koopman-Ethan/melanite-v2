@@ -9,8 +9,10 @@ import type { ServiceOption } from '@/lib/db/queries/admin-tools'
 
 import {
   createManualBooking,
+  inviteProvider,
   recordBookingPayment,
   recordMembershipPayment,
+  revokeInvite,
   type ToolState,
 } from './actions'
 
@@ -602,7 +604,133 @@ function BookingTool({
 
 // ---------------------------------------------------------------------------
 
+export interface InviteView {
+  id: string
+  email: string
+  status: string
+  sentAt: string
+  expiresAt: string
+  invitedBy: string | null
+  isExpired: boolean
+}
+
+/** Invite a provider, and see the ones still outstanding.
+ *
+ *  There is no self-service signup — a provider is someone Keoni has met, usually at a training
+ *  course — so this is the only door into the system. */
+function InviteTool({ invites }: { invites: InviteView[] }) {
+  const [email, setEmail] = useState('')
+  const [state, setState] = useState<(ToolState & { url?: string }) | null>(null)
+  const [pending, start] = useTransition()
+
+  const outstanding = invites.filter((i) => i.status === 'pending' && !i.isExpired)
+  const rest = invites.filter((i) => !(i.status === 'pending' && !i.isExpired))
+
+  return (
+    <div className="space-y-5">
+      <p className="text-sm text-ink-muted">
+        Sends a one-time link that expires in 7 days. The provider sets their own password —
+        nobody here ever sees it.
+      </p>
+
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="min-w-64 flex-1">
+          <Field
+            id="inviteEmail"
+            label="Their email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="provider@example.com"
+          />
+        </div>
+        <Button
+          disabled={pending || !email.trim()}
+          onClick={() =>
+            start(async () => {
+              const result = await inviteProvider(email)
+              setState(result)
+              if (result.success) setEmail('')
+            })
+          }
+        >
+          {pending ? 'Sending…' : 'Send invite'}
+        </Button>
+      </div>
+
+      {state?.error && <Notice>{state.error}</Notice>}
+      {state?.success && <Notice tone="success">{state.success}</Notice>}
+      {/* Shown whichever way it went — email may not be configured, and a link the admin cannot
+          see is a link nobody can send. */}
+      {state?.url && <p className="break-all text-xs text-ink-faint">{state.url}</p>}
+
+      <section className="space-y-2">
+        <h3 className="text-sm font-medium uppercase tracking-wide text-ink-muted">
+          Awaiting acceptance
+        </h3>
+        {outstanding.length === 0 ? (
+          <p className="rounded-card border border-dashed border-line p-6 text-center text-sm text-ink-muted">
+            No invites outstanding.
+          </p>
+        ) : (
+          <ul className="space-y-2">
+            {outstanding.map((invite) => (
+              <li
+                key={invite.id}
+                className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-line p-3"
+              >
+                <div className="min-w-0">
+                  <span className="text-sm">{invite.email}</span>
+                  <span className="ml-2 text-xs text-ink-faint">
+                    expires{' '}
+                    {new Date(invite.expiresAt).toLocaleDateString('en-US', {
+                      month: 'short',
+                      day: 'numeric',
+                    })}
+                    {invite.invitedBy && ` · invited by ${invite.invitedBy}`}
+                  </span>
+                </div>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={pending}
+                  onClick={() => start(async () => setState(await revokeInvite(invite.id)))}
+                >
+                  Revoke
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {rest.length > 0 && (
+        <section className="space-y-2">
+          <h3 className="text-sm font-medium uppercase tracking-wide text-ink-muted">
+            Accepted, expired and revoked
+          </h3>
+          <ul className="space-y-1.5">
+            {rest.map((invite) => (
+              <li key={invite.id} className="flex justify-between gap-3 text-xs text-ink-muted">
+                <span>{invite.email}</span>
+                <span className="text-ink-faint">
+                  {invite.status === 'accepted'
+                    ? 'accepted'
+                    : invite.isExpired
+                      ? 'expired'
+                      : 'revoked'}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+    </div>
+  )
+}
+
 const TABS = [
+  { key: 'invite', label: 'Invite a provider' },
   { key: 'payment', label: 'Record a payment' },
   { key: 'membership', label: 'Medical director payment' },
   { key: 'booking', label: 'Add an appointment' },
@@ -613,13 +741,15 @@ export function Tools({
   providers,
   serviceMap,
   sharePct,
+  invites,
 }: {
   unpaid: UnpaidBookingView[]
   providers: ProviderView[]
   serviceMap: Record<string, ServiceOption[]>
   sharePct: number
+  invites: InviteView[]
 }) {
-  const [tab, setTab] = useState<(typeof TABS)[number]['key']>('payment')
+  const [tab, setTab] = useState<(typeof TABS)[number]['key']>('invite')
 
   return (
     <div className="space-y-5">
@@ -646,6 +776,7 @@ export function Tools({
       </div>
 
       <div className="rounded-card border border-line bg-surface p-6">
+        {tab === 'invite' && <InviteTool invites={invites} />}
         {tab === 'payment' && <PaymentTool unpaid={unpaid} sharePct={sharePct} />}
         {tab === 'membership' && <MembershipTool providers={providers} />}
         {tab === 'booking' && <BookingTool providers={providers} serviceMap={serviceMap} />}

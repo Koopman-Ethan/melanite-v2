@@ -543,6 +543,50 @@ successful login, which an account with no hash can never reach. And flipping th
 character of a digest proves nothing, because trailing base64 characters can carry padding bits
 that decode to the same bytes.
 
+### Provider invites and onboarding step 1 — 2026-07-27
+
+`invite_links` and `providers.onboarding_step` had existed since the first migration with
+nothing in the app touching either. A new provider could only be created by inserting a row by
+hand and running `db:set-password`.
+
+**The invite tool** is now the first tab of `/app/admin/tools` — the only door into the system,
+since there is no self-service signup and should not be: a provider is someone Keoni has met,
+usually at a training course. Issuing an invite supersedes any outstanding one for the same
+address, because two live tokens for one person means whichever they happen to click decides
+their account and the other lingers as a loose credential.
+
+**All five landing states are distinct**, matching v1 and for the same reason: "wrong link",
+"too late", "already done" and "you have no token" need completely different actions from the
+reader, and collapsing them into one error means everybody emails Keoni.
+
+**The invite is claimed BEFORE the provider is created**, conditionally on it still being
+pending. Two browsers submitting together then produce one winner and one "already used".
+Creating the provider first would let both succeed and leave one account orphaned.
+
+**The account is created `pending`, not active, with `bookingEnabled` false.** Finishing
+onboarding is not consent to practise — Keoni still confirms insurance and medical-director
+documents by email. Creating an active provider here would hand out booking access on the
+strength of an email address.
+
+v1's step 1 said "STEP 1 OF 5" and its sidebar omitted Medical Director, while every later
+screen said "OF 6". Six is used consistently here.
+
+### `sendEmail` distinguishes "not configured" from "failed" — 2026-07-27
+
+Sending the first real invite surfaced this: the admin was told "Email is not configured, so
+send this link yourself" when in fact Resend was configured and had rejected the address
+(`example.com` is refused as a destination). Two very different problems, one message.
+
+`sendEmail` now returns `{ delivered, reason, detail }` and no longer throws. Not throwing is
+the more important half: every caller is reporting something that has ALREADY happened — a
+booking made, a fee charged, an invite issued — so a failed email must never be mistaken for a
+failed operation, and an exception invited exactly that.
+
+Password rules moved to `lib/auth/password-policy.ts`. A `'use server'` file may only export
+async functions, so the sync helper there was a build error TypeScript could not see — and the
+form needs to import the rules anyway. One definition means a client rule the server does not
+enforce, and a server rule the client does not show, are both impossible.
+
 ## Backlog
 
 ### Multi-service bookings
