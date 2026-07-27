@@ -7,12 +7,15 @@ import {
   getAppointmentCounts,
   getAppointments,
   getBookedMonths,
+  getBookingLink,
   getProviderServiceOptions,
   type Appointment,
   type AppointmentStatus,
 } from '@/lib/db/queries/appointments'
+import { appOrigin } from '@/lib/stripe/config'
 
 import { AppointmentActions } from './appointment-actions'
+import { BookedBanner } from './booked-banner'
 import { Filters } from './filters'
 
 export const metadata: Metadata = { title: 'Appointments · Melanite' }
@@ -164,7 +167,13 @@ async function AppointmentList({
 export default async function AppointmentsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; month?: string; service?: string }>
+  searchParams: Promise<{
+    status?: string
+    month?: string
+    service?: string
+    booked?: string
+    emailed?: string
+  }>
 }) {
   const user = await requireProvider()
   const params = await searchParams
@@ -188,6 +197,9 @@ export default async function AppointmentsPage({
     getProviderServiceOptions(user.id),
   ])
 
+  // Only after a booking, and only for a booking that belongs to this provider.
+  const justBooked = params.booked ? await getBookingLink(params.booked, user.id) : null
+
   return (
     <main className="mx-auto w-full max-w-4xl px-6 py-10 space-y-6">
       <header>
@@ -196,6 +208,15 @@ export default async function AppointmentsPage({
           {counts.total} total · {counts.upcoming} upcoming
         </p>
       </header>
+
+      {justBooked && (
+        <BookedBanner
+          url={`${await appOrigin()}/pay/${justBooked.token}`}
+          clientName={justBooked.clientName}
+          clientEmail={justBooked.clientEmail}
+          emailed={params.emailed === '1'}
+        />
+      )}
 
       <Filters months={months} serviceOptions={serviceOptions} counts={counts} />
 

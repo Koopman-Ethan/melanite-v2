@@ -3,7 +3,13 @@ import 'server-only'
 import { and, asc, desc, eq, gte, sql, type SQL } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
-import { bookings, packageRedemptions, providerServices, services } from '@/lib/db/schema'
+import {
+  bookings,
+  checkoutLinks,
+  packageRedemptions,
+  providerServices,
+  services,
+} from '@/lib/db/schema'
 
 // v1's GET /appointments loaded every booking for the provider and filtered them in
 // application code, and returned raw booking rows with no service name — so the page had to
@@ -225,6 +231,26 @@ export async function getNextAppointment(providerId: string): Promise<NextAppoin
       ),
     )
     .orderBy(asc(bookings.startTime))
+    .limit(1)
+
+  return row ?? null
+}
+
+/** The payment link for a booking the provider just made, for the confirmation banner.
+ *
+ *  Scoped to the provider on purpose: a token in a URL parameter is a bearer credential for
+ *  someone else's payment page, and this must not become a way to read one by guessing ids. */
+export async function getBookingLink(bookingId: string, providerId: string) {
+  const [row] = await db
+    .select({
+      token: checkoutLinks.token,
+      status: checkoutLinks.status,
+      clientName: bookings.clientName,
+      clientEmail: bookings.clientEmail,
+    })
+    .from(checkoutLinks)
+    .innerJoin(bookings, eq(checkoutLinks.bookingId, bookings.id))
+    .where(and(eq(checkoutLinks.bookingId, bookingId), eq(bookings.providerId, providerId)))
     .limit(1)
 
   return row ?? null

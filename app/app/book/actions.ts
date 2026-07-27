@@ -9,6 +9,8 @@ import { canBook, bookingBlockedReasons, requireProvider } from '@/lib/auth/dal'
 import { denverInstant, getLaserHours } from '@/lib/db/queries/availability'
 import { db } from '@/lib/db'
 import { providerServices, services } from '@/lib/db/schema'
+import { bookingPaymentLinkEmail, sendEmail } from '@/lib/email'
+import { appOrigin } from '@/lib/stripe/config'
 
 export interface BookState {
   error?: string
@@ -76,6 +78,7 @@ export async function createBooking(_prev: BookState, formData: FormData): Promi
       durationMins: providerServices.durationMins,
       minDurationMins: services.minDurationMins,
       maxDurationMins: services.maxDurationMins,
+      name: services.name,
     })
     .from(providerServices)
     .innerJoin(services, eq(providerServices.serviceId, services.id))
@@ -177,5 +180,38 @@ export async function createBooking(_prev: BookState, formData: FormData): Promi
     return { error: 'Someone just booked that slot. Pick another time.' }
   }
 
-  redirect(`/app/appointments?booked=${bookingId}`)
+  // Send the link the moment it exists. Until now it was created and shown to nobody — the
+  // provider had no way to get it to the client, which makes the whole checkout flow
+  // unreachable in practice.
+  //
+  // Best effort by design: a booking that succeeded must not be reported as failed because an
+  // email bounced, and the link is displayed on the next screen either way.
+  let emailed = false
+  if (clientEmail) {
+    try {
+      const result = await sendEmail({
+        to: clientEmail,
+        ...bookingPaymentLinkEmail({
+          clientName,
+          providerName: `${user.firstName} ${user.lastName}`,
+          serviceName: svc.name,
+          when: startTime.toLocaleString('en-US', {
+            weekday: 'long',
+            month: 'long',
+            day: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+            timeZone: 'America/Denver',
+          }),
+          amount: `$${price.toFixed(2)}`,
+          url: `${await appOrigin()}/pay/${token}`,
+        }),
+      })
+      emailed = result.delivered
+    } catch (err) {
+      console.error('[email] booking payment link failed', err)
+    }
+  }
+
+  redirect(`/app/appointments?booked=${bookingId}&emailed=${emailed ? '1' : '0'}`)
 }

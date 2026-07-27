@@ -327,6 +327,29 @@ Transferring a student between courses moves the enrolment row rather than refun
 re-charging. The ledger entries key on the enrolment id, so the money follows it and their
 balance stays correct against the new course's price.
 
+### The booking payment link had nowhere to go — 2026-07-27
+
+A booking created its checkout link and then showed it to nobody. The action redirected to
+`/app/appointments?booked=<id>` and the appointments page ignored the parameter entirely, so a
+provider finished booking with no way to reach the link short of querying the database. The
+whole `/pay/*` flow was unreachable in practice.
+
+Two halves to the fix:
+
+- **Emailed at creation** when the client gave an address, using the Resend wrapper. Best
+  effort: a booking that succeeded must never be reported as failed because an email bounced.
+- **Shown on the next screen either way**, with a copy button. Most of these travel by text
+  message, so email is a convenience rather than the delivery mechanism, and the link is offered
+  for copying even when the email went out.
+
+The banner tells the truth about what happened: "emailed to X", or "email isn't set up yet, so
+nothing was sent — copy the link and send it yourself". `sendEmail` reports `delivered: false`
+rather than throwing when unconfigured, and the caller passes that through instead of claiming
+a send.
+
+`getBookingLink` is scoped to the provider. A link token is a bearer credential for someone
+else's payment page, and reading one by guessing booking ids must not be possible.
+
 ## Backlog
 
 ### Multi-service bookings
