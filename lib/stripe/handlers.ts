@@ -538,16 +538,43 @@ export async function handleSubscriptionChanged(
     ? new Date(sub.items.data[0].current_period_end * 1000)
     : null
 
-  await db
+  const fields = {
+    status: (ended ? 'cancelled' : sub.status === 'past_due' ? 'past_due' : 'active') as
+      | 'cancelled'
+      | 'past_due'
+      | 'active',
+    cancelAtPeriodEnd: sub.cancel_at_period_end,
+    renewalDate,
+    cancelDate: sub.canceled_at ? new Date(sub.canceled_at * 1000) : null,
+    stripeSubscriptionId: sub.id,
+    stripeCustomerId: sub.customer,
+  }
+
+  // UPSERT, not update.
+  //
+  // An update alone affects zero rows when no membership exists yet, which is the normal case
+  // for a first subscription: the row was previously only created by
+  // checkout.session.completed, so a subscription started any other way — an admin creating
+  // one in the Stripe dashboard, a migration, a plan change — opened the booking gate and
+  // left no record of the plan behind it. Caught by driving a real sandbox subscription
+  // through the API rather than through Checkout.
+  //
+  // subscription.created is the authoritative event for "this subscription exists", so it is
+  // the right place to guarantee the row.
+  const updated = await db
     .update(memberships)
-    .set({
-      status: ended ? 'cancelled' : sub.status === 'past_due' ? 'past_due' : 'active',
-      cancelAtPeriodEnd: sub.cancel_at_period_end,
-      renewalDate,
-      cancelDate: sub.canceled_at ? new Date(sub.canceled_at * 1000) : null,
-      stripeSubscriptionId: sub.id,
-    })
+    .set(fields)
     .where(eq(memberships.providerId, providerId))
+    .returning({ id: memberships.id })
+
+  if (updated.length === 0) {
+    await db.insert(memberships).values({
+      providerId,
+      plan: 'medical_director',
+      startDate: new Date(),
+      ...fields,
+    })
+  }
 
   // Only a genuinely ended subscription closes the gate. cancel_at_period_end means they keep
   // access until the period runs out, so flipping the status now would cut them off early.
