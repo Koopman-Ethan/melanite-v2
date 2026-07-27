@@ -106,6 +106,59 @@ Note that today's dot reflects *bookable* slots, so a quiet afternoon still read
 by evening. That is intended: what the provider needs to know is how many openings remain, and
 the heading below the calendar gives the exact count.
 
+### Room rental — 2026-07-27
+
+`/app/room-rental`. Full day or half day, provider pays Melanite, so `payer = 'provider'` and
+the whole amount is `melaniteCut` — no split, no Connect transfer.
+
+**Occupancy is an EXCLUDE constraint on the time range**, not a unique index on
+(date, slot_type). The unique index v2 shipped with looked right and was not: it stopped two
+`am` bookings on a day but happily allowed `full` to be sold on a day that already had one.
+Verified by inserting `am` then `full` on the same date — the constraint now refuses it, and
+`pm` still succeeds.
+
+**Reserve, then pay.** v1 checked availability with a read, created no row, and called the
+webhook "the atomic commit". Nothing held the slot in between, so two providers could both pay
+for the same day and one had to be refunded by hand. Here the row is written as `pending` first
+and the constraint decides; a race surfaces as `23P01` and is reported as "that block was just
+taken". Holds expire after 30 minutes, swept on read — there is no scheduler in this stack yet,
+and a stale hold that clears when someone next looks is still cleared before it affects them.
+
+**Prices and hours moved to `platform_settings`.** v1 hardcoded 100 and 60 inside
+`POST /room/rental-intent`, so changing what the room costs meant editing an endpoint.
+
+**Gates are deliberately not the booking gates.** Renting the room is a space rental, so
+`bookingEnabled` + `roomRentalEnabled` (per provider) + `roomRentalEnabled` (platform) apply,
+but the medical-director and licence gates do not. v1 drew the same line. Cancellation is not
+gated at all — turning the feature off must never strand a provider with a booking they cannot
+cancel.
+
+Two bugs fixed in `roomRentalPaid` while wiring this up:
+
+- It fell back to `subjectId: pi.id` when no rental matched. `subject_id` is a `uuid` column and
+  `pi_3Abc…` is not a uuid, so the defensive fallback was the one path guaranteed to throw.
+- It matched on (provider, rental_date) with no slot, so a provider holding both `am` and `pm`
+  on one day could have either payment confirm the wrong block.
+
+Both are fixed by carrying `room_booking_id` in the PaymentIntent metadata.
+
+### `drizzle-kit migrate` does not work here — 2026-07-27
+
+It prints "applying migrations…", exits 0, and changes nothing. The cause is the driver:
+drizzle-kit wraps a run in a transaction and `@neondatabase/serverless` over HTTP has no
+interactive transactions, so the run is silently abandoned. A migration tool that reports
+success without applying anything is worse than one that fails.
+
+`npm run db:migrate` now runs `scripts/migrate.ts`, which sends statements one at a time.
+That is not only a workaround: `ALTER TYPE … ADD VALUE` cannot be followed by a use of that
+value in the same transaction, so statement-at-a-time is the only way migration 0008 could
+apply at all. `drizzle-kit generate` is still the right way to author migrations, and
+`db:migrate:kit` keeps the old command available.
+
+Trade-off: without a transaction, a failure halfway leaves the schema partly changed. Each
+statement is logged as it runs, and a migration is recorded only after all of its statements
+succeed.
+
 ## Backlog
 
 ### Multi-service bookings
@@ -126,7 +179,6 @@ Scope when unblocked — this is a model change, not a UI change:
 
 ### Stripe writes still unbuilt
 
-- Room rental payment intent (needs the room rental screen, which does not exist yet).
 - Package checkout link generation (needs `/pay/package/*`).
 
 ### v1 questions still open, carried forward

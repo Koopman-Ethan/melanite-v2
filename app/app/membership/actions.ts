@@ -1,13 +1,12 @@
 'use server'
 
 import { eq } from 'drizzle-orm'
-import { headers } from 'next/headers'
 
 import { requireProvider } from '@/lib/auth/dal'
 import { db } from '@/lib/db'
 import { providers } from '@/lib/db/schema'
 import { friendlyStripeError, stripePost } from '@/lib/stripe/client'
-import { medicalDirectorPriceId, modeMismatch } from '@/lib/stripe/config'
+import { appOrigin, medicalDirectorPriceId, modeMismatch } from '@/lib/stripe/config'
 
 export interface StripeRedirect {
   url?: string
@@ -21,14 +20,6 @@ export interface StripeRedirect {
 // Neither of these grants access. Paying does not set medical_director_status; the
 // invoice.payment_succeeded webhook does. That split is deliberate: a checkout that completes
 // but whose payment later fails must not have already opened the booking gate.
-
-async function origin(): Promise<string> {
-  const h = await headers()
-  return (
-    process.env.APP_BASE_URL ??
-    `${h.get('x-forwarded-proto') ?? 'http'}://${h.get('host') ?? 'localhost:3000'}`
-  )
-}
 
 export async function startSubscription(): Promise<StripeRedirect> {
   const user = await requireProvider()
@@ -56,7 +47,7 @@ export async function startSubscription(): Promise<StripeRedirect> {
     .where(eq(providers.id, user.id))
     .limit(1)
 
-  const base = await origin()
+  const base = await appOrigin()
 
   try {
     const session = await stripePost<{ url?: string }>(
@@ -102,7 +93,7 @@ export async function openBillingPortal(): Promise<StripeRedirect> {
     return { error: 'No billing account on file yet.' }
   }
 
-  const base = await origin()
+  const base = await appOrigin()
 
   try {
     // No idempotency key: a portal session moves no money and expires quickly, so reusing a

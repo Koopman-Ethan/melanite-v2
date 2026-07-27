@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
+    "db:migrate": "tsx scripts/migrate.ts",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "db:sql": "tsx scripts/sql.ts",
@@ -17,7 +17,8 @@
     "etl:load": "tsx scripts/etl/load.ts",
     "etl:verify": "tsx scripts/etl/verify.ts",
     "db:set-password": "tsx --tsconfig scripts/tsconfig.json scripts/set-password.ts",
-    "db:reset-link": "tsx --tsconfig scripts/tsconfig.json scripts/reset-link.ts"
+    "db:reset-link": "tsx --tsconfig scripts/tsconfig.json scripts/reset-link.ts",
+    "db:migrate:kit": "drizzle-kit migrate"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",

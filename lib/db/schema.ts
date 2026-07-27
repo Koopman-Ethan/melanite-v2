@@ -113,6 +113,11 @@ export const membershipStatus = pgEnum('membership_status', ['active', 'past_due
 export const roomSlotType = pgEnum('room_slot_type', ['full', 'am', 'pm'])
 
 export const roomBookingStatus = pgEnum('room_booking_status', [
+  /** Slot held while the provider is in Stripe Checkout. v1 had no such state: it created no
+   *  row until the webhook fired, so its availability check was a read with nothing behind it
+   *  and two providers could both pay for the same day. Here the row exists first and the
+   *  exclusion constraint is what actually holds the slot. */
+  'pending',
   'confirmed',
   'cancellation_requested',
   'cancelled',
@@ -210,6 +215,16 @@ export const platformSettings = pgTable('platform_settings', {
   laserCloseTime: text().notNull().default('20:00'),
   slotStrideMins: integer().notNull().default(15),
   roomRentalEnabled: boolean().notNull().default(false),
+  /** v1 hardcoded 100 and 60 inside POST /room/rental-intent, so changing what the room costs
+   *  meant editing an endpoint. Prices are configuration, not logic. */
+  roomFullDayPrice: money().notNull().default('100.00'),
+  roomHalfDayPrice: money().notNull().default('60.00'),
+  /** Denver wall-clock bounds for the two half-day blocks. `amEnd` is also `pmStart`. */
+  roomAmStart: text().notNull().default('08:00'),
+  roomAmEnd: text().notNull().default('13:00'),
+  roomPmEnd: text().notNull().default('18:00'),
+  /** How far ahead the room can be booked. v1's 60 days, made configurable. */
+  roomAdvanceDays: integer().notNull().default(60),
   packagesEnabled: boolean().notNull().default(false),
   updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   updatedBy: uuid().references(() => providers.id, { onDelete: 'set null' }),
@@ -635,7 +650,14 @@ export const memberships = pgTable('memberships', {
  *  `ledgerEntries.payer = 'provider'` and the whole amount is `melaniteCut`.
  *
  *  v1 carried an `active_slot_key` text column ("<date>:<slot>", nulled on cancel) purely
- *  to get a partial unique index out of a plain unique index. Postgres does this properly. */
+ *  to get a partial unique index out of a plain unique index. Postgres does this properly.
+ *
+ *  Occupancy is enforced by an EXCLUDE constraint on the time range rather than by any
+ *  combination of (date, slot_type) — see `room_bookings_no_overlap` in migration 0008. A
+ *  unique index on (date, slot_type) looks right and is not: it stops two `am` bookings but
+ *  happily lets `full` be sold on a day that already has one. The room is a physical space
+ *  with a start and an end, so overlap is the actual rule, and the ranges already exist in
+ *  `startAt`/`endAt`. */
 export const roomBookings = pgTable('room_bookings', {
   id: uuid().primaryKey().defaultRandom(),
   createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
@@ -645,16 +667,23 @@ export const roomBookings = pgTable('room_bookings', {
   rentalDate: date().notNull(),
   slotType: roomSlotType().notNull().default('full'),
   price: money().notNull().default('0.00'),
-  status: roomBookingStatus().notNull().default('confirmed'),
+  status: roomBookingStatus().notNull().default('pending'),
   startAt: timestamp({ withTimezone: true }).notNull(),
   endAt: timestamp({ withTimezone: true }).notNull(),
   cancelledAt: timestamp({ withTimezone: true }),
+
+  /** Needed to refund on cancellation. v1 stored this and v2's table did not, which would have
+   *  left the cancel flow with nothing to call Stripe with. */
+  stripePaymentIntentId: text(),
+  stripeCheckoutSessionId: text(),
+  /** When an unpaid hold stops blocking the slot. Without this an abandoned checkout would
+   *  take the room off the market permanently. */
+  holdExpiresAt: timestamp({ withTimezone: true }),
 }, (t) => [
-  uniqueIndex()
-    .on(t.rentalDate, t.slotType)
-    .where(sql`${t.status} = 'confirmed'`),
   index().on(t.providerId),
   index().on(t.rentalDate),
+  index().on(t.status),
+  index().on(t.stripePaymentIntentId),
 ])
 
 // ---------------------------------------------------------------------------

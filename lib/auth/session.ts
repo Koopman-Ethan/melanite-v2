@@ -59,6 +59,9 @@ export interface SessionUser {
   role: (typeof providers.$inferSelect)['role']
   status: (typeof providers.$inferSelect)['status']
   bookingEnabled: boolean
+  /** Separate from `bookingEnabled`: renting the room is a space rental, and Melanite revokes
+   *  it independently of laser access. */
+  roomRentalEnabled: boolean
   medicalDirectorStatus: (typeof providers.$inferSelect)['medicalDirectorStatus']
   /** `YYYY-MM-DD`, or null when the provider has none on file. A lapsed licence blocks
    *  booking — v1's LICENSE_EXPIRED gate, which is easy to miss because it lives in the
@@ -83,6 +86,7 @@ export async function getSessionUser(): Promise<SessionUser | null> {
       role: providers.role,
       status: providers.status,
       bookingEnabled: providers.bookingEnabled,
+      roomRentalEnabled: providers.roomRentalEnabled,
       medicalDirectorStatus: providers.medicalDirectorStatus,
       licenseExpiry: providers.licenseExpiry,
       requiresPasswordReset: providers.requiresPasswordReset,

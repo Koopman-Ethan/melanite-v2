@@ -183,32 +183,47 @@ async function serviceIdFor(providerServiceId: string): Promise<string | null> {
   return row?.serviceId ?? null
 }
 
-/** Room rental: the PROVIDER pays Melanite, so there is no split. */
+/** Room rental: the PROVIDER pays Melanite, so there is no split.
+ *
+ *  The rental row already exists as a `pending` hold created before checkout — this confirms it
+ *  rather than discovering it. Two earlier bugs are worth remembering:
+ *
+ *  1. It fell back to `subjectId: pi.id` when no row matched. `subject_id` is a uuid column and
+ *     `pi_3Abc…` is not a uuid, so the "safe" fallback was the one path guaranteed to throw.
+ *  2. It matched on (provider, rental_date) with no slot, so a provider holding both `am` and
+ *     `pm` on one day could have either payment confirm the wrong block.
+ *
+ *  Both are fixed by carrying `room_booking_id` in the PaymentIntent metadata. Without a
+ *  resolvable rental there is nothing honest to attribute the money to, so it is left
+ *  unhandled for replay rather than written against a guess.
+ */
 async function roomRentalPaid(pi: StripePaymentIntentObject): Promise<HandlerResult> {
   if (await alreadyRecorded(pi.id, 'purchase')) {
     return { handled: true, detail: 'already recorded' }
   }
 
   const providerId = pi.metadata?.provider_id ?? null
+  const roomBookingId = pi.metadata?.room_booking_id ?? null
   const gross = money(pi.amount_received)
 
-  const [rental] = await db
-    .select({ id: roomBookings.id })
-    .from(roomBookings)
-    .where(
-      and(
-        eq(roomBookings.providerId, providerId ?? ''),
-        eq(roomBookings.rentalDate, pi.metadata?.rental_date ?? ''),
-      ),
-    )
-    .limit(1)
+  const [rental] = roomBookingId
+    ? await db
+        .select({ id: roomBookings.id })
+        .from(roomBookings)
+        .where(eq(roomBookings.id, roomBookingId))
+        .limit(1)
+    : []
+
+  if (!rental) {
+    return { handled: false, detail: `no room booking for ${pi.id}` }
+  }
 
   await db.insert(ledgerEntries).values({
     source: 'room_rental',
     payer: 'provider',
     entryType: 'purchase',
     subjectType: 'room_booking',
-    subjectId: rental?.id ?? pi.id,
+    subjectId: rental.id,
     providerId,
     grossAmount: gross,
     tipAmount: '0.00',
@@ -219,12 +234,13 @@ async function roomRentalPaid(pi: StripePaymentIntentObject): Promise<HandlerRes
     payoutStatus: 'paid',
   })
 
-  if (rental) {
-    await db
-      .update(roomBookings)
-      .set({ status: 'confirmed' })
-      .where(eq(roomBookings.id, rental.id))
-  }
+  // `holdExpiresAt` is cleared because the hold is over — it is now a paid booking. The sweep
+  // filters on `status = 'pending'` and would skip this row regardless, but leaving a stale
+  // expiry on a confirmed rental invites a future sweep that forgets to.
+  await db
+    .update(roomBookings)
+    .set({ status: 'confirmed', stripePaymentIntentId: pi.id, holdExpiresAt: null })
+    .where(eq(roomBookings.id, rental.id))
 
   return { handled: true, detail: 'room rental recorded' }
 }

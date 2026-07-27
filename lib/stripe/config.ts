@@ -1,9 +1,23 @@
 import 'server-only'
 
 import { eq } from 'drizzle-orm'
+import { headers } from 'next/headers'
 
 import { db } from '@/lib/db'
 import { platformSettings } from '@/lib/db/schema'
+
+/** Base URL for Stripe return trips.
+ *
+ *  `APP_BASE_URL` wins so production is not at the mercy of a forwarded header. Shared rather
+ *  than duplicated per feature: a checkout that returns to the wrong host lands the provider on
+ *  a login page with no explanation of what happened to their payment. */
+export async function appOrigin(): Promise<string> {
+  const h = await headers()
+  return (
+    process.env.APP_BASE_URL ??
+    `${h.get('x-forwarded-proto') ?? 'http'}://${h.get('host') ?? 'localhost:3000'}`
+  )
+}
 
 // Stripe ids that differ between test and live.
 //
