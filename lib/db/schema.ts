@@ -422,6 +422,11 @@ export const clients = pgTable('clients', {
    *  Nothing else about the card is retained, and none of it ever reaches this server as raw
    *  data — Stripe Elements collects it directly. */
   defaultPaymentMethodId: text(),
+  /** Stripe's payment method type — `card`, `link`, and so on. Recorded because it decides how
+   *  the saved method can be described: a Link method carries no card object at all, so brand
+   *  and last four are null and "•••• ????" is the only thing brand-and-last-four logic can
+   *  produce. Found by paying through Link in the sandbox and getting four nulls back. */
+  paymentMethodType: text(),
   cardBrand: text(),
   cardLast4: text(),
   cardExpMonth: integer(),

@@ -11,6 +11,7 @@ import {
   providerServices,
   providers,
 } from '@/lib/db/schema'
+import { feeChargedEmail, sendEmail } from '@/lib/email'
 import { friendlyStripeError, stripePost, stripeWritesEnabled } from '@/lib/stripe/client'
 
 // No-show and late-cancellation fees.
@@ -113,6 +114,8 @@ export async function chargeBookingFee(bookingId: string, kind: FeeKind): Promis
       providerId: bookings.providerId,
       clientId: bookings.clientId,
       clientName: bookings.clientName,
+      clientEmail: bookings.clientEmail,
+      startTime: bookings.startTime,
       price: bookings.price,
       paymentSource: bookings.paymentSource,
       providerServiceId: bookings.providerServiceId,
@@ -159,7 +162,11 @@ export async function chargeBookingFee(bookingId: string, kind: FeeKind): Promis
   }
 
   const [provider] = await db
-    .select({ stripeAccountId: providers.stripeAccountId })
+    .select({
+      stripeAccountId: providers.stripeAccountId,
+      firstName: providers.firstName,
+      lastName: providers.lastName,
+    })
     .from(providers)
     .where(eq(providers.id, booking.providerId))
     .limit(1)
@@ -234,11 +241,46 @@ export async function chargeBookingFee(bookingId: string, kind: FeeKind): Promis
     paymentMethod: 'stripe',
     stripePaymentIntentId: intentId,
     payoutStatus: provider?.stripeAccountId ? 'pending' : 'paid',
-    note:
-      kind === 'no_show_fee'
-        ? `No-show fee, ${card.cardBrand ?? 'card'} ••••${card.cardLast4 ?? '????'}`
-        : `Late cancellation fee, ${card.cardBrand ?? 'card'} ••••${card.cardLast4 ?? '????'}`,
+    note: `${kind === 'no_show_fee' ? 'No-show fee' : 'Late cancellation fee'}, ${describeMethod(card)}`,
   })
 
+  // Told, not discovered on a statement. They agreed to the fee, not to silence about it.
+  // A send failure must never undo a charge that already went through.
+  if (booking.clientEmail) {
+    try {
+      await sendEmail({
+        to: booking.clientEmail,
+        ...feeChargedEmail({
+          clientName: booking.clientName,
+          providerName: `${provider?.firstName ?? 'your provider'} ${provider?.lastName ?? ''}`.trim(),
+          reason: kind,
+          amount: `$${(amountCents / 100).toFixed(2)}`,
+          when: booking.startTime.toLocaleDateString('en-US', {
+            weekday: 'long',
+            month: 'long',
+            day: 'numeric',
+            timeZone: 'America/Denver',
+          }),
+        }),
+      })
+    } catch (err) {
+      console.error('[email] fee notice failed for booking', booking.id, err)
+    }
+  }
+
   return { charged: true, amount: (amountCents / 100).toFixed(2) }
+}
+
+/** How to name the saved payment method in a ledger note.
+ *
+ *  Not every saved method is a card: Stripe Link carries an email and no card object at all, so
+ *  brand-and-last-four formatting produces "•••• ????" and describes nothing. */
+function describeMethod(card: {
+  paymentMethodType: string | null
+  cardBrand: string | null
+  cardLast4: string | null
+}): string {
+  if (card.cardBrand && card.cardLast4) return `${card.cardBrand} ••••${card.cardLast4}`
+  if (card.paymentMethodType === 'link') return 'Stripe Link'
+  return card.paymentMethodType ?? 'saved payment method'
 }

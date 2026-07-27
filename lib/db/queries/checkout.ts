@@ -263,6 +263,7 @@ export async function getClientCard(clientId: string) {
       id: clients.id,
       stripeCustomerId: clients.stripeCustomerId,
       defaultPaymentMethodId: clients.defaultPaymentMethodId,
+      paymentMethodType: clients.paymentMethodType,
       cardBrand: clients.cardBrand,
       cardLast4: clients.cardLast4,
       consentAt: clients.cardOnFileConsentAt,

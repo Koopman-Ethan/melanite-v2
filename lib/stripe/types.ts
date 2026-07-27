@@ -30,6 +30,9 @@ export interface StripePaymentIntentObject {
 
 export interface StripePaymentMethodObject {
   id: string
+  /** `card`, `link`, `us_bank_account`… Only `card` carries a `card` object. */
+  type: string
+  link?: { email?: string } | null
   card?: {
     brand?: string
     last4?: string

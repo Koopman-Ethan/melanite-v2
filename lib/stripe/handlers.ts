@@ -110,6 +110,9 @@ async function persistSavedCard(pi: StripePaymentIntentObject): Promise<void> {
       .update(clients)
       .set({
         defaultPaymentMethodId: pm.id,
+        paymentMethodType: pm.type,
+        // Null for anything that is not a card. Stripe Link, for instance, exposes only an
+        // email — writing "•••• ????" would be describing a card that does not exist.
         cardBrand: pm.card?.brand ?? null,
         cardLast4: pm.card?.last4 ?? null,
         cardExpMonth: pm.card?.exp_month ?? null,

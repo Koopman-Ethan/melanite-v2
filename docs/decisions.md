@@ -215,10 +215,34 @@ accounts cannot have their ToS accepted by the platform, so the working shape wa
 `controller[requirement_collection]=application` account, which activates `transfers`
 immediately.
 
-Still open: `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` is unset, so the card form degrades to "card
-payments aren't configured yet" — verified, but the card step itself is untested end to end.
-`platform_settings.cherry_apply_url` is null, so the Cherry button is hidden until the real URL
-is set.
+**Verified end to end in the sandbox**, including the card step: a $200 payment through Stripe
+Link produced the ledger row ($100/$100), flipped the link to paid, and saved the payment method
+with a consent stamp. Cancelling that appointment inside the 24-hour window then charged $50
+off-session, split $25/$25, with the Stripe intent confirming
+`application_fee_amount: 2500` against the provider's account. All test rows removed afterwards.
+
+One thing the test surfaced: paying via **Stripe Link** produces a payment method of type
+`link` with **no card object at all**, so brand and last four came back null and the ledger note
+would have read "•••• ????". `clients.paymentMethodType` now records the type and the note
+describes it accordingly. Worth remembering — anything that assumes a saved method is a card is
+wrong for Link, Apple Pay and bank debits alike.
+
+Cherry is live at `https://pay.withcherry.com/melanite-laser-suite`.
+
+### Email — 2026-07-27
+
+Resend, via its REST API in `lib/email.ts` — no SDK dependency. Already used for password
+resets; now also sends the package link when one is created, and tells a client when their card
+on file has been charged.
+
+That last one is not optional politeness. Taking money from someone who is not present and
+saying nothing is indefensible: they agreed to the fee, not to finding out from their bank
+statement. A send failure is logged and swallowed, because it must never undo a charge that
+already went through.
+
+With no `RESEND_API_KEY` set, `sendEmail` logs loudly to the console and reports
+`delivered: false` rather than pretending. Callers surface that honestly — the package link
+action says "copy it to your client" rather than "emailed" when nothing was sent.
 
 ## Backlog
 

@@ -18,6 +18,7 @@ import {
   providerServices,
   services,
 } from '@/lib/db/schema'
+import { packageLinkEmail, sendEmail } from '@/lib/email'
 import { appOrigin } from '@/lib/stripe/config'
 
 /** Package links live longer than booking links: a four-figure package is a decision, not a
@@ -469,10 +470,41 @@ export async function createPackageLink(input: {
     })
     .returning({ token: packageCheckoutLinks.token })
 
+  const url = `${await appOrigin()}/pay/package/${link.token}`
+
+  // A link nobody can deliver is not much of a link. Sending is best-effort: the provider still
+  // gets the URL back to send by text, which is how most of these actually travel.
+  let delivered = false
+  if (email) {
+    try {
+      const [{ sessions }] = await db
+        .select({ sessions: sql<number>`coalesce(sum(${packageTemplateItems.quantity}), 0)::int` })
+        .from(packageTemplateItems)
+        .where(eq(packageTemplateItems.packageTemplateId, template.id))
+
+      const result = await sendEmail({
+        to: email,
+        ...packageLinkEmail({
+          clientName: input.clientName?.trim() ?? null,
+          providerName: `${user.firstName} ${user.lastName}`,
+          packageName: template.name,
+          sessions: Number(sessions),
+          amount: `$${Number(template.totalPrice).toFixed(2)}`,
+          url,
+        }),
+      })
+      delivered = result.delivered
+    } catch (err) {
+      console.error('[email] package link failed', err)
+    }
+  }
+
   revalidatePath('/app/packages')
 
   return {
-    success: `Link created for ${template.name}.`,
-    url: `${await appOrigin()}/pay/package/${link.token}`,
+    success: delivered
+      ? `Link created and emailed to ${email}.`
+      : `Link created for ${template.name}. Copy it to your client.`,
+    url,
   }
 }

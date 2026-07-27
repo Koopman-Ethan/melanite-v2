@@ -1,0 +1,1 @@
+ALTER TABLE "clients" ADD COLUMN "payment_method_type" text;
