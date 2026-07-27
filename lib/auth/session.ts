@@ -2,7 +2,7 @@ import 'server-only'
 
 import { createHash, randomBytes } from 'node:crypto'
 
-import { and, eq, gt, lt } from 'drizzle-orm'
+import { and, eq, gt, lt, ne } from 'drizzle-orm'
 import { cookies } from 'next/headers'
 
 import { db } from '@/lib/db'
@@ -111,8 +111,28 @@ export async function destroySession() {
   store.delete(SESSION_COOKIE)
 }
 
-/** Ends every session for a provider — use when deactivating an account or changing a
- *  password, so other devices lose access immediately. */
+/** Ends every session for a provider — use when deactivating an account, or from an admin
+ *  path where there is no "current" session to keep. */
 export async function destroyAllSessions(providerId: string) {
   await db.delete(sessions).where(eq(sessions.providerId, providerId))
+}
+
+/** Ends every session EXCEPT the one making the request.
+ *
+ *  This is what a password change wants: other devices lose access immediately, but the
+ *  provider is not signed out of the page they are standing on, which would look like the
+ *  change failed. */
+export async function destroyOtherSessions(providerId: string) {
+  const token = (await cookies()).get(SESSION_COOKIE)?.value
+
+  if (!token) {
+    await db.delete(sessions).where(eq(sessions.providerId, providerId))
+    return
+  }
+
+  await db
+    .delete(sessions)
+    .where(
+      and(eq(sessions.providerId, providerId), ne(sessions.tokenHash, hashToken(token))),
+    )
 }

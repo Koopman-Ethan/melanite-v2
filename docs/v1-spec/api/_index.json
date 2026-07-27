@@ -1,499 +1,499 @@
 [
   {
-    "id": 3910318,
-    "verb": "POST",
-    "name": "webhooks/stripe/platform",
-    "lines": 905,
-    "chars": 38061
-  },
-  {
-    "id": 3996000,
-    "verb": "POST",
-    "name": "webhooks/stripe/package",
-    "lines": 432,
-    "chars": 19037
-  },
-  {
-    "id": 3933818,
-    "verb": "GET",
-    "name": "admin/revenue",
-    "lines": 429,
-    "chars": 11653
-  },
-  {
-    "id": 3996450,
-    "verb": "POST",
-    "name": "bookings/create-from-package",
-    "lines": 416,
-    "chars": 17762
-  },
-  {
-    "id": 3958651,
-    "verb": "PATCH",
-    "name": "providers/{provider_id}",
-    "lines": 310,
-    "chars": 8751
-  },
-  {
-    "id": 3933814,
-    "verb": "GET",
-    "name": "earnings",
-    "lines": 307,
-    "chars": 8552
-  },
-  {
-    "id": 3984603,
-    "verb": "POST",
-    "name": "webhooks/stripe/room",
-    "lines": 300,
-    "chars": 10326
-  },
-  {
-    "id": 3995758,
-    "verb": "PATCH",
-    "name": "packages/templates/{template_id}",
-    "lines": 281,
-    "chars": 7626
-  },
-  {
-    "id": 3933580,
-    "verb": "POST",
-    "name": "bookings/create",
-    "lines": 216,
-    "chars": 7237
-  },
-  {
     "id": 3997225,
     "verb": "POST",
     "name": "bookings/{booking_id}/cancel-package-redemption",
-    "lines": 209,
-    "chars": 7313
-  },
-  {
-    "id": 3910275,
-    "verb": "POST",
-    "name": "webhooks/stripe/connect",
-    "lines": 191,
-    "chars": 6109
+    "file": "POST_bookings__booking_id__cancel-package-redemption.xs",
+    "lines": 209
   },
   {
     "id": 3997193,
     "verb": "GET",
     "name": "packages/detail",
-    "lines": 178,
-    "chars": 5676
-  },
-  {
-    "id": 3933595,
-    "verb": "POST",
-    "name": "pay/{token}/pay",
-    "lines": 161,
-    "chars": 4955
-  },
-  {
-    "id": 3995999,
-    "verb": "POST",
-    "name": "pay/package/{token}/intent",
-    "lines": 160,
-    "chars": 4705
-  },
-  {
-    "id": 3996449,
-    "verb": "GET",
-    "name": "packages/client-balance",
-    "lines": 154,
-    "chars": 5487
-  },
-  {
-    "id": 3984586,
-    "verb": "POST",
-    "name": "room/rental-intent",
-    "lines": 149,
-    "chars": 4795
-  },
-  {
-    "id": 3995755,
-    "verb": "POST",
-    "name": "packages/templates",
-    "lines": 144,
-    "chars": 4315
-  },
-  {
-    "id": 3933815,
-    "verb": "GET",
-    "name": "provider/dashboard-summary",
-    "lines": 143,
-    "chars": 4055
-  },
-  {
-    "id": 3933578,
-    "verb": "GET",
-    "name": "availability",
-    "lines": 129,
-    "chars": 3428
-  },
-  {
-    "id": 3929705,
-    "verb": "POST",
-    "name": "training-enrollments",
-    "lines": 126,
-    "chars": 4492
-  },
-  {
-    "id": 3984610,
-    "verb": "POST",
-    "name": "room/rentals/{rental_id}/cancel",
-    "lines": 123,
-    "chars": 3916
-  },
-  {
-    "id": 3995998,
-    "verb": "GET",
-    "name": "pay/package/{token}",
-    "lines": 121,
-    "chars": 3646
-  },
-  {
-    "id": 3976855,
-    "verb": "POST",
-    "name": "training-enrollments/{id}/pay-balance",
-    "lines": 119,
-    "chars": 4102
-  },
-  {
-    "id": 3933827,
-    "verb": "GET",
-    "name": "admin/dashboard-summary",
-    "lines": 111,
-    "chars": 3374
+    "file": "GET_packages_detail.xs",
+    "lines": 178
   },
   {
     "id": 3997192,
     "verb": "GET",
     "name": "packages/provider-list",
-    "lines": 104,
-    "chars": 3326
+    "file": "GET_packages_provider-list.xs",
+    "lines": 104
   },
   {
-    "id": 3933587,
+    "id": 3996450,
     "verb": "POST",
-    "name": "bookings/{booking_id}/cancel",
-    "lines": 104,
-    "chars": 3205
+    "name": "bookings/create-from-package",
+    "file": "POST_bookings_create-from-package.xs",
+    "lines": 416
   },
   {
-    "id": 3947240,
+    "id": 3996449,
+    "verb": "GET",
+    "name": "packages/client-balance",
+    "file": "GET_packages_client-balance.xs",
+    "lines": 154
+  },
+  {
+    "id": 3996000,
     "verb": "POST",
-    "name": "providers/me/medical-director/subscribe",
-    "lines": 101,
-    "chars": 3312
+    "name": "webhooks/stripe/package",
+    "file": "POST_webhooks_stripe_package.xs",
+    "lines": 432
   },
   {
-    "id": 3930534,
-    "verb": "PATCH",
-    "name": "admin/training-courses/{id}",
-    "lines": 101,
-    "chars": 3646
+    "id": 3995999,
+    "verb": "POST",
+    "name": "pay/package/{token}/intent",
+    "file": "POST_pay_package__token__intent.xs",
+    "lines": 160
   },
   {
-    "id": 3933805,
-    "verb": "PATCH",
-    "name": "provider-services/{provider_service_id}",
-    "lines": 98,
-    "chars": 2948
+    "id": 3995998,
+    "verb": "GET",
+    "name": "pay/package/{token}",
+    "file": "GET_pay_package__token_.xs",
+    "lines": 121
   },
   {
     "id": 3995997,
     "verb": "POST",
     "name": "packages/checkout-link",
-    "lines": 94,
-    "chars": 2667
-  },
-  {
-    "id": 3942878,
-    "verb": "POST",
-    "name": "auth/forgot-password",
-    "lines": 94,
-    "chars": 4228
-  },
-  {
-    "id": 3933594,
-    "verb": "GET",
-    "name": "pay/{token}",
-    "lines": 94,
-    "chars": 2806
-  },
-  {
-    "id": 3896993,
-    "verb": "POST",
-    "name": "admin/providers/invite",
-    "lines": 91,
-    "chars": 3747
-  },
-  {
-    "id": 3958652,
-    "verb": "DELETE",
-    "name": "providers/{provider_id}",
-    "lines": 88,
-    "chars": 3199
-  },
-  {
-    "id": 3976696,
-    "verb": "GET",
-    "name": "admin/bookings",
-    "lines": 87,
-    "chars": 2261
-  },
-  {
-    "id": 3897432,
-    "verb": "PATCH",
-    "name": "me",
-    "lines": 87,
-    "chars": 4639
-  },
-  {
-    "id": 3933584,
-    "verb": "GET",
-    "name": "appointments",
-    "lines": 86,
-    "chars": 2093
-  },
-  {
-    "id": 3930569,
-    "verb": "POST",
-    "name": "admin/training-enrollments/{id}/send-balance-link",
-    "lines": 84,
-    "chars": 3638
-  },
-  {
-    "id": 3901561,
-    "verb": "POST",
-    "name": "me/services",
-    "lines": 84,
-    "chars": 2544
-  },
-  {
-    "id": 3942879,
-    "verb": "POST",
-    "name": "auth/reset-password",
-    "lines": 82,
-    "chars": 2872
-  },
-  {
-    "id": 3895745,
-    "verb": "POST",
-    "name": "auth/login",
-    "lines": 82,
-    "chars": 1867
-  },
-  {
-    "id": 3947245,
-    "verb": "POST",
-    "name": "me/documents",
-    "lines": 76,
-    "chars": 2131
-  },
-  {
-    "id": 3907519,
-    "verb": "POST",
-    "name": "providers/me/stripe/onboarding-link",
-    "lines": 76,
-    "chars": 2710
-  },
-  {
-    "id": 3897378,
-    "verb": "POST",
-    "name": "auth/onboard/{token}/complete-step1",
-    "lines": 76,
-    "chars": 2320
-  },
-  {
-    "id": 3930517,
-    "verb": "GET",
-    "name": "admin/training-courses",
-    "lines": 75,
-    "chars": 1993
-  },
-  {
-    "id": 3930553,
-    "verb": "POST",
-    "name": "admin/training-courses/{id}/mark-complete",
-    "lines": 64,
-    "chars": 1733
-  },
-  {
-    "id": 3933448,
-    "verb": "GET",
-    "name": "training-courses/upcoming",
-    "lines": 60,
-    "chars": 1903
-  },
-  {
-    "id": 3933585,
-    "verb": "GET",
-    "name": "appointments/{booking_id}",
-    "lines": 59,
-    "chars": 1423
-  },
-  {
-    "id": 3933596,
-    "verb": "POST",
-    "name": "pay/{token}/cancel",
-    "lines": 56,
-    "chars": 1453
-  },
-  {
-    "id": 3933588,
-    "verb": "POST",
-    "name": "bookings/{booking_id}/mark-no-show",
-    "lines": 55,
-    "chars": 1552
-  },
-  {
-    "id": 3911518,
-    "verb": "GET",
-    "name": "providers/me/stripe/onboarding-return",
-    "lines": 55,
-    "chars": 2025
+    "file": "POST_packages_checkout-link.xs",
+    "lines": 94
   },
   {
     "id": 3995759,
     "verb": "POST",
     "name": "packages/templates/{template_id}/deactivate",
-    "lines": 54,
-    "chars": 1668
+    "file": "POST_packages_templates__template_id__deactivate.xs",
+    "lines": 54
   },
   {
-    "id": 3930524,
-    "verb": "POST",
-    "name": "admin/training-courses",
-    "lines": 50,
-    "chars": 1566
-  },
-  {
-    "id": 3947242,
-    "verb": "GET",
-    "name": "providers/me/medical-director",
-    "lines": 49,
-    "chars": 1104
-  },
-  {
-    "id": 3930560,
+    "id": 3995758,
     "verb": "PATCH",
-    "name": "admin/training-enrollments/{id}",
-    "lines": 48,
-    "chars": 1533
-  },
-  {
-    "id": 3929709,
-    "verb": "GET",
-    "name": "training-enrollments/{id}",
-    "lines": 46,
-    "chars": 1646
-  },
-  {
-    "id": 3995756,
-    "verb": "GET",
-    "name": "packages/templates",
-    "lines": 45,
-    "chars": 1130
-  },
-  {
-    "id": 3972276,
-    "verb": "POST",
-    "name": "providers/me/billing-portal",
-    "lines": 44,
-    "chars": 1122
-  },
-  {
-    "id": 3933804,
-    "verb": "GET",
-    "name": "provider-services",
-    "lines": 44,
-    "chars": 1479
-  },
-  {
-    "id": 3911524,
-    "verb": "POST",
-    "name": "providers/me/stripe/onboarding-refresh",
-    "lines": 41,
-    "chars": 1513
+    "name": "packages/templates/{template_id}",
+    "file": "PATCH_packages_templates__template_id_.xs",
+    "lines": 281
   },
   {
     "id": 3995757,
     "verb": "GET",
     "name": "packages/templates/{template_id}",
-    "lines": 38,
-    "chars": 1079
+    "file": "GET_packages_templates__template_id_.xs",
+    "lines": 38
   },
   {
-    "id": 3897340,
+    "id": 3995756,
     "verb": "GET",
-    "name": "auth/onboard/{token}",
-    "lines": 35,
-    "chars": 959
+    "name": "packages/templates",
+    "file": "GET_packages_templates.xs",
+    "lines": 45
+  },
+  {
+    "id": 3995755,
+    "verb": "POST",
+    "name": "packages/templates",
+    "file": "POST_packages_templates.xs",
+    "lines": 144
   },
   {
     "id": 3984611,
     "verb": "GET",
     "name": "admin/room-rentals",
-    "lines": 34,
-    "chars": 864
+    "file": "GET_admin_room-rentals.xs",
+    "lines": 34
   },
   {
-    "id": 3947248,
-    "verb": "GET",
-    "name": "me/documents/{document_id}",
-    "lines": 31,
-    "chars": 709
-  },
-  {
-    "id": 3976862,
-    "verb": "GET",
-    "name": "admin/training-enrollments",
-    "lines": 28,
-    "chars": 815
-  },
-  {
-    "id": 3976550,
+    "id": 3984610,
     "verb": "POST",
-    "name": "providers/me/acknowledge-policy",
-    "lines": 28,
-    "chars": 609
+    "name": "room/rentals/{rental_id}/cancel",
+    "file": "POST_room_rentals__rental_id__cancel.xs",
+    "lines": 123
   },
   {
     "id": 3984609,
     "verb": "GET",
     "name": "room/my-rentals",
-    "lines": 22,
-    "chars": 523
+    "file": "GET_room_my-rentals.xs",
+    "lines": 22
   },
   {
-    "id": 3895660,
-    "verb": "GET",
-    "name": "services",
-    "lines": 22,
-    "chars": 458
+    "id": 3984603,
+    "verb": "POST",
+    "name": "webhooks/stripe/room",
+    "file": "POST_webhooks_stripe_room.xs",
+    "lines": 300
+  },
+  {
+    "id": 3984586,
+    "verb": "POST",
+    "name": "room/rental-intent",
+    "file": "POST_room_rental-intent.xs",
+    "lines": 149
   },
   {
     "id": 3984585,
     "verb": "GET",
     "name": "room/availability",
-    "lines": 20,
-    "chars": 621
+    "file": "GET_room_availability.xs",
+    "lines": 20
+  },
+  {
+    "id": 3976862,
+    "verb": "GET",
+    "name": "admin/training-enrollments",
+    "file": "GET_admin_training-enrollments.xs",
+    "lines": 28
+  },
+  {
+    "id": 3976855,
+    "verb": "POST",
+    "name": "training-enrollments/{id}/pay-balance",
+    "file": "POST_training-enrollments__id__pay-balance.xs",
+    "lines": 119
+  },
+  {
+    "id": 3976696,
+    "verb": "GET",
+    "name": "admin/bookings",
+    "file": "GET_admin_bookings.xs",
+    "lines": 87
+  },
+  {
+    "id": 3976550,
+    "verb": "POST",
+    "name": "providers/me/acknowledge-policy",
+    "file": "POST_providers_me_acknowledge-policy.xs",
+    "lines": 28
+  },
+  {
+    "id": 3972276,
+    "verb": "POST",
+    "name": "providers/me/billing-portal",
+    "file": "POST_providers_me_billing-portal.xs",
+    "lines": 44
+  },
+  {
+    "id": 3958652,
+    "verb": "DELETE",
+    "name": "providers/{provider_id}",
+    "file": "DELETE_providers__provider_id_.xs",
+    "lines": 88
+  },
+  {
+    "id": 3958651,
+    "verb": "PATCH",
+    "name": "providers/{provider_id}",
+    "file": "PATCH_providers__provider_id_.xs",
+    "lines": 310
+  },
+  {
+    "id": 3947248,
+    "verb": "GET",
+    "name": "me/documents/{document_id}",
+    "file": "GET_me_documents__document_id_.xs",
+    "lines": 31
   },
   {
     "id": 3947247,
     "verb": "GET",
     "name": "me/documents",
-    "lines": 20,
-    "chars": 385
+    "file": "GET_me_documents.xs",
+    "lines": 20
+  },
+  {
+    "id": 3947245,
+    "verb": "POST",
+    "name": "me/documents",
+    "file": "POST_me_documents.xs",
+    "lines": 76
+  },
+  {
+    "id": 3947242,
+    "verb": "GET",
+    "name": "providers/me/medical-director",
+    "file": "GET_providers_me_medical-director.xs",
+    "lines": 49
+  },
+  {
+    "id": 3947240,
+    "verb": "POST",
+    "name": "providers/me/medical-director/subscribe",
+    "file": "POST_providers_me_medical-director_subscribe.xs",
+    "lines": 101
+  },
+  {
+    "id": 3942879,
+    "verb": "POST",
+    "name": "auth/reset-password",
+    "file": "POST_auth_reset-password.xs",
+    "lines": 82
+  },
+  {
+    "id": 3942878,
+    "verb": "POST",
+    "name": "auth/forgot-password",
+    "file": "POST_auth_forgot-password.xs",
+    "lines": 94
+  },
+  {
+    "id": 3933827,
+    "verb": "GET",
+    "name": "admin/dashboard-summary",
+    "file": "GET_admin_dashboard-summary.xs",
+    "lines": 111
+  },
+  {
+    "id": 3933818,
+    "verb": "GET",
+    "name": "admin/revenue",
+    "file": "GET_admin_revenue.xs",
+    "lines": 429
+  },
+  {
+    "id": 3933815,
+    "verb": "GET",
+    "name": "provider/dashboard-summary",
+    "file": "GET_provider_dashboard-summary.xs",
+    "lines": 143
+  },
+  {
+    "id": 3933814,
+    "verb": "GET",
+    "name": "earnings",
+    "file": "GET_earnings.xs",
+    "lines": 307
+  },
+  {
+    "id": 3933805,
+    "verb": "PATCH",
+    "name": "provider-services/{provider_service_id}",
+    "file": "PATCH_provider-services__provider_service_id_.xs",
+    "lines": 98
+  },
+  {
+    "id": 3933804,
+    "verb": "GET",
+    "name": "provider-services",
+    "file": "GET_provider-services.xs",
+    "lines": 44
+  },
+  {
+    "id": 3933596,
+    "verb": "POST",
+    "name": "pay/{token}/cancel",
+    "file": "POST_pay__token__cancel.xs",
+    "lines": 56
+  },
+  {
+    "id": 3933595,
+    "verb": "POST",
+    "name": "pay/{token}/pay",
+    "file": "POST_pay__token__pay.xs",
+    "lines": 161
+  },
+  {
+    "id": 3933594,
+    "verb": "GET",
+    "name": "pay/{token}",
+    "file": "GET_pay__token_.xs",
+    "lines": 94
+  },
+  {
+    "id": 3933588,
+    "verb": "POST",
+    "name": "bookings/{booking_id}/mark-no-show",
+    "file": "POST_bookings__booking_id__mark-no-show.xs",
+    "lines": 55
+  },
+  {
+    "id": 3933587,
+    "verb": "POST",
+    "name": "bookings/{booking_id}/cancel",
+    "file": "POST_bookings__booking_id__cancel.xs",
+    "lines": 104
+  },
+  {
+    "id": 3933585,
+    "verb": "GET",
+    "name": "appointments/{booking_id}",
+    "file": "GET_appointments__booking_id_.xs",
+    "lines": 59
+  },
+  {
+    "id": 3933584,
+    "verb": "GET",
+    "name": "appointments",
+    "file": "GET_appointments.xs",
+    "lines": 86
+  },
+  {
+    "id": 3933580,
+    "verb": "POST",
+    "name": "bookings/create",
+    "file": "POST_bookings_create.xs",
+    "lines": 216
+  },
+  {
+    "id": 3933578,
+    "verb": "GET",
+    "name": "availability",
+    "file": "GET_availability.xs",
+    "lines": 129
+  },
+  {
+    "id": 3933448,
+    "verb": "GET",
+    "name": "training-courses/upcoming",
+    "file": "GET_training-courses_upcoming.xs",
+    "lines": 60
+  },
+  {
+    "id": 3930569,
+    "verb": "POST",
+    "name": "admin/training-enrollments/{id}/send-balance-link",
+    "file": "POST_admin_training-enrollments__id__send-balance-link.xs",
+    "lines": 84
+  },
+  {
+    "id": 3930560,
+    "verb": "PATCH",
+    "name": "admin/training-enrollments/{id}",
+    "file": "PATCH_admin_training-enrollments__id_.xs",
+    "lines": 48
+  },
+  {
+    "id": 3930553,
+    "verb": "POST",
+    "name": "admin/training-courses/{id}/mark-complete",
+    "file": "POST_admin_training-courses__id__mark-complete.xs",
+    "lines": 64
+  },
+  {
+    "id": 3930534,
+    "verb": "PATCH",
+    "name": "admin/training-courses/{id}",
+    "file": "PATCH_admin_training-courses__id_.xs",
+    "lines": 101
+  },
+  {
+    "id": 3930524,
+    "verb": "POST",
+    "name": "admin/training-courses",
+    "file": "POST_admin_training-courses.xs",
+    "lines": 50
+  },
+  {
+    "id": 3930517,
+    "verb": "GET",
+    "name": "admin/training-courses",
+    "file": "GET_admin_training-courses.xs",
+    "lines": 75
+  },
+  {
+    "id": 3929709,
+    "verb": "GET",
+    "name": "training-enrollments/{id}",
+    "file": "GET_training-enrollments__id_.xs",
+    "lines": 46
+  },
+  {
+    "id": 3929705,
+    "verb": "POST",
+    "name": "training-enrollments",
+    "file": "POST_training-enrollments.xs",
+    "lines": 126
+  },
+  {
+    "id": 3911524,
+    "verb": "POST",
+    "name": "providers/me/stripe/onboarding-refresh",
+    "file": "POST_providers_me_stripe_onboarding-refresh.xs",
+    "lines": 41
+  },
+  {
+    "id": 3911518,
+    "verb": "GET",
+    "name": "providers/me/stripe/onboarding-return",
+    "file": "GET_providers_me_stripe_onboarding-return.xs",
+    "lines": 55
+  },
+  {
+    "id": 3910318,
+    "verb": "POST",
+    "name": "webhooks/stripe/platform",
+    "file": "POST_webhooks_stripe_platform.xs",
+    "lines": 905
+  },
+  {
+    "id": 3910275,
+    "verb": "POST",
+    "name": "webhooks/stripe/connect",
+    "file": "POST_webhooks_stripe_connect.xs",
+    "lines": 191
+  },
+  {
+    "id": 3907519,
+    "verb": "POST",
+    "name": "providers/me/stripe/onboarding-link",
+    "file": "POST_providers_me_stripe_onboarding-link.xs",
+    "lines": 76
+  },
+  {
+    "id": 3901561,
+    "verb": "POST",
+    "name": "me/services",
+    "file": "POST_me_services.xs",
+    "lines": 84
+  },
+  {
+    "id": 3897432,
+    "verb": "PATCH",
+    "name": "me",
+    "file": "PATCH_me.xs",
+    "lines": 87
+  },
+  {
+    "id": 3897378,
+    "verb": "POST",
+    "name": "auth/onboard/{token}/complete-step1",
+    "file": "POST_auth_onboard__token__complete-step1.xs",
+    "lines": 76
+  },
+  {
+    "id": 3897340,
+    "verb": "GET",
+    "name": "auth/onboard/{token}",
+    "file": "GET_auth_onboard__token_.xs",
+    "lines": 35
+  },
+  {
+    "id": 3896993,
+    "verb": "POST",
+    "name": "admin/providers/invite",
+    "file": "POST_admin_providers_invite.xs",
+    "lines": 91
   },
   {
     "id": 3896472,
     "verb": "GET",
     "name": "me",
-    "lines": 16,
-    "chars": 376
+    "file": "GET_me.xs",
+    "lines": 16
+  },
+  {
+    "id": 3895745,
+    "verb": "POST",
+    "name": "auth/login",
+    "file": "POST_auth_login.xs",
+    "lines": 82
+  },
+  {
+    "id": 3895660,
+    "verb": "GET",
+    "name": "services",
+    "file": "GET_services.xs",
+    "lines": 22
   }
 ]
