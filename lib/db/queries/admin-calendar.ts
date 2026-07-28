@@ -3,7 +3,13 @@ import 'server-only'
 import { and, asc, eq, gte, lt } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
-import { bookings, providerServices, providers, services } from '@/lib/db/schema'
+import {
+  bookings,
+  providerServices,
+  providers,
+  roomBookings,
+  services,
+} from '@/lib/db/schema'
 
 import { denverInstant, getLaserHours, type LaserHours } from './availability'
 
@@ -49,10 +55,27 @@ export interface CalendarBooking {
   endLabel: string
 }
 
+/** A day the treatment room is let to a provider.
+ *
+ *  Deliberately NOT a positioned block like a booking. The room is sold by the day, morning or
+ *  afternoon, so placing it on the laser timeline would imply a precision it does not have and
+ *  would sit on top of appointments that are genuinely unrelated to it. It renders as a band
+ *  across the day instead.
+ *
+ *  The medical director could already see these; the owner could not, which is backwards. */
+export interface CalendarRoomLet {
+  id: string
+  day: string
+  slotType: string
+  providerName: string
+  status: string
+}
+
 export interface CalendarWeek {
   days: string[]
   hours: LaserHours
   bookings: CalendarBooking[]
+  roomLets: CalendarRoomLet[]
   stats: {
     booked: number
     cancelled: number
@@ -194,6 +217,35 @@ export async function getCalendarWeek(weekStart: string): Promise<CalendarWeek> 
     .where(and(gte(bookings.startTime, from), lt(bookings.startTime, to)))
     .orderBy(asc(bookings.startTime))
 
+  // Fetched by rental_date rather than by timestamp range: the room is sold as a named day
+  // slot, and its start/end are derived from platform settings that can change. The date is
+  // what was actually bought.
+  const lets = await db
+    .select({
+      id: roomBookings.id,
+      day: roomBookings.rentalDate,
+      slotType: roomBookings.slotType,
+      status: roomBookings.status,
+      firstName: providers.firstName,
+      lastName: providers.lastName,
+    })
+    .from(roomBookings)
+    .innerJoin(providers, eq(roomBookings.providerId, providers.id))
+    .where(and(gte(roomBookings.rentalDate, weekStart), lt(roomBookings.rentalDate, addDays(weekStart, 7))))
+    .orderBy(asc(roomBookings.rentalDate))
+
+  const roomLets: CalendarRoomLet[] = lets
+    // A pending hold is someone mid-checkout, which is worth seeing — an abandoned one expires
+    // and disappears on its own. A cancelled let is not.
+    .filter((l) => l.status !== 'cancelled' && l.status !== 'refunded')
+    .map((l) => ({
+      id: l.id,
+      day: l.day,
+      slotType: l.slotType,
+      status: l.status,
+      providerName: `${l.firstName} ${l.lastName}`,
+    }))
+
   const dayEnd = 24 * 60
   const entries: CalendarBooking[] = rows.map((r) => {
     const start = denverPlacement(r.startTime)
@@ -235,6 +287,7 @@ export async function getCalendarWeek(weekStart: string): Promise<CalendarWeek> 
     days,
     hours,
     bookings: entries,
+    roomLets,
     stats: {
       booked: occupying.length,
       cancelled: entries.length - occupying.length,
