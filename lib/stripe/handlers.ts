@@ -24,6 +24,7 @@ import { refreshPaymentStatus } from '@/lib/db/queries/training'
 
 import { splitClientPayment, toCents, toMoney } from '@/lib/money'
 
+import { planFromMetadata } from './config'
 import { stripeGet } from './client'
 import type {
   StripeAccountObject,
@@ -550,12 +551,15 @@ export async function handleChargeRefunded(charge: StripeChargeObject): Promise<
 /** An invoice paid against a subscription. This is membership revenue, which in v1 existed
  *  ONLY in Stripe and never reached any table. */
 export async function handleInvoicePaid(invoice: StripeInvoiceObject): Promise<HandlerResult> {
-  const providerId =
-    invoice.parent?.subscription_details?.metadata?.provider_id ??
-    invoice.lines?.data?.[0]?.metadata?.provider_id ??
-    null
+  const metadata =
+    invoice.parent?.subscription_details?.metadata ?? invoice.lines?.data?.[0]?.metadata ?? null
 
+  const providerId = metadata?.provider_id ?? null
   if (!providerId) return { handled: false, detail: 'invoice with no provider_id in metadata' }
+
+  // Which plan was paid for. This is the line that stops an Epicutis payment being treated as
+  // medical direction — the same metadata the subscription carries, read from the invoice.
+  const plan = planFromMetadata(metadata)
 
   const [existing] = await db
     .select({ id: ledgerEntries.id })
@@ -565,10 +569,13 @@ export async function handleInvoicePaid(invoice: StripeInvoiceObject): Promise<H
 
   if (existing) return { handled: true, detail: 'invoice already recorded' }
 
+  // The membership this invoice belongs to, not merely the provider's first one. With two
+  // plans, `.limit(1)` on provider alone attaches the money to whichever row happened to be
+  // created first.
   const [membership] = await db
     .select({ id: memberships.id })
     .from(memberships)
-    .where(eq(memberships.providerId, providerId))
+    .where(and(eq(memberships.providerId, providerId), eq(memberships.plan, plan)))
     .limit(1)
 
   const gross = money(invoice.amount_paid)
@@ -589,42 +596,50 @@ export async function handleInvoicePaid(invoice: StripeInvoiceObject): Promise<H
     payoutStatus: 'paid',
   })
 
-  // Paying restores the gate. This is the line that turns a subscription into the ability to
-  // book — without it, the whole membership flow is decorative.
-  await db
-    .update(providers)
-    .set({ medicalDirectorStatus: 'active' })
-    .where(eq(providers.id, providerId))
+  // Paying restores the gate — but ONLY for the director plan. This line used to run for any
+  // subscription invoice carrying a provider_id, so buying a $95 content membership would have
+  // granted physician oversight. That is a compliance problem, not a data one.
+  if (plan === 'medical_director') {
+    await db
+      .update(providers)
+      .set({ medicalDirectorStatus: 'active' })
+      .where(eq(providers.id, providerId))
+  }
 
   await db
     .update(memberships)
     .set({ status: 'active' })
-    .where(eq(memberships.providerId, providerId))
+    .where(and(eq(memberships.providerId, providerId), eq(memberships.plan, plan)))
 
-  return { handled: true, detail: `membership invoice recorded for ${providerId}` }
+  return { handled: true, detail: `${plan} invoice recorded for ${providerId}` }
 }
 
 export async function handleInvoicePaymentFailed(
   invoice: StripeInvoiceObject,
 ): Promise<HandlerResult> {
-  const providerId =
-    invoice.parent?.subscription_details?.metadata?.provider_id ??
-    invoice.lines?.data?.[0]?.metadata?.provider_id ??
-    null
+  const metadata =
+    invoice.parent?.subscription_details?.metadata ?? invoice.lines?.data?.[0]?.metadata ?? null
 
+  const providerId = metadata?.provider_id ?? null
   if (!providerId) return { handled: false, detail: 'invoice with no provider_id in metadata' }
 
-  await db
-    .update(providers)
-    .set({ medicalDirectorStatus: 'past_due' })
-    .where(eq(providers.id, providerId))
+  const plan = planFromMetadata(metadata)
+
+  // The same trap as the paid path, in reverse: a failed card on a $95 content subscription
+  // would have marked the provider's MEDICAL DIRECTION past due and closed the booking gate.
+  if (plan === 'medical_director') {
+    await db
+      .update(providers)
+      .set({ medicalDirectorStatus: 'past_due' })
+      .where(eq(providers.id, providerId))
+  }
 
   await db
     .update(memberships)
     .set({ status: 'past_due' })
-    .where(eq(memberships.providerId, providerId))
+    .where(and(eq(memberships.providerId, providerId), eq(memberships.plan, plan)))
 
-  return { handled: true, detail: `${providerId} marked past_due` }
+  return { handled: true, detail: `${plan} past_due for ${providerId}` }
 }
 
 /** Covers created / updated / deleted. v1 subscribed to customer.subscription.updated but had
@@ -635,6 +650,11 @@ export async function handleSubscriptionChanged(
 ): Promise<HandlerResult> {
   const providerId = sub.metadata?.provider_id ?? null
   if (!providerId) return { handled: false, detail: 'subscription with no provider_id' }
+
+  // WHICH subscription this is. A provider can hold the medical director plan and Epicutis at
+  // once, and they mean entirely different things — one is a booking gate, the other is content
+  // access. Before this existed, every subscription event was assumed to be the director plan.
+  const plan = planFromMetadata(sub.metadata)
 
   const ended = eventType === 'customer.subscription.deleted' || sub.status === 'canceled'
   const renewalDate = sub.items?.data?.[0]?.current_period_end
@@ -664,16 +684,19 @@ export async function handleSubscriptionChanged(
   //
   // subscription.created is the authoritative event for "this subscription exists", so it is
   // the right place to guarantee the row.
+  // Scoped to (provider, plan). It used to match on provider alone, which was harmless while
+  // there was one plan and destructive the moment there were two: an Epicutis subscription
+  // would overwrite the director row's subscription id and dates.
   const updated = await db
     .update(memberships)
     .set(fields)
-    .where(eq(memberships.providerId, providerId))
+    .where(and(eq(memberships.providerId, providerId), eq(memberships.plan, plan)))
     .returning({ id: memberships.id })
 
   if (updated.length === 0) {
     await db.insert(memberships).values({
       providerId,
-      plan: 'medical_director',
+      plan,
       startDate: new Date(),
       ...fields,
     })
@@ -681,14 +704,21 @@ export async function handleSubscriptionChanged(
 
   // Only a genuinely ended subscription closes the gate. cancel_at_period_end means they keep
   // access until the period runs out, so flipping the status now would cut them off early.
-  if (ended) {
+  //
+  // And only the DIRECTOR plan closes it at all. Cancelling Epicutis used to set
+  // medicalDirectorStatus to inactive, which would have revoked a provider's ability to book
+  // because they stopped paying for a content subscription.
+  if (ended && plan === 'medical_director') {
     await db
       .update(providers)
       .set({ medicalDirectorStatus: 'inactive' })
       .where(eq(providers.id, providerId))
   }
 
-  return { handled: true, detail: `subscription ${sub.id} -> ${ended ? 'ended' : sub.status}` }
+  return {
+    handled: true,
+    detail: `${plan} subscription ${sub.id} -> ${ended ? 'ended' : sub.status}`,
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -799,6 +829,7 @@ export async function linkSubscriptionCustomer(
   providerId: string,
   customerId: string | null,
   subscriptionId: string | null,
+  plan: 'medical_director' | 'epicutis' = 'medical_director',
 ): Promise<void> {
   if (customerId) {
     await db
@@ -807,16 +838,18 @@ export async function linkSubscriptionCustomer(
       .where(eq(providers.id, providerId))
   }
 
+  // Per plan, not per provider. Checking only the provider meant an Epicutis checkout would
+  // find the director row, decide a membership already existed, and never create its own.
   const [existing] = await db
     .select({ id: memberships.id })
     .from(memberships)
-    .where(eq(memberships.providerId, providerId))
+    .where(and(eq(memberships.providerId, providerId), eq(memberships.plan, plan)))
     .limit(1)
 
   if (!existing) {
     await db.insert(memberships).values({
       providerId,
-      plan: 'medical_director',
+      plan,
       status: 'active',
       stripeSubscriptionId: subscriptionId,
       stripeCustomerId: customerId,

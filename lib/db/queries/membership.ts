@@ -109,6 +109,8 @@ export interface MembershipCharge {
   amount: string
   entryType: string
   stripeInvoiceId: string | null
+  /** Null for rows written before the plans were distinguished, which were all director. */
+  plan: 'medical_director' | 'epicutis' | null
 }
 
 /** What the provider has actually paid Melanite for supervision.
@@ -123,11 +125,54 @@ export async function getMembershipCharges(providerId: string): Promise<Membersh
       amount: ledgerEntries.grossAmount,
       entryType: ledgerEntries.entryType,
       stripeInvoiceId: ledgerEntries.stripeInvoiceId,
+      // Which subscription the charge was for. The ledger row points at the membership it
+      // belongs to, so a provider holding both plans sees two distinct lines rather than a
+      // column of "Medical director — monthly" that includes their Epicutis payments.
+      plan: memberships.plan,
     })
     .from(ledgerEntries)
+    .leftJoin(memberships, eq(memberships.id, ledgerEntries.subjectId))
     .where(
       and(eq(ledgerEntries.providerId, providerId), eq(ledgerEntries.source, 'membership')),
     )
     .orderBy(desc(ledgerEntries.createdAt))
     .limit(24)
+}
+
+export interface EpicutisMembership {
+  status: 'active' | 'past_due' | 'cancelled' | null
+  renewalDate: Date | null
+  cancelAtPeriodEnd: boolean
+  configured: boolean
+}
+
+/** The Epicutis membership, which is NOT a booking gate.
+ *
+ *  Read separately from `getMembership` rather than folded into it. That function is about the
+ *  medical director — the thing that decides whether a provider can work — and quietly widening
+ *  it to cover an unrelated content subscription is how the two end up being treated as
+ *  interchangeable somewhere downstream. */
+export async function getEpicutis(providerId: string): Promise<EpicutisMembership> {
+  const [row] = await db
+    .select({
+      status: memberships.status,
+      renewalDate: memberships.renewalDate,
+      cancelAtPeriodEnd: memberships.cancelAtPeriodEnd,
+    })
+    .from(memberships)
+    .where(and(eq(memberships.providerId, providerId), eq(memberships.plan, 'epicutis')))
+    .limit(1)
+
+  const [settings] = await db
+    .select({ priceId: platformSettings.epicutisPriceId })
+    .from(platformSettings)
+    .where(eq(platformSettings.id, 1))
+    .limit(1)
+
+  return {
+    status: row?.status ?? null,
+    renewalDate: row?.renewalDate ?? null,
+    cancelAtPeriodEnd: row?.cancelAtPeriodEnd ?? false,
+    configured: Boolean(process.env.STRIPE_EPICUTIS_PRICE_ID || settings?.priceId),
+  }
 }

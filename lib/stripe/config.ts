@@ -47,6 +47,37 @@ export async function medicalDirectorPriceId(): Promise<string | null> {
   return settings?.priceId ?? null
 }
 
+/** The Epicutis membership price.
+ *
+ *  Same shape as the director plan, and deliberately a SEPARATE lookup rather than a shared
+ *  "get the price for plan X" helper — the two are configured independently and a provider can
+ *  hold both at once, so nothing should encourage treating them as interchangeable. */
+export async function epicutisPriceId(): Promise<string | null> {
+  const override = process.env.STRIPE_EPICUTIS_PRICE_ID
+  if (override && override.length > 0) return override
+
+  const [settings] = await db
+    .select({ priceId: platformSettings.epicutisPriceId })
+    .from(platformSettings)
+    .where(eq(platformSettings.id, 1))
+    .limit(1)
+
+  return settings?.priceId ?? null
+}
+
+/** Which plan a Stripe subscription or invoice belongs to.
+ *
+ *  Read from metadata written at checkout, because that is the only signal that survives every
+ *  event type — a subscription event carries its price, an invoice event may not, and matching
+ *  on price id alone breaks the day somebody changes the price in the dashboard.
+ *
+ *  Falls back to `medical_director` for anything unlabelled, which is what every subscription
+ *  created before this existed looks like. Getting that fallback backwards would grant the
+ *  booking gate to an Epicutis subscriber. */
+export function planFromMetadata(metadata: Record<string, string> | null | undefined) {
+  return metadata?.plan === 'epicutis' ? ('epicutis' as const) : ('medical_director' as const)
+}
+
 /** Warns when the write key and the price are in different Stripe modes.
  *
  *  This is the single most likely misconfiguration once both a live and a test key exist, and
@@ -69,4 +100,16 @@ export function modeMismatch(priceId: string | null): string | null {
   }
 
   return null
+}
+
+/** True when Stripe is telling us the stored billing customer no longer exists.
+ *
+ *  It happens for real: a customer deleted in the dashboard, a database restored across Stripe
+ *  modes, a migration that brought live ids into a test environment. Without recognising it,
+ *  the provider gets "Could not start the subscription" forever and there is nothing they or
+ *  Melanite can do from the app — the id is not editable anywhere.
+ */
+export function isMissingCustomerError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err)
+  return /no such customer/i.test(message)
 }

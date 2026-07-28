@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
 import { webhookEvents } from '@/lib/db/schema'
+import { planFromMetadata } from '@/lib/stripe/config'
 import { dispatch, linkSubscriptionCustomer } from '@/lib/stripe/handlers'
 import { verifyStripeSignature } from '@/lib/stripe/signature'
 import type { StripeCheckoutSessionObject, StripeEvent } from '@/lib/stripe/types'
@@ -98,7 +99,12 @@ export async function POST(request: Request) {
       const session = event.data.object as unknown as StripeCheckoutSessionObject
       const providerId = session.metadata?.provider_id
       if (session.mode === 'subscription' && providerId) {
-        await linkSubscriptionCustomer(providerId, session.customer, session.subscription)
+        await linkSubscriptionCustomer(
+          providerId,
+          session.customer,
+          session.subscription,
+          planFromMetadata(session.metadata),
+        )
       }
     } else {
       const outcome = await dispatch(event)

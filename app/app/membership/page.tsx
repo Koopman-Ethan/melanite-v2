@@ -2,8 +2,9 @@ import type { Metadata } from 'next'
 
 import { requireProvider } from '@/lib/auth/dal'
 import { cn } from '@/lib/cn'
-import { getMembership, getMembershipCharges } from '@/lib/db/queries/membership'
+import { getEpicutis, getMembership, getMembershipCharges } from '@/lib/db/queries/membership'
 
+import { Epicutis } from './epicutis'
 import { MembershipActions } from './membership-actions'
 
 export const metadata: Metadata = { title: 'Membership · Melanite' }
@@ -30,9 +31,10 @@ const STATUS = {
 
 export default async function MembershipPage() {
   const user = await requireProvider()
-  const [membership, charges] = await Promise.all([
+  const [membership, charges, epicutis] = await Promise.all([
     getMembership(user.id),
     getMembershipCharges(user.id),
+    getEpicutis(user.id),
   ])
 
   const status = STATUS[membership.status]
@@ -160,6 +162,15 @@ export default async function MembershipPage() {
         </section>
       )}
 
+      <Epicutis
+        epicutis={{
+          status: epicutis.status,
+          renewalDate: epicutis.renewalDate?.toISOString() ?? null,
+          cancelAtPeriodEnd: epicutis.cancelAtPeriodEnd,
+          configured: epicutis.configured,
+        }}
+      />
+
       {charges.length > 0 && (
         <section className="space-y-3">
           <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">
@@ -184,7 +195,11 @@ export default async function MembershipPage() {
                   <tr key={c.id} className={c.entryType === 'refund' ? 'opacity-70' : undefined}>
                     <td className="p-3 whitespace-nowrap tabular-nums">{date(c.createdAt)}</td>
                     <td className="p-3 text-ink-muted">
-                      {c.entryType === 'refund' ? 'Refund' : 'Medical director — monthly'}
+                      {c.entryType === 'refund'
+                        ? 'Refund'
+                        : c.plan === 'epicutis'
+                          ? 'Epicutis — monthly'
+                          : 'Medical director — monthly'}
                     </td>
                     <td className="p-3 text-right tabular-nums">{usd(c.amount)}</td>
                   </tr>

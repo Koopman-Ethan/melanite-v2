@@ -106,7 +106,10 @@ export const clientPackageStatus = pgEnum('client_package_status', [
   'refunded',
 ])
 
-export const membershipPlan = pgEnum('membership_plan', ['medical_director'])
+/** A provider can hold more than one of these at once, and they mean completely different
+ *  things: `medical_director` is a booking gate, `epicutis` is content and wholesale access
+ *  that unlocks nothing in this app. Code that touches a subscription must say which. */
+export const membershipPlan = pgEnum('membership_plan', ['medical_director', 'epicutis'])
 
 export const membershipStatus = pgEnum('membership_status', ['active', 'past_due', 'cancelled'])
 
@@ -231,6 +234,9 @@ export const platformSettings = pgTable('platform_settings', {
   cherryApplyUrl: text(),
   stripePlatformAccountId: text().notNull(),
   medicalDirectorPriceId: text(),
+  /** The Epicutis membership price. Separate column rather than a shared "plans" table: there
+   *  are two, they are configured once, and a table would be ceremony around two strings. */
+  epicutisPriceId: text(),
   laserOpenTime: text().notNull().default('08:00'),
   laserCloseTime: text().notNull().default('20:00'),
   slotStrideMins: integer().notNull().default(15),
@@ -705,7 +711,13 @@ export const memberships = pgTable('memberships', {
   startDate: timestamp({ withTimezone: true }),
   renewalDate: timestamp({ withTimezone: true }),
   cancelDate: timestamp({ withTimezone: true }),
-}, (t) => [uniqueIndex().on(t.stripeSubscriptionId), index().on(t.providerId, t.status)])
+}, (t) => [
+  uniqueIndex().on(t.stripeSubscriptionId),
+  index().on(t.providerId, t.status),
+  // One row per provider per plan. Without this a retried webhook or a resubscribe leaves two
+  // `epicutis` rows and every lookup picks whichever comes back first.
+  uniqueIndex('memberships_provider_plan_unique').on(t.providerId, t.plan),
+])
 
 // ---------------------------------------------------------------------------
 // Room rental
