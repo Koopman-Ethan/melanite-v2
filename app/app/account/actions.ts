@@ -43,6 +43,19 @@ export async function updateProfile(
   const malpracticeInsurance = String(formData.get('malpracticeInsurance') ?? '').trim() || null
 
   if (!firstName || !lastName) return { error: 'First and last name are required.' }
+
+  // Onboarding requires the licence, so Account must not let it be erased afterwards. Without
+  // this the strictness of setup is decorative: finish it, then blank every field.
+  //
+  // Scoped to providers. An owner or the medical director is not practising under a laser
+  // licence, and two of those accounts have never had one — requiring it of them would lock
+  // them out of their own profile form over a field that does not apply.
+  if (user.role === 'provider') {
+    if (!licenseNumber) return { error: 'Your licence number is required.' }
+    if (!licenseState) return { error: 'The state your licence was issued in is required.' }
+    if (!licenseExpiryRaw) return { error: 'Your licence expiry date is required.' }
+  }
+
   if (licenseExpiryRaw && !DATE.test(licenseExpiryRaw)) {
     return { error: 'Licence expiry must be a valid date.' }
   }

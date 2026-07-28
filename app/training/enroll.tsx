@@ -190,7 +190,8 @@ export function Enroll({ courses }: { courses: CourseView[] }) {
               label="Professional licence number"
               value={licenseNumber}
               onChange={(e) => setLicenseNumber(e.target.value)}
-              hint="Optional here — Melanite will need it before you can practise"
+              required
+              hint="Melanite records who was trained and under what licence."
             />
           </section>
 

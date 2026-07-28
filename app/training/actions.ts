@@ -1,9 +1,15 @@
 'use server'
 
-import { and, eq, sql } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
-import { getEnrollmentDetail } from '@/lib/db/queries/training'
+import {
+  SEAT_HOLD_MINUTES,
+  claimSeat,
+  getEnrollmentDetail,
+  releaseExpiredSeats,
+  releaseSeat,
+} from '@/lib/db/queries/training'
 import { trainingCourses, trainingEnrollments } from '@/lib/db/schema'
 import { friendlyStripeError, stripePost } from '@/lib/stripe/client'
 
@@ -53,6 +59,11 @@ export async function enrollAndPayDeposit(input: {
   if (!firstName || !lastName) return { error: 'Enter your first and last name.' }
   if (!EMAIL.test(email)) return { error: 'Enter a valid email address.' }
   if (!input.phone.trim()) return { error: 'Enter a phone number.' }
+  // Required, not optional. This is a clinical laser course — who is being trained, and under
+  // what licence, is the record Melanite has to be able to produce later.
+  if (!input.licenseNumber.trim()) {
+    return { error: 'Enter your professional licence number.' }
+  }
 
   const [course] = await db
     .select({
@@ -70,27 +81,18 @@ export async function enrollAndPayDeposit(input: {
   if (!course) return { error: 'That course does not exist.' }
   if (course.status !== 'scheduled') return { error: 'That course is no longer open.' }
 
-  // Seats are counted from enrolments that have paid something. An abandoned form must not
-  // hold a place, and someone who paid a deposit has one.
-  const [{ taken }] = await db
-    .select({ taken: sql<number>`count(*)::int` })
-    .from(trainingEnrollments)
-    .where(
-      and(
-        eq(trainingEnrollments.trainingCourseId, course.id),
-        sql`${trainingEnrollments.paymentStatus} <> 'unpaid'`,
-      ),
-    )
-
-  if (Number(taken) >= course.maxStudents) {
-    return { error: 'This course is now full. Contact Melanite about the next date.' }
-  }
+  // Abandoned checkouts give their seats back before anyone else is told the course is full.
+  await releaseExpiredSeats(course.id)
 
   // Re-enrolling with the same email reuses the row rather than creating a second seat for the
   // same person — v1 refused with ALREADY_ENROLLED, which strands anyone whose first payment
   // attempt failed.
   const [existing] = await db
-    .select({ id: trainingEnrollments.id, paymentStatus: trainingEnrollments.paymentStatus })
+    .select({
+      id: trainingEnrollments.id,
+      paymentStatus: trainingEnrollments.paymentStatus,
+      seatHeldUntil: trainingEnrollments.seatHeldUntil,
+    })
     .from(trainingEnrollments)
     .where(
       and(
@@ -104,6 +106,16 @@ export async function enrollAndPayDeposit(input: {
     return { error: 'You are already enrolled on this course. Check your email for your balance link.' }
   }
 
+  // Somebody retrying inside their own hold window already has a seat; claiming a second one
+  // would let one person eat two places on a five-seat course.
+  const alreadyHolding = Boolean(existing?.seatHeldUntil && existing.seatHeldUntil > new Date())
+
+  if (!alreadyHolding && !(await claimSeat(course.id))) {
+    return { error: 'This course is now full. Contact Melanite about the next date.' }
+  }
+
+  const heldUntil = new Date(Date.now() + SEAT_HOLD_MINUTES * 60_000)
+
   let enrollmentId = existing?.id
   if (enrollmentId) {
     await db
@@ -112,7 +124,8 @@ export async function enrollAndPayDeposit(input: {
         firstName,
         lastName,
         phone: input.phone.trim(),
-        licenseNumber: input.licenseNumber.trim() || null,
+        licenseNumber: input.licenseNumber.trim(),
+        seatHeldUntil: heldUntil,
       })
       .where(eq(trainingEnrollments.id, enrollmentId))
   } else {
@@ -124,8 +137,9 @@ export async function enrollAndPayDeposit(input: {
         lastName,
         email,
         phone: input.phone.trim(),
-        licenseNumber: input.licenseNumber.trim() || null,
+        licenseNumber: input.licenseNumber.trim(),
         paymentStatus: 'unpaid',
+        seatHeldUntil: heldUntil,
       })
       .returning({ id: trainingEnrollments.id })
     enrollmentId = created.id
@@ -134,7 +148,10 @@ export async function enrollAndPayDeposit(input: {
   const amountCents = Math.round(
     Number(input.payInFull ? course.totalPrice : course.depositAmount) * 100,
   )
-  if (amountCents <= 0) return { error: 'This course has no price set. Contact Melanite.' }
+  if (amountCents <= 0) {
+    if (!alreadyHolding) await releaseSeat(course.id)
+    return { error: 'This course has no price set. Contact Melanite.' }
+  }
 
   try {
     const intent = await stripePost<{ id: string; client_secret: string }>('/payment_intents', {
@@ -157,6 +174,9 @@ export async function enrollAndPayDeposit(input: {
       amount: amountCents / 100,
     }
   } catch (err) {
+    // Stripe never got as far as a payment, so the seat goes back now rather than waiting out
+    // the hold. Only if this call is what claimed it.
+    if (!alreadyHolding) await releaseSeat(course.id)
     return { error: friendlyStripeError(err, 'Could not start the payment. Try again shortly.') }
   }
 }

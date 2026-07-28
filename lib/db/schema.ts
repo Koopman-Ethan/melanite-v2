@@ -765,6 +765,15 @@ export const trainingCourses = pgTable('training_courses', {
   day2Start: text().notNull().default('10:00'),
   day2End: text().notNull().default('14:00'),
   maxStudents: integer().notNull().default(5),
+  /** Seats actually claimed, maintained by an atomic conditional UPDATE rather than derived by
+   *  counting enrolments.
+   *
+   *  Counting was the bug. The old check read `count(*) where payment_status <> 'unpaid'` and
+   *  compared it to maxStudents — but the seat is not taken until Stripe confirms the payment,
+   *  which is minutes later. Two people could both pass the check, both pay, and both be
+   *  enrolled on the last seat. A counter incremented under a row lock closes that: concurrent
+   *  claims serialise on the course row, and the loser sees the course full. */
+  seatsTaken: integer().notNull().default(0),
   depositAmount: money().notNull().default('500.00'),
   totalPrice: money().notNull().default('1400.00'),
   googleCalendarEventIdDay1: text(),
@@ -795,6 +804,12 @@ export const trainingEnrollments = pgTable('training_enrollments', {
   licenseNumber: text(),
 
   paymentStatus: trainingPaymentStatus().notNull().default('unpaid'),
+  /** When an unpaid seat stops being held.
+   *
+   *  The same shape as `roomBookings.holdExpiresAt`, and for the same reason: without it an
+   *  abandoned checkout takes a seat off the market permanently. Cleared once payment lands,
+   *  at which point the seat is held by the payment rather than by the clock. */
+  seatHeldUntil: timestamp({ withTimezone: true }),
   balanceDueDate: date(),
   courseCompletedAt: timestamp({ withTimezone: true }),
 }, (t) => [

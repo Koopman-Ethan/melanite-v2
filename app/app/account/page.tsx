@@ -94,7 +94,7 @@ export default async function AccountPage() {
         title="Profile"
         description="Your email is your sign-in and can’t be changed here — contact Melanite if it needs to move."
       >
-        <ProfileForm values={account} />
+        <ProfileForm values={account} licenceRequired={user.role === 'provider'} />
       </Section>
 
       <Section

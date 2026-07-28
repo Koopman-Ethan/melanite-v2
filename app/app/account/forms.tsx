@@ -39,7 +39,15 @@ export interface ProfileValues {
   malpracticeInsurance: string | null
 }
 
-export function ProfileForm({ values }: { values: ProfileValues }) {
+export function ProfileForm({
+  values,
+  licenceRequired,
+}: {
+  values: ProfileValues
+  /** Providers practise under the licence, so they cannot blank it. Owners and the medical
+   *  director are not practising under one and two of those accounts have never had one. */
+  licenceRequired: boolean
+}) {
   const [state, action] = useActionState<AccountState, FormData>(updateProfile, {})
 
   return (
@@ -63,12 +71,14 @@ export function ProfileForm({ values }: { values: ProfileValues }) {
           name="licenseNumber"
           label="License number"
           defaultValue={values.licenseNumber ?? ''}
+          required={licenceRequired}
         />
         <Field
           id="licenseState"
           name="licenseState"
           label="License state"
           defaultValue={values.licenseState ?? ''}
+          required={licenceRequired}
         />
         <Field
           id="licenseExpiry"
@@ -76,6 +86,7 @@ export function ProfileForm({ values }: { values: ProfileValues }) {
           label="License expires"
           type="date"
           defaultValue={values.licenseExpiry ?? ''}
+          required={licenceRequired}
           hint="Booking stops automatically once this date passes."
         />
         <Field
