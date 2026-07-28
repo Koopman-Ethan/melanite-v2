@@ -24,7 +24,9 @@
     "a11y": "playwright test",
     "a11y:report": "playwright test --reporter=list",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "etl:verify:providers": "tsx --tsconfig scripts/tsconfig.json scripts/etl/verify-providers.ts",
+    "db:scrub": "tsx --tsconfig scripts/tsconfig.json scripts/scrub-dev.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
