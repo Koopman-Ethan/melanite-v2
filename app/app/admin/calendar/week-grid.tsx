@@ -275,15 +275,25 @@ export function WeekGrid({
           {/* Timeline */}
           <div className="flex" style={{ height: gridHeight }}>
             <div className="relative w-12 shrink-0">
-              {hourMarks.map((m) => (
-                <span
-                  key={m}
-                  style={{ top: (m - openMinutes) * PX_PER_MIN }}
-                  className="absolute right-1.5 -translate-y-1/2 text-[10px] tabular-nums text-ink-faint"
-                >
-                  {hourLabel(m)}
-                </span>
-              ))}
+              {hourMarks.map((m) => {
+                // Hour labels are centred on their line. The first line IS the top edge of the
+                // grid, so centring it put half the text above the timeline and into the room
+                // gutter, where it collided with the ROOM label. That one sits below its line
+                // instead; every other hour is unchanged.
+                const top = (m - openMinutes) * PX_PER_MIN
+                return (
+                  <span
+                    key={m}
+                    style={{ top }}
+                    className={cn(
+                      'absolute right-1.5 text-[10px] tabular-nums text-ink-faint',
+                      top === 0 ? 'translate-y-0.5' : '-translate-y-1/2',
+                    )}
+                  >
+                    {hourLabel(m)}
+                  </span>
+                )
+              })}
             </div>
 
             {days.map((day) => {
