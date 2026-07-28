@@ -35,7 +35,7 @@ export interface FeeResult {
   skipped?: string
 }
 
-interface FeePolicy {
+export interface FeePolicy {
   noShowPct: number
   cancellationAmount: number
   lateHours: number
@@ -92,7 +92,9 @@ export async function quoteFee(
   }
 }
 
-function feeCents(kind: FeeKind, price: string, policy: FeePolicy): number {
+/** The amount, before any split. Exported so it can be tested without a Stripe call —
+ *  it is the number that ends up on somebody's card statement. */
+export function feeCents(kind: FeeKind, price: string, policy: FeePolicy): number {
   return kind === 'no_show_fee'
     ? Math.round(toCents(price) * policy.noShowPct)
     : // A late cancellation is a flat amount, not a proportion: the cost is the empty slot,
