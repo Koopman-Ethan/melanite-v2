@@ -3,6 +3,8 @@
 import { eq } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 
+import { DATE, validateCourse } from '@/lib/validate/training-course'
+
 import { requireAdmin } from '@/lib/auth/dal'
 import { db } from '@/lib/db'
 import { getEnrollmentDetail } from '@/lib/db/queries/training'
@@ -16,8 +18,6 @@ export interface TrainingState {
   url?: string
 }
 
-const DATE = /^\d{4}-\d{2}-\d{2}$/
-const TIME = /^\d{2}:\d{2}$/
 
 export async function createCourse(input: {
   day1Date: string
@@ -32,7 +32,7 @@ export async function createCourse(input: {
 }): Promise<TrainingState> {
   await requireAdmin()
 
-  const invalid = validate(input)
+  const invalid = validateCourse(input)
   if (invalid) return { error: invalid }
 
   await db.insert(trainingCourses).values({
@@ -68,7 +68,7 @@ export async function updateCourse(
 ): Promise<TrainingState> {
   await requireAdmin()
 
-  const invalid = validate(input)
+  const invalid = validateCourse(input)
   if (invalid) return { error: invalid }
 
   const [course] = await db
@@ -218,40 +218,3 @@ export async function setBalanceDueDate(
   return { success: dueDate ? 'Due date set.' : 'Due date cleared.' }
 }
 
-function validate(input: {
-  day1Date: string
-  day1Start: string
-  day1End: string
-  day2Date: string | null
-  day2Start: string
-  day2End: string
-  maxStudents: number
-  depositAmount: number
-  totalPrice: number
-}): string | null {
-  if (!DATE.test(input.day1Date)) return 'Pick a date for day one.'
-  if (!TIME.test(input.day1Start) || !TIME.test(input.day1End)) return 'Day one times are not valid.'
-  if (input.day1End <= input.day1Start) return 'Day one must end after it starts.'
-
-  if (input.day2Date) {
-    if (!DATE.test(input.day2Date)) return 'Day two date is not valid.'
-    if (input.day2Date < input.day1Date) return 'Day two cannot be before day one.'
-    if (!TIME.test(input.day2Start) || !TIME.test(input.day2End)) {
-      return 'Day two times are not valid.'
-    }
-    if (input.day2End <= input.day2Start) return 'Day two must end after it starts.'
-  }
-
-  if (!Number.isInteger(input.maxStudents) || input.maxStudents < 1) {
-    return 'A course needs at least one seat.'
-  }
-  if (!(input.totalPrice > 0)) return 'Set a course price.'
-  if (input.depositAmount < 0) return 'The deposit cannot be negative.'
-  // A deposit larger than the price would leave a negative balance owed, which nothing
-  // downstream is prepared to represent.
-  if (input.depositAmount > input.totalPrice) {
-    return 'The deposit cannot be more than the total price.'
-  }
-
-  return null
-}
