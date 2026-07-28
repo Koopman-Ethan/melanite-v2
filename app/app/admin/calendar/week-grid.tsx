@@ -179,7 +179,9 @@ export function WeekGrid({
         </label>
         <p className="text-xs text-ink-faint">
           {openTime}–{closeTime} Mountain · one laser, all providers
-          {roomLets.length > 0 && ` · ${roomLets.length} room let${roomLets.length === 1 ? '' : 's'}`}
+          {roomLets.length === 0
+            ? ' · room not let this week'
+            : ` · ${roomLets.length} room let${roomLets.length === 1 ? '' : 's'}`}
         </p>
       </div>
 
@@ -231,9 +233,13 @@ export function WeekGrid({
           {/* Room lets.
               A band rather than a block on the timeline: the room is sold by the day, morning
               or afternoon, so a positioned rectangle would imply a precision it does not have
-              and would overlap laser appointments it has nothing to do with. Only rendered
-              when there is something to show, so a week with no lets costs no vertical space. */}
-          {roomLets.length > 0 && (
+              and would overlap laser appointments it has nothing to do with.
+
+              Always rendered, empty weeks included. The first version hid the row when there
+              was nothing in it, which saved a little space and made the feature impossible to
+              find: a row that disappears when there is no data looks exactly like a row that
+              was never built. */}
+          <div>
             <div className="flex border-b border-line bg-raised/40">
               <div className="flex w-12 shrink-0 items-center justify-end pr-1.5">
                 <span className="text-[9px] uppercase leading-tight text-ink-faint">Room</span>
@@ -241,7 +247,7 @@ export function WeekGrid({
               {days.map((day) => {
                 const lets = roomLets.filter((l) => l.day === day)
                 return (
-                  <div key={day} className="flex-1 border-l border-line p-1">
+                  <div key={day} className="min-h-11 flex-1 border-l border-line p-1">
                     {lets.map((let_) => (
                       <div
                         key={let_.id}
@@ -264,7 +270,7 @@ export function WeekGrid({
                 )
               })}
             </div>
-          )}
+          </div>
 
           {/* Timeline */}
           <div className="flex" style={{ height: gridHeight }}>
