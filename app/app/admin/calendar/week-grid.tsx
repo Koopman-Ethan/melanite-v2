@@ -355,7 +355,23 @@ export function WeekGrid({
                 <span className="rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-ink-muted">
                   {selected.status.replace('_', ' ')}
                 </span>
-                {selected.paymentSource !== 'checkout_link' && (
+                {/* An external payment says WHICH route and whether the money has landed.
+                    "Paid outside the app" alone left Keoni unable to tell a Groupon she still
+                    has to invoice from one she already collected — the distinction the whole
+                    external-payment flow exists to give her. */}
+                {selected.paymentSource === 'external' && (
+                  <span
+                    className={
+                      selected.reconciled
+                        ? 'rounded-field border border-success/30 bg-success/10 px-2 py-0.5 text-[10px] text-success'
+                        : 'rounded-field border border-warning/40 bg-warning/10 px-2 py-0.5 text-[10px] text-warning'
+                    }
+                  >
+                    {(selected.externalMethod ?? 'external').replace(/^\w/, (c) => c.toUpperCase())}
+                    {selected.reconciled ? ' · recorded' : ' · not yet recorded'}
+                  </span>
+                )}
+                {selected.paymentSource !== 'checkout_link' && selected.paymentSource !== 'external' && (
                   <span className="rounded border border-gold/40 bg-gold/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-gold">
                     {PAYMENT_LABELS[selected.paymentSource] ?? selected.paymentSource}
                   </span>

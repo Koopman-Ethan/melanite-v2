@@ -694,6 +694,15 @@ export const packageCheckoutLinks = pgTable('package_checkout_links', {
    *  at checkout, and nothing records that it moved. */
   price: money().notNull().default('0.00'),
   status: checkoutLinkStatus().notNull().default('pending'),
+  /** When the client left for Cherry.
+   *
+   *  Cherry is a hand-off: the client finishes on Cherry's site and the money reaches Keoni
+   *  directly, so no webhook ever arrives here. Without this the link sits at `pending`
+   *  forever and looks identical to one nobody opened — the copy on that page literally says
+   *  "then tell your provider", which is a workflow held together by somebody remembering.
+   *
+   *  An INTENT, not a payment. It records that they went, not that they paid. */
+  cherryStartedAt: timestamp({ withTimezone: true }),
   tipAmount: money().notNull().default('0.00'),
   stripeCustomerId: text(),
   stripePaymentIntentId: text(),

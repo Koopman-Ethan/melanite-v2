@@ -1,6 +1,6 @@
 'use server'
 
-import { eq } from 'drizzle-orm'
+import { and, eq, isNull } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
 import { getBookingCheckout, getPackageCheckout } from '@/lib/db/queries/checkout'
@@ -367,5 +367,38 @@ function notPayableMessage(state: string): string {
       return 'This payment link was cancelled.'
     default:
       return 'This is no longer payable. Contact your provider.'
+  }
+}
+
+/**
+ * Records that a client left for Cherry.
+ *
+ * Cherry is a hand-off, not an integration: the client finishes on Cherry's site and the money
+ * reaches Keoni directly, so no webhook ever comes back here. Without this the link sits at
+ * `pending` indefinitely and is indistinguishable from one nobody opened — while the page
+ * itself tells the client to "tell your provider", a workflow held together by somebody
+ * remembering to pass a message on.
+ *
+ * This records INTENT, never payment. It says they went, not that they paid, and the wording
+ * everywhere downstream says the same — a package marked paid because somebody clicked a link
+ * would be worse than no signal at all.
+ *
+ * Deliberately forgiving: the client is mid-checkout on a four-figure purchase, and a failure
+ * to write a tracking timestamp must never stand between them and Cherry.
+ */
+export async function noteCherryHandoff(token: string): Promise<void> {
+  try {
+    await db
+      .update(packageCheckoutLinks)
+      .set({ cherryStartedAt: new Date() })
+      .where(
+        and(
+          eq(packageCheckoutLinks.token, token),
+          eq(packageCheckoutLinks.status, 'pending'),
+          isNull(packageCheckoutLinks.cherryStartedAt),
+        ),
+      )
+  } catch (err) {
+    console.error('[cherry] could not record hand-off for', token, err)
   }
 }

@@ -3,6 +3,7 @@ import type { Metadata } from 'next'
 import { requireAdmin } from '@/lib/auth/dal'
 import {
   getActiveProviders,
+  getCherryHandoffs,
   getManualEntries,
   getProviderServiceMap,
   getProviderSharePct,
@@ -38,14 +39,16 @@ const SOURCE_LABELS: Record<string, string> = {
 export default async function AdminToolsPage() {
   await requireAdmin()
 
-  const [unpaid, providers, serviceMap, sharePct, manualEntries, invites] = await Promise.all([
-    getUnpaidBookings(),
-    getActiveProviders(),
-    getProviderServiceMap(),
-    getProviderSharePct(),
-    getManualEntries(),
-    getInvites(),
-  ])
+  const [unpaid, providers, serviceMap, sharePct, manualEntries, invites, cherry] =
+    await Promise.all([
+      getUnpaidBookings(),
+      getActiveProviders(),
+      getProviderServiceMap(),
+      getProviderSharePct(),
+      getManualEntries(),
+      getInvites(),
+      getCherryHandoffs(),
+    ])
 
   return (
     <main className="mx-auto w-full max-w-4xl px-6 py-10 space-y-10">
@@ -67,6 +70,54 @@ export default async function AdminToolsPage() {
           expiresAt: i.expiresAt.toISOString(),
         }))}
       />
+
+      {/* Cherry is the only route with no webhook: the client finishes on Cherry's site, Cherry
+          pays Keoni in full, and Keoni owes the provider their half. Nothing about that chain
+          reaches this app on its own, so before this the whole thing depended on a client
+          remembering to mention it. */}
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">
+          Applied through Cherry
+        </h2>
+        {cherry.length === 0 ? (
+          <div className="rounded-card border border-dashed border-line p-8 text-center text-sm text-ink-muted">
+            Nobody is mid-application.
+          </div>
+        ) : (
+          <ul className="space-y-2">
+            {cherry.map((c) => (
+              <li
+                key={c.id}
+                className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-warning/40 bg-warning/5 p-4"
+              >
+                <div className="min-w-0">
+                  <p className="font-medium">
+                    {c.clientName ?? c.clientEmail ?? 'Client'}{' '}
+                    <span className="font-normal text-ink-muted">· {c.packageName}</span>
+                  </p>
+                  <p className="mt-0.5 text-xs text-ink-faint">
+                    {c.providerName} · started{' '}
+                    {c.waitingDays === 0
+                      ? 'today'
+                      : `${c.waitingDays} day${c.waitingDays === 1 ? '' : 's'} ago`}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <div className="tabular-nums font-semibold">{usd(c.price)}</div>
+                  <div className="text-xs text-warning">check Cherry</div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+        {/* An intent, not a payment. Recording it as revenue because a button was clicked would
+            be worse than no signal at all. */}
+        <p className="text-xs text-ink-faint">
+          These clients opened Cherry to apply. It is not proof they were approved or that they
+          paid — check Cherry, then record it as a package payment so the provider gets their
+          half. Each one disappears from this list once the package is paid for.
+        </p>
+      </section>
 
       <section className="space-y-3">
         <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">

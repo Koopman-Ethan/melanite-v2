@@ -229,7 +229,19 @@ async function main() {
   // Drives laser hours, the provider share and the medical-director price. Without it the app
   // falls back to defaults that happen to match, which hides the gap rather than showing it.
   if (xPlatformSettings[0]) {
-    await db.insert(schema.platformSettings).values(T.transformPlatformSettings(xPlatformSettings[0]))
+    const settings = T.transformPlatformSettings(xPlatformSettings[0])
+    await db.insert(schema.platformSettings).values(settings)
+
+    // Two settings v1 has no column for. Both fail by disappearing: a missing Cherry URL hides
+    // the financing button, a missing Epicutis price disables the membership one — no error
+    // either way. Saying so here is the only thing between that and finding out from Keoni.
+    console.log(`  cherry financing: ${settings.cherryApplyUrl}`)
+    console.log(
+      settings.epicutisPriceId
+        ? `  epicutis price:   ${settings.epicutisPriceId}`
+        : `  epicutis price:   NOT SET — the Epicutis membership will be unavailable.\n` +
+            `                    Set STRIPE_EPICUTIS_PRICE_ID (live price id in production).`,
+    )
   }
 
   const mdRows = xProviders.map(T.transformMedicalDirectorCredentials).filter((r) => r !== null)

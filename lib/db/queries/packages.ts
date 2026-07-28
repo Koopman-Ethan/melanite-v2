@@ -7,6 +7,7 @@ import {
   clientPackageItems,
   clientPackages,
   clients,
+  packageCheckoutLinks,
   packageRedemptions,
   packageTemplateItems,
   packageTemplates,
@@ -207,6 +208,60 @@ export async function getRedemptionHistory(clientPackageId: string) {
     .innerJoin(services, eq(clientPackageItems.serviceId, services.id))
     .where(eq(packageRedemptions.clientPackageId, clientPackageId))
     .orderBy(asc(packageRedemptions.redeemedAt))
+}
+
+export interface OutstandingPackageLink {
+  id: string
+  clientName: string | null
+  clientEmail: string | null
+  templateName: string
+  price: string
+  createdAt: Date
+  expiresAt: Date
+  expired: boolean
+  /** When the client left for Cherry, if they did. */
+  cherryStartedAt: Date | null
+}
+
+/** Package payment links sent and not yet paid.
+ *
+ *  A link the provider cannot see is a sale they have to remember. This is also the only place
+ *  a Cherry hand-off is visible to the person who sold the package — Cherry pays Keoni, not the
+ *  provider, so the provider's own Stripe account will never show it and nothing else here
+ *  would ever mention it.
+ */
+export async function getOutstandingPackageLinks(
+  providerId: string,
+): Promise<OutstandingPackageLink[]> {
+  const rows = await db
+    .select({
+      id: packageCheckoutLinks.id,
+      clientName: packageCheckoutLinks.clientName,
+      clientEmail: packageCheckoutLinks.clientEmail,
+      templateName: packageTemplates.name,
+      price: packageCheckoutLinks.price,
+      createdAt: packageCheckoutLinks.createdAt,
+      expiresAt: packageCheckoutLinks.expiresAt,
+      cherryStartedAt: packageCheckoutLinks.cherryStartedAt,
+    })
+    .from(packageCheckoutLinks)
+    .innerJoin(packageTemplates, eq(packageCheckoutLinks.packageTemplateId, packageTemplates.id))
+    .where(
+      and(
+        eq(packageCheckoutLinks.providerId, providerId),
+        eq(packageCheckoutLinks.status, 'pending'),
+      ),
+    )
+    // A client mid-application through Cherry is the one worth acting on, so it sorts first.
+    // NULLS LAST is not optional here: Postgres orders DESC as NULLS FIRST, which would put
+    // every link nobody has touched above the ones that need chasing.
+    .orderBy(
+      sql`${packageCheckoutLinks.cherryStartedAt} desc nulls last`,
+      desc(packageCheckoutLinks.createdAt),
+    )
+
+  const now = new Date()
+  return rows.map((r) => ({ ...r, expired: r.expiresAt < now }))
 }
 
 /** Services the provider offers, for building a template. A line item must be something they

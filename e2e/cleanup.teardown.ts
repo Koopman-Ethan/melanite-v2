@@ -28,6 +28,19 @@ teardown('remove e2e rows', async () => {
   await query.query(`DELETE FROM bookings WHERE client_name LIKE 'ZZ E2E %'`)
   await query.query(`DELETE FROM clients WHERE email = 'zz.e2e@example.com'`)
 
+  // The package spec sends a real payment link each run. Without this they pile up on the
+  // provider's "awaiting payment" list, which is meant to be a short list of real sales.
+  await query.query(`DELETE FROM package_checkout_links WHERE client_name LIKE 'ZZ E2E %'`)
+
+  // And the template it sells. Left behind, it shows up on a real provider's packages list on
+  // appdev, which Keoni looks at — the spec rebuilds it from scratch next run.
+  const tmpl = `SELECT id FROM package_templates WHERE name = 'ZZ E2E Package'`
+  await query.query(`DELETE FROM package_template_items WHERE package_template_id IN (${tmpl})`)
+  await query.query(
+    `DELETE FROM package_templates WHERE name = 'ZZ E2E Package'
+       AND NOT EXISTS (SELECT 1 FROM client_packages WHERE package_template_id = package_templates.id)`,
+  )
+
   // The onboarding journey builds a whole provider out of an invite. Sessions and services
   // both reference it, so those go first.
   const created = `SELECT id FROM providers WHERE email LIKE 'zz.onboard.%@example.com'`

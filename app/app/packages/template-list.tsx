@@ -6,7 +6,17 @@ import { Button } from '@/components/ui/button'
 import { Notice } from '@/components/ui/field'
 import { cn } from '@/lib/cn'
 
-import { createTemplate, setTemplateActive, updateTemplate, type PackageState } from './actions'
+import {
+  createPackageLink,
+  createTemplate,
+  setTemplateActive,
+  updateTemplate,
+  type PackageState,
+} from './actions'
+
+/** Kept in step with the pay page. Below this, Cherry declines anyway, so offering it there
+ *  only produces a dead end — and promising it here would be worse. */
+const CHERRY_MINIMUM = 200
 
 interface Line {
   serviceId: string
@@ -257,6 +267,94 @@ function Builder({
   )
 }
 
+/** Sends a client a link to buy this package.
+ *
+ *  The email is optional on purpose: most of these links travel by text message, so the form
+ *  hands the URL straight back rather than assuming delivery. `createPackageLink` cancels any
+ *  earlier pending link for the same client and template, so clicking twice cannot leave two
+ *  live links quoting different prices.
+ */
+function LinkForm({
+  template,
+  pending,
+  onCancel,
+  onSubmit,
+}: {
+  template: Template
+  pending: boolean
+  onCancel: () => void
+  onSubmit: (values: {
+    clientName: string | null
+    clientEmail: string | null
+    clientPhone: string | null
+  }) => void
+}) {
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const [phone, setPhone] = useState('')
+
+  const field = 'w-full rounded-field border border-line bg-overlay px-3 py-2 text-sm text-ink'
+
+  return (
+    <div className="mt-4 space-y-3 rounded-card border border-line-strong bg-overlay/50 p-4">
+      <h4 className="text-sm font-medium">Send a payment link · {usd(template.totalPrice)}</h4>
+
+      <div className="grid gap-3 sm:grid-cols-3">
+        <label className="space-y-1.5 text-sm">
+          <span className="block font-medium text-ink-secondary">Client name</span>
+          <input value={name} onChange={(e) => setName(e.target.value)} className={field} />
+        </label>
+        <label className="space-y-1.5 text-sm">
+          <span className="block font-medium text-ink-secondary">Email</span>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="Optional — we&rsquo;ll send it for you"
+            className={field}
+          />
+        </label>
+        <label className="space-y-1.5 text-sm">
+          <span className="block font-medium text-ink-secondary">Phone</span>
+          <input
+            type="tel"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            className={field}
+          />
+        </label>
+      </div>
+
+      <p className="text-xs text-ink-faint">
+        The price is fixed at {usd(template.totalPrice)} when you send it, so editing this package
+        later never changes what this client is charged. The link is good for 14 days.
+        {Number(template.totalPrice) >= CHERRY_MINIMUM
+          ? ' Cherry financing will be offered — if they take it, Melanite collects and pays you your half.'
+          : ` Cherry financing is not offered below ${usd(CHERRY_MINIMUM)}.`}
+      </p>
+
+      <div className="flex gap-2">
+        <Button
+          size="sm"
+          disabled={pending}
+          onClick={() =>
+            onSubmit({
+              clientName: name.trim() || null,
+              clientEmail: email.trim() || null,
+              clientPhone: phone.trim() || null,
+            })
+          }
+        >
+          {pending ? 'Creating…' : 'Create link'}
+        </Button>
+        <Button size="sm" variant="ghost" disabled={pending} onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 export function TemplateList({
   templates,
   services,
@@ -266,12 +364,18 @@ export function TemplateList({
 }) {
   const [pending, startTransition] = useTransition()
   const [state, setState] = useState<PackageState>({})
-  const [mode, setMode] = useState<{ kind: 'new' } | { kind: 'edit'; id: string } | null>(null)
+  const [linkUrl, setLinkUrl] = useState<string | null>(null)
+  const [mode, setMode] = useState<
+    { kind: 'new' } | { kind: 'edit'; id: string } | { kind: 'link'; id: string } | null
+  >(null)
 
-  const run = (fn: () => Promise<PackageState>) =>
+  const run = (fn: () => Promise<PackageState & { url?: string }>) =>
     startTransition(async () => {
       const result = await fn()
       setState(result)
+      // Held until the next action, not cleared on a timer: most of these links get pasted into
+      // a text message, and a URL that vanishes while they are switching apps is useless.
+      setLinkUrl(result.url ?? null)
       if (!result.error) setMode(null)
     })
 
@@ -279,6 +383,32 @@ export function TemplateList({
     <div className="space-y-3">
       {state.error && <Notice>{state.error}</Notice>}
       {state.success && <Notice tone="success">{state.success}</Notice>}
+
+      {linkUrl && (
+        <div className="space-y-2 rounded-card border border-success/40 bg-success/5 p-4">
+          <label className="block space-y-1.5 text-sm">
+            <span className="block font-medium text-ink-secondary">Payment link</span>
+            <input
+              readOnly
+              value={linkUrl}
+              onFocus={(e) => e.currentTarget.select()}
+              className="w-full rounded-field border border-line bg-overlay px-3 py-2 text-sm text-ink"
+            />
+          </label>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void navigator.clipboard?.writeText(linkUrl)}
+            >
+              Copy
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setLinkUrl(null)}>
+              Done
+            </Button>
+          </div>
+        </div>
+      )}
 
       {templates.length === 0 && mode?.kind !== 'new' && (
         <div className="rounded-card border border-dashed border-line p-8 text-center">
@@ -341,7 +471,15 @@ export function TemplateList({
 
                 <div className="text-right">
                   <div className="text-lg font-semibold tabular-nums">{usd(t.totalPrice)}</div>
-                  <div className="mt-2 flex gap-2">
+                  <div className="mt-2 flex flex-wrap justify-end gap-2">
+                    {/* A retired package can still be edited, but it must not be sellable —
+                        the server refuses one too, and offering the button anyway would just
+                        produce an error a click later. */}
+                    {t.active && (
+                      <Button size="sm" onClick={() => setMode({ kind: 'link', id: t.id })}>
+                        Send link
+                      </Button>
+                    )}
                     <Button size="sm" variant="outline" onClick={() => setMode({ kind: 'edit', id: t.id })}>
                       Edit
                     </Button>
@@ -356,6 +494,15 @@ export function TemplateList({
                   </div>
                 </div>
               </div>
+
+              {mode?.kind === 'link' && mode.id === t.id && (
+                <LinkForm
+                  template={t}
+                  pending={pending}
+                  onCancel={() => setMode(null)}
+                  onSubmit={(v) => run(() => createPackageLink({ templateId: t.id, ...v }))}
+                />
+              )}
             </li>
           ),
         )}

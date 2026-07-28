@@ -960,9 +960,23 @@ export interface XanoTrainingCourse {
  *  looked wrong — the medical-director price id was simply absent, which disables the
  *  subscribe button with no visible reason. Defaults that coincidentally agree with reality
  *  are worse than ones that do not, because nothing surfaces the gap. */
+/** Melanite's Cherry patient-financing page.
+ *
+ *  Xano has no column for this — Cherry was handled by a link in a text message — so a straight
+ *  transform leaves it null, and the pay page hides the financing button when it is. That is
+ *  the right behaviour (better absent than pointing nowhere) and it is exactly why the gap is
+ *  invisible: nothing errors, the button simply never appears. It was null in development for
+ *  the entire time the Cherry work was being built. */
+const CHERRY_APPLY_URL = 'https://pay.withcherry.com/melanite-laser-suite'
+
 export function transformPlatformSettings(s: XanoPlatformSettings) {
   return {
     id: 1,
+    cherryApplyUrl: CHERRY_APPLY_URL,
+    /** Epicutis postdates v1 entirely, and the price id differs between test and live — so it
+     *  comes from the environment the load is run with, not from a constant. Null here disables
+     *  the membership button with no visible reason, so the loader says so out loud. */
+    epicutisPriceId: process.env.STRIPE_EPICUTIS_PRICE_ID || null,
     providerSharePct: (s.provider_share_pct ?? 0.5).toFixed(3),
     tipToProviderPct: (s.tip_to_provider_pct ?? 1).toFixed(3),
     noShowFeePctOfPrice: (s.noshow_fee_pct_of_price ?? 0.5).toFixed(3),

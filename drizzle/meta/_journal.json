@@ -127,6 +127,20 @@
       "when": 1785273534467,
       "tag": "0017_wet_rawhide_kid",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1785274819399,
+      "tag": "0018_robust_dragon_lord",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1785274849263,
+      "tag": "0019_graceful_pepper_potts",
+      "breakpoints": true
     }
   ]
 }

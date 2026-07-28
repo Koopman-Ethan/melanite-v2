@@ -6,6 +6,8 @@ import { db } from '@/lib/db'
 import {
   bookings,
   ledgerEntries,
+  packageCheckoutLinks,
+  packageTemplates,
   platformSettings,
   providerServices,
   providers,
@@ -78,6 +80,54 @@ export async function getUnpaidBookings(limit = 50): Promise<UnpaidBooking[]> {
       ),
     )
     .orderBy(desc(bookings.startTime))
+    .limit(limit)
+}
+
+export interface CherryHandoff {
+  id: string
+  clientName: string | null
+  clientEmail: string | null
+  providerName: string
+  packageName: string
+  price: string
+  startedAt: Date
+  waitingDays: number
+}
+
+/** Clients who left for Cherry on a package and have not been settled since.
+ *
+ *  This is the one payment route with no webhook and no callback. The client finishes on
+ *  Cherry's site, Cherry pays Keoni in full, and Keoni owes the provider their half — a chain
+ *  that lives entirely outside the app. Before this, the only signal was the client telling
+ *  their provider, and the link sat at `pending` looking exactly like one nobody had opened.
+ *
+ *  Recorded intent, not payment. A row here means "somebody went to apply", which is a reason
+ *  to go and look at Cherry, not a figure to put in the ledger. It leaves the list the moment
+ *  the package is paid for by any route — including Keoni recording it by hand below — so it
+ *  cannot linger after it has been dealt with.
+ */
+export async function getCherryHandoffs(limit = 25): Promise<CherryHandoff[]> {
+  return db
+    .select({
+      id: packageCheckoutLinks.id,
+      clientName: packageCheckoutLinks.clientName,
+      clientEmail: packageCheckoutLinks.clientEmail,
+      providerName: sql<string>`${providers.firstName} || ' ' || ${providers.lastName}`,
+      packageName: packageTemplates.name,
+      price: packageCheckoutLinks.price,
+      startedAt: sql<Date>`${packageCheckoutLinks.cherryStartedAt}`,
+      waitingDays: sql<number>`floor(extract(epoch from now() - ${packageCheckoutLinks.cherryStartedAt}) / 86400)::int`,
+    })
+    .from(packageCheckoutLinks)
+    .innerJoin(providers, eq(packageCheckoutLinks.providerId, providers.id))
+    .innerJoin(packageTemplates, eq(packageCheckoutLinks.packageTemplateId, packageTemplates.id))
+    .where(
+      and(
+        isNotNull(packageCheckoutLinks.cherryStartedAt),
+        eq(packageCheckoutLinks.status, 'pending'),
+      ),
+    )
+    .orderBy(asc(packageCheckoutLinks.cherryStartedAt))
     .limit(limit)
 }
 

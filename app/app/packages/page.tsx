@@ -4,6 +4,7 @@ import { requireProvider } from '@/lib/auth/dal'
 import { cn } from '@/lib/cn'
 import {
   getClientPackages,
+  getOutstandingPackageLinks,
   getPackageTemplates,
   getPackageableServices,
 } from '@/lib/db/queries/packages'
@@ -35,10 +36,11 @@ const STATUS = {
 
 export default async function PackagesPage() {
   const user = await requireProvider()
-  const [templates, balances, offered] = await Promise.all([
+  const [templates, balances, offered, pendingLinks] = await Promise.all([
     getPackageTemplates(user.id),
     getClientPackages(user.id),
     getPackageableServices(user.id),
+    getOutstandingPackageLinks(user.id),
   ])
 
   const live = balances.filter((b) => b.status === 'active' && !b.expiredByDate)
@@ -65,6 +67,61 @@ export default async function PackagesPage() {
         </div>
         <TemplateList templates={templates} services={offered} />
       </section>
+
+      {pendingLinks.length > 0 && (
+        <section className="space-y-4">
+          <div>
+            <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">
+              Awaiting payment
+            </h2>
+            <p className="mt-1 text-xs text-ink-faint">
+              Links you have sent that nobody has paid yet. The package appears under client
+              balances the moment it is.
+            </p>
+          </div>
+
+          <ul className="space-y-2">
+            {pendingLinks.map((l) => (
+              <li
+                key={l.id}
+                className={cn(
+                  'flex flex-wrap items-center justify-between gap-3 rounded-card border p-4',
+                  l.cherryStartedAt
+                    ? 'border-gold/40 bg-gold/5'
+                    : 'border-line bg-surface',
+                )}
+              >
+                <div className="min-w-0">
+                  <p className="font-medium">
+                    {l.clientName ?? l.clientEmail ?? 'Client'}{' '}
+                    <span className="font-normal text-ink-muted">· {l.templateName}</span>
+                  </p>
+                  {/* Cherry pays Melanite, not the provider — so their own Stripe account will
+                      never show this and nothing else in the app would mention it. */}
+                  <p className="mt-0.5 text-xs text-ink-faint">
+                    {l.cherryStartedAt
+                      ? `Applied through Cherry on ${date(l.cherryStartedAt)} — Melanite collects this one and pays you your half.`
+                      : l.expired
+                        ? `Link expired ${date(l.expiresAt)}. Send a new one.`
+                        : `Link expires ${date(l.expiresAt)}`}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <div className="tabular-nums font-semibold">{usd(l.price)}</div>
+                  <div
+                    className={cn(
+                      'text-xs',
+                      l.cherryStartedAt ? 'text-gold' : l.expired ? 'text-warning' : 'text-ink-faint',
+                    )}
+                  >
+                    {l.cherryStartedAt ? 'Cherry' : l.expired ? 'expired' : 'unpaid'}
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section className="space-y-4">
         <div>
@@ -153,8 +210,8 @@ export default async function PackagesPage() {
       </section>
 
       <p className="text-xs text-ink-faint">
-        Selling a package needs the client checkout flow, which isn&rsquo;t built yet. Booking a
-        session against a balance moves no money — the split settled when the client paid.
+        Booking a session against a balance moves no money — the split settled when the client
+        paid, so a redemption is an entitlement being used rather than a transaction.
       </p>
     </main>
   )

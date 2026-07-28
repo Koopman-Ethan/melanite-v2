@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { and, asc, eq, gte, lt } from 'drizzle-orm'
+import { and, asc, eq, gte, lt, sql } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
 import {
@@ -49,6 +49,13 @@ export interface CalendarBooking {
   price: string
   status: string
   paymentSource: string
+  /** Which external route, when the money came from outside the app. */
+  externalMethod: string | null
+  /** Whether any money has actually been recorded against this booking.
+   *
+   *  The difference Keoni needs and could not see: "Groupon, still owed to me" versus
+   *  "Groupon, collected". Both read as `external` on the calendar until you ask the ledger. */
+  reconciled: boolean
   treatmentArea: string | null
   durationMins: number
   startLabel: string
@@ -202,6 +209,12 @@ export async function getCalendarWeek(weekStart: string): Promise<CalendarWeek> 
       price: bookings.price,
       status: bookings.status,
       paymentSource: bookings.paymentSource,
+      externalMethod: bookings.externalMethod,
+      reconciled: sql<boolean>`exists (
+        select 1 from ledger_entries l
+        where l.subject_type = 'booking' and l.subject_id = bookings.id
+          and l.entry_type = 'purchase'
+      )`,
       providerId: providers.id,
       firstName: providers.firstName,
       lastName: providers.lastName,
@@ -268,6 +281,8 @@ export async function getCalendarWeek(weekStart: string): Promise<CalendarWeek> 
       price: r.price,
       status: r.status,
       paymentSource: r.paymentSource,
+      externalMethod: r.externalMethod,
+      reconciled: r.reconciled,
       treatmentArea: r.treatmentArea,
       durationMins: r.durationMins,
       startLabel: clock(start.minutes),

@@ -5,7 +5,7 @@ import { useState, useTransition } from 'react'
 import { Button } from '@/components/ui/button'
 import { Field, Notice } from '@/components/ui/field'
 
-import { createPackageIntent } from '../../actions'
+import { createPackageIntent, noteCherryHandoff } from '../../actions'
 import { CardForm } from '../../card-form'
 
 export interface PackageSummary {
@@ -21,6 +21,13 @@ export interface PackageSummary {
 
 const usd = (v: string | number) =>
   Number(v).toLocaleString('en-US', { style: 'currency', currency: 'USD' })
+
+/** Cherry's own floor for a financing plan.
+ *
+ *  Below this they will not write one, so offering the button on a $150 package sends the
+ *  client out to a page that turns them down — worse than not offering it, because it looks
+ *  like the practice made a promise it could not keep. */
+const CHERRY_MINIMUM = 200
 
 export function PackageCheckout({
   token,
@@ -171,7 +178,7 @@ export function PackageCheckout({
               exactly the purchase somebody wants to finance, and burying that behind the card
               form is how the option goes unnoticed. Hidden entirely when unconfigured — a
               button that goes nowhere is worse than no button. */}
-          {cherryUrl && (
+          {cherryUrl && Number(pkg.price) >= CHERRY_MINIMUM && (
             <div className="space-y-2">
               <div className="flex items-center gap-3">
                 <span className="h-px flex-1 bg-line" />
@@ -179,10 +186,18 @@ export function PackageCheckout({
                 <span className="h-px flex-1 bg-line" />
               </div>
 
+              {/* The hand-off is recorded before the client leaves, so the link stops looking
+                  like one nobody opened. Fire-and-forget on purpose: this is somebody mid-way
+                  through a four-figure purchase, and a failed tracking write must never stand
+                  between them and Cherry. The navigation is a real link, not JS, so it works
+                  even if the action never resolves. */}
               <a
                 href={cherryUrl}
                 target="_blank"
                 rel="noopener noreferrer"
+                onClick={() => {
+                  void noteCherryHandoff(token)
+                }}
                 className="block rounded-control border border-line-strong px-[18px] py-3 text-center text-[13px] font-bold tracking-[0.3px] text-ink-secondary transition-colors hover:border-ink-faint hover:bg-overlay"
               >
                 Pay over time with Cherry →
