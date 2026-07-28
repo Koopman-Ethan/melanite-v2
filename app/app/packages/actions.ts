@@ -384,7 +384,9 @@ export async function bookFromPackage(input: {
 
   // Collision check fused to the insert, exactly as in a paid booking — the laser does not
   // care that this session was prepaid.
-  const booked = await db.execute(sql`
+  let booked
+  try {
+    booked = await db.execute(sql`
     INSERT INTO bookings
       (id, provider_id, provider_service_id, client_id, client_name, client_email,
        treatment_area, notes, original_price, discount_pct, price, payment_source,
@@ -404,6 +406,15 @@ export async function bookFromPackage(input: {
     )
     RETURNING id
   `)
+  } catch (err) {
+    // Same race as the ordinary booking path, now caught by `bookings_no_overlap`. The session
+    // goes back — the client did not get a treatment out of a lost race.
+    await releaseSession()
+    if (String((err as { code?: string })?.code ?? err).includes('23P01')) {
+      return { error: 'Someone just booked that slot. Pick another time.' }
+    }
+    throw err
+  }
 
   if ((booked.rows?.length ?? 0) === 0) {
     // The slot went to someone else, so the session was never actually used.

@@ -139,17 +139,21 @@ export async function createBooking(_prev: BookState, formData: FormData): Promi
   const token = randomBytes(24).toString('base64url')
   const expiresAt = new Date(Date.now() + CHECKOUT_LINK_TTL_DAYS * 24 * 60 * 60 * 1000)
 
-  // One statement, so the collision check and both inserts are genuinely atomic.
+  // One statement, so the booking and its checkout link are written together or not at all.
   //
   // A transaction wrapper would not do here: the neon-http driver is non-interactive, so it
-  // cannot branch on a result mid-transaction. A CTE solves it properly anyway — INSERT ...
-  // SELECT ... WHERE NOT EXISTS either writes the booking or writes nothing, and the checkout
-  // link is inserted from the CTE's output, so it can only exist if the booking does.
+  // cannot branch on a result mid-transaction. The CTE solves that — the link is inserted from
+  // the booking's output, so it can only exist if the booking does.
   //
-  // Checking availability and then inserting as two steps would leave a window where two
-  // providers both see the slot free and both book it. On a single shared laser that is two
-  // clients in the chair at once.
-  const booked = await db.execute(sql`
+  // The NOT EXISTS is the FRIENDLY check, not the guarantee. It is what turns the common case
+  // into a readable message instead of a database error. It is not a lock: under READ COMMITTED
+  // two concurrent statements each evaluate it against a snapshot that cannot see the other's
+  // uncommitted row, so both find the slot free and both insert. The real guarantee is the
+  // `bookings_no_overlap` EXCLUDE constraint (migration 0013), which is why the insert is
+  // wrapped below — a violation there means somebody won the race, not that anything is broken.
+  let booked
+  try {
+    booked = await db.execute(sql`
     WITH new_booking AS (
       INSERT INTO bookings
         (id, provider_id, provider_service_id, client_name, client_phone, client_email,
@@ -175,6 +179,14 @@ export async function createBooking(_prev: BookState, formData: FormData): Promi
     FROM new_booking
     RETURNING booking_id
   `)
+  } catch (err) {
+    // 23P01 — exclusion_violation. The other side of the race committed first, which is the
+    // constraint doing exactly its job. Anything else is a real failure and should surface.
+    if (String((err as { code?: string })?.code ?? err).includes('23P01')) {
+      return { error: 'Someone just booked that slot. Pick another time.' }
+    }
+    throw err
+  }
 
   if ((booked.rows?.length ?? 0) === 0) {
     return { error: 'Someone just booked that slot. Pick another time.' }
