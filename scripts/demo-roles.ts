@@ -68,6 +68,8 @@ async function makeAccount(email: string, role: string, first: string, last: str
  *
  *  Best-effort: the room has an EXCLUDE constraint on overlapping ranges, so a demo row that
  *  collides with a real booking is skipped rather than allowed to fail the run. */
+const seededRentalIds: string[] = []
+
 async function seedSchedule() {
   const [ps] = (await query.query(
     `SELECT ps.id, ps.provider_id, ps.duration_mins, ps.price
@@ -96,14 +98,20 @@ async function seedSchedule() {
       .catch((e) => console.log(`  (demo booking skipped: ${String(e).slice(0, 140)})`))
   }
 
+  // Denver, not UTC. `date_trunc('day', now())` is UTC midnight, so a "full day" starting at
+  // +8h rendered as 2:00 AM in the app — the seed was wrong, not the page.
   await query
     .query(
       `INSERT INTO room_bookings (provider_id, rental_date, slot_type, price, status, start_at, end_at)
        VALUES ($1, (current_date + 3), 'full', '100.00', 'confirmed',
-               date_trunc('day', now()) + interval '3 days' + interval '8 hours',
-               date_trunc('day', now()) + interval '3 days' + interval '20 hours')`,
+               ((current_date + 3)::text || ' 08:00')::timestamp AT TIME ZONE 'America/Denver',
+               ((current_date + 3)::text || ' 20:00')::timestamp AT TIME ZONE 'America/Denver')
+       RETURNING id`,
       [ps.provider_id],
     )
+    .then((rows) => {
+      for (const r of rows as { id: string }[]) seededRentalIds.push(r.id)
+    })
     .catch((e) => console.log(`  (demo rental skipped: ${String(e).slice(0, 140)})`))
 }
 
@@ -223,9 +231,18 @@ Both windows are open — the director on the left, the admin on the right.`)
 
   // --- Cleanup -------------------------------------------------------------------------------
   console.log('\nCleaning up')
-  await query.query(`DELETE FROM room_bookings WHERE provider_id IN (
-      SELECT provider_id FROM provider_services LIMIT 0) OR (rental_date = current_date + 3
-      AND status = 'confirmed' AND price = '100.00' AND created_at > now() - interval '10 minutes')`)
+  // Matched on the provider it was created for, not on a time window. The first version used
+  // "created in the last 10 minutes", which quietly stopped matching the moment a hold ran
+  // longer than that — cleanup that only works when the run is short is cleanup that fails on
+  // exactly the runs you leave open.
+  await query.query(
+    `DELETE FROM room_bookings
+      WHERE stripe_payment_intent_id IS NULL
+        AND status = 'confirmed'
+        AND rental_date = current_date + 3
+        AND id = ANY($1::uuid[])`,
+    [seededRentalIds],
+  )
   await query.query(`DELETE FROM bookings WHERE client_name LIKE $1`, [`${DEMO_CLIENT}%`])
   for (const id of [directorId, adminId]) {
     await query.query(`DELETE FROM sessions WHERE provider_id = $1`, [id])
