@@ -27,6 +27,8 @@ import { neon } from '@neondatabase/serverless'
 
 import '../../envConfig'
 
+import { PROVIDER_CORRECTIONS, isCorrected } from './corrections'
+
 interface XanoProvider {
   id: string
   email: string
@@ -57,34 +59,50 @@ const STRIPE = process.env.STRIPE_SECRET_KEY ?? process.env.STRIPE_SECRET_KEY_WR
 
 const problems: string[] = []
 const notes: string[] = []
-let forbidden = 0
+let unreadable = false
 const fail = (who: string, what: string) => problems.push(`${who.padEnd(32)} ${what}`)
 
-type AccountLookup =
-  | { kind: 'found'; payoutsEnabled: boolean }
-  | { kind: 'missing' }
-  | { kind: 'forbidden' }
-  | { kind: 'unavailable' }
+interface PlatformAccount {
+  id: string
+  payouts_enabled: boolean
+}
 
-/** Asks Stripe about a Connect account.
+/** Every Connect account on the platform, by id.
  *
- *  404 and 403 mean COMPLETELY different things and the first version of this treated them as
- *  one: "the account is gone" versus "this key may not ask". Both restricted keys in .env.local
- *  return 403 for /v1/accounts, so that version reported every single provider as having a
- *  dead Stripe account — seven false alarms on a screen whose whole job is to be believed. */
-async function stripeAccount(id: string): Promise<AccountLookup> {
-  if (!STRIPE) return { kind: 'unavailable' }
+ *  LISTED rather than fetched one at a time, and the difference matters. Stripe answers
+ *  GET /v1/accounts/{id} with 403 both when the key may not see the account AND when the
+ *  account does not exist — deliberately, so an id cannot be probed for validity. It never
+ *  returns 404. So "fetch it and check the status" cannot tell a dead id from a live one,
+ *  which is the single fact this check exists to establish.
+ *
+ *  Listing sidesteps that entirely: an id absent from the platform's own list is not ours.
+ *  Fewer calls, and an answer that means what it says.
+ *
+ *  Returns null when the key cannot list at all, so "could not check" stays distinct from
+ *  "checked and found nothing".
+ */
+async function platformAccounts(): Promise<Map<string, PlatformAccount> | null> {
+  if (!STRIPE) return null
 
-  const res = await fetch(`https://api.stripe.com/v1/accounts/${id}`, {
-    headers: { Authorization: `Bearer ${STRIPE}` },
-  })
+  const accounts = new Map<string, PlatformAccount>()
+  let startingAfter: string | undefined
 
-  if (res.status === 404) return { kind: 'missing' }
-  if (res.status === 403) return { kind: 'forbidden' }
-  if (!res.ok) return { kind: 'unavailable' }
+  for (let page = 0; page < 20; page++) {
+    const url = new URL('https://api.stripe.com/v1/accounts')
+    url.searchParams.set('limit', '100')
+    if (startingAfter) url.searchParams.set('starting_after', startingAfter)
 
-  const body = (await res.json()) as { payouts_enabled: boolean }
-  return { kind: 'found', payoutsEnabled: body.payouts_enabled }
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${STRIPE}` } })
+    if (!res.ok) return null
+
+    const body = (await res.json()) as { data: PlatformAccount[]; has_more: boolean }
+    for (const account of body.data) accounts.set(account.id, account)
+
+    if (!body.has_more || body.data.length === 0) return accounts
+    startingAfter = body.data[body.data.length - 1].id
+  }
+
+  return accounts
 }
 
 async function main() {
@@ -99,7 +117,15 @@ async function main() {
 
   const byEmail = new Map(loaded.map((p) => [p.email.toLowerCase(), p]))
 
-  console.log(`Xano: ${staged.length} providers   Loaded: ${loaded.length}\n`)
+  console.log(`Xano: ${staged.length} providers   Loaded: ${loaded.length}`)
+
+  // Printed every run. A correction that nobody sees is a silent edit to somebody's record,
+  // and the difference between a decision and a mystery is whether it was stated out loud.
+  console.log(`\n${PROVIDER_CORRECTIONS.length} declared correction(s) to v1 data:`)
+  for (const correction of PROVIDER_CORRECTIONS) {
+    console.log(`  ${correction.email} — ${Object.keys(correction.set).join(', ')}`)
+  }
+  console.log()
 
   // --- every provider in the source arrived ------------------------------------------------
   for (const source of staged) {
@@ -111,8 +137,12 @@ async function main() {
     }
 
     // Fields copied verbatim must actually match. A silent transform bug looks exactly like
-    // correct data until somebody checks.
-    if (String(source.stripe_account_id ?? '') !== String(got.stripe_account_id ?? '')) {
+    // correct data until somebody checks — EXCEPT where corrections.ts declares the difference
+    // on purpose, which is the one case where disagreeing with v1 is the correct outcome.
+    if (
+      String(source.stripe_account_id ?? '') !== String(got.stripe_account_id ?? '') &&
+      !isCorrected(email, 'stripeAccountId')
+    ) {
       fail(email, `stripe_account_id differs: xano=${source.stripe_account_id} db=${got.stripe_account_id}`)
     }
     if (String(source.license_number ?? '') !== String(got.license_number ?? '')) {
@@ -130,6 +160,15 @@ async function main() {
 
   // --- Stripe: can every stored account actually be paid? -----------------------------------
   console.log('Checking Connect accounts against Stripe...')
+  const platform = await platformAccounts()
+
+  if (!platform) {
+    unreadable = true
+  } else {
+    console.log(`  ${platform.size} Connect account(s) on the platform
+`)
+  }
+
   for (const got of loaded) {
     if (!got.stripe_account_id) {
       if (got.booking_enabled) {
@@ -137,31 +176,51 @@ async function main() {
       }
       continue
     }
+    if (!platform) continue
 
-    const account = await stripeAccount(got.stripe_account_id)
+    const account = platform.get(got.stripe_account_id)
 
-    if (account.kind === 'forbidden') {
-      forbidden += 1
-      continue
-    }
-    if (account.kind === 'unavailable') continue
-
-    if (account.kind === 'missing') {
-      // The one that fails in front of a client. Destination charges name this id.
+    if (!account) {
+      // The one that fails in front of a client. Destination charges name this id, so the
+      // charge is rejected at the moment they try to pay.
       fail(
         got.email,
-        `stripe_account_id ${got.stripe_account_id} DOES NOT EXIST on this platform` +
+        `stripe_account_id ${got.stripe_account_id} is NOT on this platform` +
           (got.booking_enabled ? ' — and they are booking-enabled' : ''),
       )
       continue
     }
 
-    if (account.payoutsEnabled !== got.stripe_onboarding_complete) {
+    if (account.payouts_enabled !== got.stripe_onboarding_complete) {
       fail(
         got.email,
         `stripe_onboarding_complete=${got.stripe_onboarding_complete} but Stripe says ` +
-          `payouts_enabled=${account.payoutsEnabled}`,
+          `payouts_enabled=${account.payouts_enabled}`,
       )
+    }
+  }
+
+  // Every account the platform has that no provider claims. A provider paid into an account
+  // the database does not know about is money going somewhere nobody is looking.
+  if (platform) {
+    const claimed = new Set(loaded.map((p) => p.stripe_account_id).filter(Boolean))
+    for (const id of platform.keys()) {
+      if (!claimed.has(id)) notes.push(`Stripe account ${id} belongs to no provider in the database`)
+    }
+  }
+
+  // --- every declared correction actually took effect ----------------------------------------
+  // A correction nobody applied is worse than no correction, because the file says it is
+  // handled. This is what stops corrections.ts becoming a wish list.
+  for (const correction of PROVIDER_CORRECTIONS) {
+    const got = byEmail.get(correction.email.toLowerCase())
+    if (!got) continue
+
+    if (correction.set.stripeAccountId === null && got.stripe_account_id !== null) {
+      fail(correction.email, 'correction NOT applied: stripe_account_id should be cleared')
+    }
+    if (correction.set.bookingEnabled === false && got.booking_enabled) {
+      fail(correction.email, 'correction NOT applied: booking_enabled should be false')
     }
   }
 
@@ -185,16 +244,16 @@ async function main() {
     for (const n of notes) console.log(`  ${n}`)
   }
 
-  if (forbidden > 0) {
+  if (unreadable) {
     // Loud, because an unchecked check is the dangerous kind — it looks like a pass.
     console.log(
       [
         ``,
-        `CONNECT ACCOUNTS NOT VERIFIED (${forbidden} of them).`,
-        `  The key in STRIPE_SECRET_KEY returned 403 for /v1/accounts, so this run could not`,
-        `  tell a live account from a deleted one. Give it the Connect > Read permission, or`,
-        `  point STRIPE_SECRET_KEY at a key that has it, and run again BEFORE migrating.`,
-        `  A dead account id here means a client reaches checkout and the payment fails.`,
+        `CONNECT ACCOUNTS NOT VERIFIED.`,
+        `  STRIPE_SECRET_KEY could not list /v1/accounts, so this run could not tell a live`,
+        `  account from a dead one. Give it the Connect > Read permission and run again`,
+        `  BEFORE migrating — a dead account id means a client reaches checkout and the`,
+        `  payment fails in front of them.`,
       ].join('\n'),
     )
   }
@@ -208,7 +267,7 @@ async function main() {
 
   // Unverified is not the same as passed. Exiting 0 here would let a migration proceed on the
   // strength of a check that never ran.
-  process.exitCode = problems.length === 0 && forbidden === 0 ? 0 : 1
+  process.exitCode = problems.length === 0 && !unreadable ? 0 : 1
 }
 
 main().catch((err) => {
