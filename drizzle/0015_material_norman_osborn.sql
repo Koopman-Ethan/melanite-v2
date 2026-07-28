@@ -1,0 +1,1 @@
+ALTER TYPE "public"."ledger_source" ADD VALUE 'epicutis' BEFORE 'training';

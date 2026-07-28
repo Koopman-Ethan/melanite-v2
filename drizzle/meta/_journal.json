@@ -106,6 +106,13 @@
       "when": 1785253849837,
       "tag": "0014_true_sinister_six",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1785256070307,
+      "tag": "0015_material_norman_osborn",
+      "breakpoints": true
     }
   ]
 }

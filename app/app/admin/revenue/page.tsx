@@ -13,6 +13,7 @@ const SOURCE_LABELS: Record<string, string> = {
   package: 'Packages',
   room_rental: 'Room rental',
   membership: 'Medical director',
+  epicutis: 'Epicutis',
   training: 'Training',
 }
 
@@ -21,6 +22,7 @@ const SOURCE_COLORS: Record<string, string> = {
   package: 'bg-info',
   room_rental: 'bg-warning',
   membership: 'bg-success',
+  epicutis: 'bg-critical',
   training: 'bg-gold-dim',
 }
 

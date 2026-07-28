@@ -581,7 +581,9 @@ export async function handleInvoicePaid(invoice: StripeInvoiceObject): Promise<H
   const gross = money(invoice.amount_paid)
 
   await db.insert(ledgerEntries).values({
-    source: 'membership',
+    // Its own stream, so admin revenue can report what Melanite earns supplying medical
+    // direction separately from what it earns reselling Epicutis.
+    source: plan === 'epicutis' ? 'epicutis' : 'membership',
     payer: 'provider',
     entryType: 'purchase',
     subjectType: 'membership',

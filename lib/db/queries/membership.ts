@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, inArray } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
 import {
@@ -133,7 +133,12 @@ export async function getMembershipCharges(providerId: string): Promise<Membersh
     .from(ledgerEntries)
     .leftJoin(memberships, eq(memberships.id, ledgerEntries.subjectId))
     .where(
-      and(eq(ledgerEntries.providerId, providerId), eq(ledgerEntries.source, 'membership')),
+      and(
+        eq(ledgerEntries.providerId, providerId),
+        // Both streams. They are separated for REPORTING, but a provider looking at what they
+        // have paid Melanite wants one list, not two pages that each tell half the story.
+        inArray(ledgerEntries.source, ['membership', 'epicutis']),
+      ),
     )
     .orderBy(desc(ledgerEntries.createdAt))
     .limit(24)

@@ -148,6 +148,11 @@ export const ledgerSource = pgEnum('ledger_source', [
   'package',
   'room_rental',
   'membership',
+  /** Epicutis is its own stream, not a flavour of `membership`. Both are provider-paid monthly
+   *  subscriptions, which is where the similarity stops: one is Melanite supplying medical
+   *  direction, the other is reselling access to somebody else's product. Folding them together
+   *  makes every revenue report answer a question nobody asked. */
+  'epicutis',
   'training',
 ])
 

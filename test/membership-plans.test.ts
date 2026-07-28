@@ -137,19 +137,21 @@ describe('the two plans do not collide', () => {
     expect(await directorStatus()).toBe('active')
   })
 
-  it('records the money against the right membership', async () => {
+  it('records the money against the right membership, in its own revenue stream', async () => {
     const rows = (await sql.query(
-      `SELECT l.stripe_invoice_id, m.plan
+      `SELECT l.stripe_invoice_id, l.source, m.plan
          FROM ledger_entries l JOIN memberships m ON m.id = l.subject_id
         WHERE l.provider_id = $1 ORDER BY l.stripe_invoice_id`,
       [providerId],
-    )) as { stripe_invoice_id: string; plan: string }[]
+    )) as { stripe_invoice_id: string; source: string; plan: string }[]
 
-    // Both invoices land on their own plan's row, rather than both attaching to whichever
-    // membership happened to be created first.
+    // Each invoice lands on its own plan's row rather than both attaching to whichever
+    // membership was created first — and on its own ledger source, so admin revenue can report
+    // what Melanite earns supplying medical direction apart from what it earns reselling
+    // Epicutis. Summed together they answer a question nobody asked.
     expect(rows).toEqual([
-      { stripe_invoice_id: 'in_epi_1', plan: 'epicutis' },
-      { stripe_invoice_id: 'in_md_1', plan: 'medical_director' },
+      { stripe_invoice_id: 'in_epi_1', source: 'epicutis', plan: 'epicutis' },
+      { stripe_invoice_id: 'in_md_1', source: 'membership', plan: 'medical_director' },
     ])
   })
 

@@ -24,6 +24,7 @@ const SOURCE_LABELS: Record<string, string> = {
   package: 'Package sale',
   room_rental: 'Room rental',
   membership: 'Membership',
+  epicutis: 'Epicutis',
   training: 'Training',
 }
 
