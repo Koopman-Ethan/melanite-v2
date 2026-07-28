@@ -1,6 +1,7 @@
 import { neon } from '@neondatabase/serverless'
 
 import '../envConfig'
+import { requireEnv } from '../lib/env-guard'
 
 // Replaces real people's details with synthetic ones, in a NON-PRODUCTION database.
 //
@@ -26,8 +27,6 @@ import '../envConfig'
 //
 // It rewrites names, emails, phone numbers and free-text notes — the fields that identify a
 // person to somebody who opens the page.
-
-const REFUSE_IF_MATCHES = [/prod/i, /production/i]
 
 interface Table {
   label: string
@@ -95,15 +94,10 @@ async function main() {
   const url = process.env.DATABASE_URL
   if (!url) throw new Error('DATABASE_URL is not set')
 
-  // A guard, not a guarantee. It cannot truly know which database it is pointed at, so it
-  // refuses the obvious mistake and says plainly that the rest is on you.
-  for (const pattern of REFUSE_IF_MATCHES) {
-    if (pattern.test(url)) {
-      throw new Error(
-        `Refusing to run: DATABASE_URL matches ${pattern}. This is a DEV-ONLY script.`,
-      )
-    }
-  }
+  // Stated, not sniffed. The previous check looked for "prod" in the connection string — a
+  // Neon URL is `ep-old-paper-a6ligt30.us-west-2.aws.neon.tech`, so it never matched anything
+  // and protected nothing at all.
+  requireEnv(['dev'], 'scrub client details')
 
   const sql = neon(url)
   const checkOnly = process.argv.includes('--check')

@@ -8,6 +8,8 @@
 
 import { sql } from 'drizzle-orm'
 
+import { requireEnv } from '@/lib/env-guard'
+
 import { db } from './db'
 import * as s from '@/lib/db/schema'
 
@@ -34,6 +36,9 @@ const COURSE = '00000000-0000-4000-8000-000000000602'
 const d = (iso: string) => new Date(iso)
 
 async function main() {
+  // Seeding invents data. Never against production.
+  requireEnv(['dev'], 'seed the database')
+
   // Truncate in FK-safe order. RESTART IDENTITY is harmless here (all uuid PKs) but keeps
   // this correct if a serial column is ever added.
   await db.execute(sql`

@@ -17,6 +17,7 @@ import { db } from '../db'
 import * as schema from '@/lib/db/schema'
 
 import * as T from './transform'
+import { WrongEnvironmentError, requireEnv, requireProductionOptIn } from '@/lib/env-guard'
 
 const STAGED = join(import.meta.dirname, 'staged')
 
@@ -27,7 +28,19 @@ function load<T>(source: 'xano' | 'stripe', name: string): T[] {
   return parsed.items ?? parsed.data ?? parsed
 }
 
+// Loading is destructive: it repopulates tables wholesale. Allowed against dev freely; against
+// production only with an explicit second opt-in, because migration night is exactly when a
+// leftover env file from yesterday does the most damage.
+
 async function main() {
+  // Dev freely; production only with a second, explicit opt-in. Migration night is exactly
+  // when a leftover env file from yesterday does the most damage.
+  if (process.env.MELANITE_ENV?.trim().toLowerCase() === 'prod') {
+    requireProductionOptIn('load v1 data')
+  } else {
+    requireEnv(['dev'], 'load v1 data')
+  }
+
   const force = process.argv.includes('--force')
 
   const [{ count }] = await db
@@ -380,6 +393,8 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error(err)
+  // A refusal is a decision, not a crash. Printing a stack trace above it buries the one line
+  // the operator needs to read at exactly the moment they are least inclined to read carefully.
+  console.error(err instanceof WrongEnvironmentError ? String(err.message) : err)
   process.exit(1)
 })
