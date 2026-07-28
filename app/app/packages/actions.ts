@@ -12,6 +12,7 @@ import {
 
 import { canBook, bookingBlockedReasons, requireProvider } from '@/lib/auth/dal'
 import { db } from '@/lib/db'
+import { isExclusionViolation } from '@/lib/db/errors'
 import { denverInstant, getLaserHours } from '@/lib/db/queries/availability'
 import {
   clientPackageItems,
@@ -366,7 +367,7 @@ export async function bookFromPackage(input: {
     // Same race as the ordinary booking path, now caught by `bookings_no_overlap`. The session
     // goes back — the client did not get a treatment out of a lost race.
     await releaseSession()
-    if (String((err as { code?: string })?.code ?? err).includes('23P01')) {
+    if (isExclusionViolation(err)) {
       return { error: 'Someone just booked that slot. Pick another time.' }
     }
     throw err

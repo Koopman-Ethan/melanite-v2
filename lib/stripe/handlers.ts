@@ -3,6 +3,7 @@ import 'server-only'
 import { and, eq, sql } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
+import { isUniqueViolation } from '@/lib/db/errors'
 import {
   bookings,
   checkoutLinks,
@@ -580,23 +581,32 @@ export async function handleInvoicePaid(invoice: StripeInvoiceObject): Promise<H
 
   const gross = money(invoice.amount_paid)
 
-  await db.insert(ledgerEntries).values({
-    // Its own stream, so admin revenue can report what Melanite earns supplying medical
-    // direction separately from what it earns reselling Epicutis.
-    source: plan === 'epicutis' ? 'epicutis' : 'membership',
-    payer: 'provider',
-    entryType: 'purchase',
-    subjectType: 'membership',
-    subjectId: membership?.id ?? providerId,
-    providerId,
-    grossAmount: gross,
-    tipAmount: '0.00',
-    providerPayout: '0.00',
-    melaniteCut: gross,
-    paymentMethod: 'stripe',
-    stripeInvoiceId: invoice.id,
-    payoutStatus: 'paid',
-  })
+  try {
+    await db.insert(ledgerEntries).values({
+      // Its own stream, so admin revenue can report what Melanite earns supplying medical
+      // direction separately from what it earns reselling Epicutis.
+      source: plan === 'epicutis' ? 'epicutis' : 'membership',
+      payer: 'provider',
+      entryType: 'purchase',
+      subjectType: 'membership',
+      subjectId: membership?.id ?? providerId,
+      providerId,
+      grossAmount: gross,
+      tipAmount: '0.00',
+      providerPayout: '0.00',
+      melaniteCut: gross,
+      paymentMethod: 'stripe',
+      stripeInvoiceId: invoice.id,
+      payoutStatus: 'paid',
+    })
+  } catch (err) {
+    // 23505 on `ledger_entries_stripe_invoice_id_unique`. The `existing` check above answers
+    // "has this invoice been recorded?" and is not a lock: two deliveries of the same invoice
+    // both find nothing and both insert. The index is what actually stops it, and a violation
+    // here means the other delivery won — which is success, not failure.
+    if (!isUniqueViolation(err)) throw err
+    return { handled: true, detail: 'invoice already recorded (raced)' }
+  }
 
   // Paying restores the gate — but ONLY for the director plan. This line used to run for any
   // subscription invoice carrying a provider_id, so buying a $95 content membership would have

@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "ledger_entries_stripe_invoice_id_unique" ON "ledger_entries" USING btree ("stripe_invoice_id") WHERE "ledger_entries"."stripe_invoice_id" IS NOT NULL AND "ledger_entries"."entry_type" <> 'refund';

@@ -155,6 +155,30 @@ describe('the two plans do not collide', () => {
     ])
   })
 
+  it('records one row when the same invoice arrives twice', async () => {
+    // Stripe redelivers, and the CLI does too. The handler reads "has this invoice been
+    // recorded?" and inserts if not — which is not a lock, so two deliveries both find nothing
+    // and both insert. Found by paying for a real subscription and getting TWO $95 rows:
+    // revenue double counted, silently, on the table the whole business is measured from.
+    // A partial unique index on stripe_invoice_id is what actually stops it.
+    const before = (await sql.query(
+      `SELECT count(*)::int AS n FROM ledger_entries WHERE provider_id = $1`,
+      [providerId],
+    )) as { n: number }[]
+
+    await Promise.all([
+      handleInvoicePaid(invoice('in_dup', 'epicutis')),
+      handleInvoicePaid(invoice('in_dup', 'epicutis')),
+    ])
+
+    const after = (await sql.query(
+      `SELECT count(*)::int AS n FROM ledger_entries WHERE provider_id = $1`,
+      [providerId],
+    )) as { n: number }[]
+
+    expect(after[0].n - before[0].n).toBe(1)
+  })
+
   it('does NOT close the booking gate when an Epicutis payment fails', async () => {
     await handleInvoicePaymentFailed(invoice('in_epi_fail', 'epicutis'))
 

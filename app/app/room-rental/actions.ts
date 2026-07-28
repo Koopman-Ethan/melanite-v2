@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache'
 
 import { requireProvider } from '@/lib/auth/dal'
 import { db } from '@/lib/db'
+import { isExclusionViolation } from '@/lib/db/errors'
 import {
   getRoomSettings,
   releaseExpiredHolds,
@@ -247,15 +248,6 @@ export async function cancelRoomRental(rentalId: string): Promise<RentalState> {
   return { success: `Cancelled and refunded $${Number(rental.price).toFixed(2)}.` }
 }
 
-function isExclusionViolation(err: unknown): boolean {
-  return (
-    typeof err === 'object' &&
-    err !== null &&
-    ('code' in err
-      ? (err as { code?: string }).code === '23P01'
-      : String((err as { message?: string }).message ?? '').includes('room_bookings_no_overlap'))
-  )
-}
 
 const SLOT_LABELS: Record<SlotType, string> = {
   full: 'Full day',

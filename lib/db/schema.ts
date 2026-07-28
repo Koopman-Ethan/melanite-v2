@@ -926,6 +926,16 @@ export const ledgerEntries = pgTable('ledger_entries', {
   uniqueIndex()
     .on(t.stripePaymentIntentId)
     .where(sql`${t.stripePaymentIntentId} IS NOT NULL AND ${t.entryType} <> 'refund'`),
+  // The same guarantee for invoices, which subscription revenue arrives on and which have no
+  // payment intent of their own.
+  //
+  // Its absence was real, not theoretical: the handler read "has this invoice been recorded?"
+  // and inserted if not, and two deliveries of the same invoice raced that gap. Caught by
+  // paying for a subscription through the CLI and finding TWO $95 rows — revenue double
+  // counted, silently, on the one table the whole business is measured from.
+  uniqueIndex('ledger_entries_stripe_invoice_id_unique')
+    .on(t.stripeInvoiceId)
+    .where(sql`${t.stripeInvoiceId} IS NOT NULL AND ${t.entryType} <> 'refund'`),
   // A Stripe-funded entry must carry its payment intent — that link is what makes
   // reconciliation possible, and an entry claiming to be Stripe without one is either a data
   // error or a manual entry mislabelled. Membership entries are the exception: they come

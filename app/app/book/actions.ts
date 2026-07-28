@@ -8,6 +8,7 @@ import { redirect } from 'next/navigation'
 import { canBook, bookingBlockedReasons, requireProvider } from '@/lib/auth/dal'
 import { denverInstant, getLaserHours } from '@/lib/db/queries/availability'
 import { db } from '@/lib/db'
+import { isExclusionViolation } from '@/lib/db/errors'
 import { providerServices, services } from '@/lib/db/schema'
 import { bookingPaymentLinkEmail, sendEmail } from '@/lib/email'
 import { appOrigin } from '@/lib/stripe/config'
@@ -182,7 +183,7 @@ export async function createBooking(_prev: BookState, formData: FormData): Promi
   } catch (err) {
     // 23P01 — exclusion_violation. The other side of the race committed first, which is the
     // constraint doing exactly its job. Anything else is a real failure and should surface.
-    if (String((err as { code?: string })?.code ?? err).includes('23P01')) {
+    if (isExclusionViolation(err)) {
       return { error: 'Someone just booked that slot. Pick another time.' }
     }
     throw err
