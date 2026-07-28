@@ -30,7 +30,7 @@ export interface MembershipView {
   startDate: Date | null
   cancelDate: Date | null
   hasStripeSubscription: boolean
-  /** Own-director path: who they are, when their licence lapses. */
+  /** Own-director path: who they are, when their license lapses. */
   director: {
     name: string
     npi: string | null

@@ -188,13 +188,13 @@ export async function bookingHasPayment(bookingId: string): Promise<boolean> {
   return Boolean(row)
 }
 
-/** Provider licences, for the admin view.
+/** Provider licenses, for the admin view.
  *
- *  Nothing surfaced this anywhere before: the licence is a booking gate that fails on a date,
+ *  Nothing surfaced this anywhere before: the license is a booking gate that fails on a date,
  *  and the only person who could see it coming was the provider — on a page they have no reason
  *  to open. Renewal goes through Melanite, so Melanite has to be able to see it.
  *
- *  Only accounts that can actually book. An inactive provider whose licence lapsed is not a
+ *  Only accounts that can actually book. An inactive provider whose license lapsed is not a
  *  problem anyone needs to act on.
  */
 export async function getProviderLicenses(): Promise<

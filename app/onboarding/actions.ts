@@ -56,7 +56,7 @@ export async function saveProfile(input: {
   redirect('/onboarding/license')
 }
 
-/** Step 3 — licence and insurance.
+/** Step 3 — license and insurance.
  *
  *  Documents themselves are emailed to Melanite rather than uploaded, matching v1. The
  *  `documents` table and an upload path exist; wiring them is deliberately deferred rather than
@@ -73,20 +73,20 @@ export async function saveLicense(input: {
   const licenseState = input.licenseState.trim()
   const malpracticeInsurance = input.malpracticeInsurance.trim()
 
-  if (!licenseNumber) return { error: 'Enter your licence number.' }
-  if (!licenseState) return { error: 'Enter the state your licence was issued in.' }
+  if (!licenseNumber) return { error: 'Enter your license number.' }
+  if (!licenseState) return { error: 'Enter the state your license was issued in.' }
   if (!malpracticeInsurance) {
     return { error: 'Enter your malpractice insurance provider.' }
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.licenseExpiry)) {
-    return { error: 'Enter the licence expiry date.' }
+    return { error: 'Enter the license expiry date.' }
   }
 
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(new Date())
   if (input.licenseExpiry < today) {
-    // Refused rather than accepted-and-flagged: an expired licence blocks booking anyway, and
+    // Refused rather than accepted-and-flagged: an expired license blocks booking anyway, and
     // storing it silently would leave someone stuck at the last gate with no idea why.
-    return { error: 'That licence has already expired. Renew it before setting up your account.' }
+    return { error: 'That license has already expired. Renew it before setting up your account.' }
   }
 
   await completeStep(user.id, 3, {

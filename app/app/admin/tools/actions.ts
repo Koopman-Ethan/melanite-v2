@@ -240,7 +240,7 @@ export async function recordMembershipPayment(input: {
 /** Create an appointment on a provider's behalf.
  *
  *  The provider gates are deliberately NOT applied: an admin entering an appointment that
- *  already happened should not be blocked because the provider's licence lapsed afterwards.
+ *  already happened should not be blocked because the provider's license lapsed afterwards.
  *  The global collision check IS applied — the laser cannot be double-booked whoever is doing
  *  the booking.
  */

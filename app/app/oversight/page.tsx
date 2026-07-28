@@ -34,20 +34,20 @@ function denverDay(d: Date): string {
 }
 
 function CredentialLine({ provider }: { provider: OverseenProvider }) {
-  const licence = licenseStatus(provider.licenseExpiry)
+  const license = licenseStatus(provider.licenseExpiry)
   const wording =
-    licence.state === 'missing'
-      ? 'no licence on file'
-      : licence.state === 'expired'
-        ? `licence expired ${provider.licenseExpiry}`
-        : licence.state === 'expiring'
-          ? `licence expires in ${licence.daysLeft} days (${provider.licenseExpiry})`
-          : `licence valid to ${provider.licenseExpiry}`
+    license.state === 'missing'
+      ? 'no license on file'
+      : license.state === 'expired'
+        ? `license expired ${provider.licenseExpiry}`
+        : license.state === 'expiring'
+          ? `license expires in ${license.daysLeft} days (${provider.licenseExpiry})`
+          : `license valid to ${provider.licenseExpiry}`
 
   return (
     <span className="text-xs">
-      <span className={licence.state === 'ok' ? 'text-success' : 'text-warning'} aria-hidden>
-        {licence.state === 'ok' ? '✓' : '!'}
+      <span className={license.state === 'ok' ? 'text-success' : 'text-warning'} aria-hidden>
+        {license.state === 'ok' ? '✓' : '!'}
       </span>{' '}
       <span className="text-ink-secondary">
         {provider.licenseNumber ?? '—'}
@@ -66,7 +66,7 @@ export default async function OversightPage() {
     getUpcomingSchedule(),
   ])
 
-  // Credentials that need chasing, surfaced above everything else. A lapsed licence is the one
+  // Credentials that need chasing, surfaced above everything else. A lapsed license is the one
   // thing on this page that is his problem to act on rather than to observe.
   const attention = providers
     .map((provider) => ({ provider, status: licenseStatus(provider.licenseExpiry) }))

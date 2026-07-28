@@ -7,7 +7,7 @@ import { bookings, providerServices, providers, roomBookings, services } from '@
 
 // What the medical director sees.
 //
-// His duty is over PEOPLE, not appointments: he is the physician whose licence the treatments
+// His duty is over PEOPLE, not appointments: he is the physician whose license the treatments
 // are performed under, so the questions are "who am I covering", "are they credentialed", and
 // "what procedures are they performing". A calendar alone answers none of those.
 //

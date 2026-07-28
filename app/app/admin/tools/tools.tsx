@@ -461,7 +461,7 @@ function BookingTool({
       <p className="text-sm text-ink-muted">
         Enters an appointment on a provider&apos;s behalf. The laser is still checked for
         collisions, but the provider&apos;s booking gates are not — an appointment that already
-        happened should not be blocked by a licence that lapsed afterwards.
+        happened should not be blocked by a license that lapsed afterwards.
       </p>
 
       <div className="grid gap-3 sm:grid-cols-2">

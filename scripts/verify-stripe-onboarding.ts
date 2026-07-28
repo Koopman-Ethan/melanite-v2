@@ -116,9 +116,9 @@ async function main() {
   await page.getByRole('button', { name: /continue/i }).click()
 
   await page.waitForURL(/onboarding\/license/)
-  await page.getByLabel('Licence number').fill('RN-STRIPE-1')
-  await page.getByLabel('Licence state').fill('Idaho')
-  await page.getByLabel('Licence expiry').fill('2030-01-31')
+  await page.getByLabel('License number').fill('RN-STRIPE-1')
+  await page.getByLabel('License state').fill('Idaho')
+  await page.getByLabel('License expiry').fill('2030-01-31')
   await page.getByLabel('Malpractice insurance provider').fill('NSO')
   await page.getByRole('button', { name: /continue to stripe/i }).click()
   await page.waitForURL(/onboarding\/stripe/)

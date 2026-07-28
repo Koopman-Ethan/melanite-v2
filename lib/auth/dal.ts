@@ -49,14 +49,14 @@ export async function requireOversight(): Promise<SessionUser> {
 }
 
 /** THREE booking gates, not two. v1 enforced them partly in page JS and partly per endpoint,
- *  with no single place that answered "may this provider book?" — which is how the licence
+ *  with no single place that answered "may this provider book?" — which is how the license
  *  check gets overlooked: it lives inside POST /bookings/create alongside validation, well
  *  away from the other two.
  *
  *  All must pass:
  *   - `bookingEnabled`         manual admin flip once documents are confirmed on file
  *   - `medicalDirectorStatus`  the credential / subscription gate
- *   - `licenseExpiry`          a lapsed professional licence blocks booking outright
+ *   - `licenseExpiry`          a lapsed professional license blocks booking outright
  *
  *  Account status is a fourth, handled upstream: getSessionUser() signs out an inactive
  *  provider rather than letting them reach a gate at all. */
@@ -68,7 +68,7 @@ export function canBook(user: SessionUser): boolean {
   )
 }
 
-/** Compared as a calendar date in America/Denver, not a timestamp — a licence valid "through
+/** Compared as a calendar date in America/Denver, not a timestamp — a license valid "through
  *  the 31st" must not expire at 6pm on the 30th because the server is in UTC. */
 export function isLicenseExpired(user: SessionUser): boolean {
   if (!user.licenseExpiry) return false
@@ -79,7 +79,7 @@ export function isLicenseExpired(user: SessionUser): boolean {
 export interface BlockedGate {
   gate: 'booking_enabled' | 'medical_director' | 'license'
   message: string
-  /** Where the provider can act on it themselves, if anywhere. Documents and licence renewal
+  /** Where the provider can act on it themselves, if anywhere. Documents and license renewal
    *  both go through Keoni, so those have no self-serve route. */
   href?: string
   action?: string

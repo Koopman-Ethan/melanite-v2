@@ -45,7 +45,7 @@ test.describe('provider access', () => {
     await expect(row).toBeVisible()
 
     // Context is shown before the controls — the flip is a judgement about readiness, and this
-    // provider has no licence on file.
+    // provider has no license on file.
     await expect(row).toContainText('none on file')
 
     // --- Grant ------------------------------------------------------------------------------
@@ -63,12 +63,12 @@ test.describe('provider access', () => {
     // Granting booking does not quietly grant everything else.
     expect(state[0].room_rental_enabled, 'room rental changed on its own').toBe(false)
 
-    // This provider has NO licence on file, and the honest thing to say about that is that
+    // This provider has NO license on file, and the honest thing to say about that is that
     // nothing stops them — `isLicenseExpired` reads a null as not-expired. The page used to
     // claim the gate would block them, which was false; asserting the true sentence is what
     // stops that regressing.
     await expect(row.getByText(/nothing stops them/i)).toBeVisible()
-    await expect(row.getByText(/licence gate blocks them/i)).toHaveCount(0)
+    await expect(row.getByText(/license gate blocks them/i)).toHaveCount(0)
 
     // --- Revoke -----------------------------------------------------------------------------
     await row.getByLabel('Can book clients').uncheck()
@@ -109,7 +109,7 @@ test.describe('provider access', () => {
     const row = page.locator('li', { hasText: 'Zzpending Subject' })
     await expect(row).toContainText('still in setup')
 
-    // Someone at step 2 has no licence on file yet — step 3 has not happened. The toggle is
+    // Someone at step 2 has no license on file yet — step 3 has not happened. The toggle is
     // disabled, and the action refuses independently, because a disabled input is not a rule.
     await expect(row.getByLabel('Can book clients')).toBeDisabled()
 

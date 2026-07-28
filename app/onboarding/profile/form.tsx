@@ -91,7 +91,7 @@ export function ProfileForm({
           })
         }
       >
-        {pending ? 'Saving…' : 'Continue to licence'}
+        {pending ? 'Saving…' : 'Continue to license'}
       </Button>
     </div>
   )

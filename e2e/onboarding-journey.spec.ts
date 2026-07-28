@@ -99,14 +99,14 @@ test.describe('provider onboarding', () => {
     await page.getByLabel('Professional credentials').fill('RN')
     await page.getByRole('button', { name: /continue/i }).click()
 
-    // --- Step 3: licence ------------------------------------------------------------------
+    // --- Step 3: license ------------------------------------------------------------------
     await expect(page).toHaveURL(/\/onboarding\/license/)
 
-    await expectAccessible(page, 'step 3 — licence')
+    await expectAccessible(page, 'step 3 — license')
 
-    await page.getByLabel('Licence number').fill('RN-E2E-0001')
-    await page.getByLabel('Licence state').fill('Idaho')
-    await page.getByLabel('Licence expiry').fill('2099-12-31')
+    await page.getByLabel('License number').fill('RN-E2E-0001')
+    await page.getByLabel('License state').fill('Idaho')
+    await page.getByLabel('License expiry').fill('2099-12-31')
     await page.getByLabel('Malpractice insurance provider').fill('NSO')
     await page.getByRole('button', { name: /continue to stripe/i }).click()
 
@@ -228,20 +228,20 @@ test.describe('provider onboarding', () => {
     await expect(page).toHaveURL(/\/onboarding\/license/)
 
     // --- Step 3: malpractice cover is not optional ----------------------------------------
-    await page.getByLabel('Licence number').fill('RN-GATE-1')
-    await page.getByLabel('Licence state').fill('Idaho')
-    await page.getByLabel('Licence expiry').fill('2099-12-31')
+    await page.getByLabel('License number').fill('RN-GATE-1')
+    await page.getByLabel('License state').fill('Idaho')
+    await page.getByLabel('License expiry').fill('2099-12-31')
     await page.getByRole('button', { name: /continue to stripe/i }).click()
     await expect(page.getByText(/malpractice insurance provider/i).last()).toBeVisible()
     await expect(page).toHaveURL(/\/onboarding\/license/)
 
-    // An already-expired licence is refused outright rather than stored and flagged.
+    // An already-expired license is refused outright rather than stored and flagged.
     await page.getByLabel('Malpractice insurance provider').fill('NSO')
-    await page.getByLabel('Licence expiry').fill('2020-01-01')
+    await page.getByLabel('License expiry').fill('2020-01-01')
     await page.getByRole('button', { name: /continue to stripe/i }).click()
     await expect(page.getByText(/already expired/i)).toBeVisible()
 
-    await page.getByLabel('Licence expiry').fill('2099-12-31')
+    await page.getByLabel('License expiry').fill('2099-12-31')
     await page.getByRole('button', { name: /continue to stripe/i }).click()
     await expect(page).toHaveURL(/\/onboarding\/stripe/)
 

@@ -37,7 +37,7 @@ export function stepNumber(slug: OnboardingSlug): number {
 
 /** May this provider open this step?
  *
- *  Forward only by one — you cannot skip ahead to Stripe without a licence on file — but going
+ *  Forward only by one — you cannot skip ahead to Stripe without a license on file — but going
  *  BACK is always allowed. v1 enforced the same rule server-side (`complete_step` had to be at
  *  most `onboarding_step + 1`); revisiting a finished step to fix a typo is not an attack. */
 export function canOpenStep(slug: OnboardingSlug, onboardingStep: number): boolean {

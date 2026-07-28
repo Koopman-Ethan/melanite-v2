@@ -128,7 +128,7 @@ export default async function CoursePage({
                     </p>
                     {e.licenseNumber && (
                       <p className="mt-0.5 text-xs text-ink-faint">
-                        Licence {e.licenseNumber}
+                        License {e.licenseNumber}
                       </p>
                     )}
                   </div>

@@ -53,7 +53,7 @@ export async function startRoomRental(input: {
   }
 
   // Deliberately NOT the full booking gate. Renting the room is a space rental; the medical
-  // director and licence gates govern treating on the laser, and v1 drew the same line.
+  // director and license gates govern treating on the laser, and v1 drew the same line.
   if (!user.bookingEnabled) {
     return { error: 'Your account is not yet cleared. Melanite will enable it once your documents are confirmed.' }
   }

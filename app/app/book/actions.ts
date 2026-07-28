@@ -27,7 +27,7 @@ const CHECKOUT_LINK_TTL_DAYS = 7
 export async function createBooking(_prev: BookState, formData: FormData): Promise<BookState> {
   const user = await requireProvider()
 
-  // Gates first. canBook() covers bookingEnabled, medicalDirectorStatus and licence expiry;
+  // Gates first. canBook() covers bookingEnabled, medicalDirectorStatus and license expiry;
   // an inactive account never gets a session at all.
   if (!canBook(user)) {
     const gates = bookingBlockedReasons(user)

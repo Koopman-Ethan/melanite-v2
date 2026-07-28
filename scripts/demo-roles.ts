@@ -175,7 +175,7 @@ async function main() {
   await capture(
     dir,
     'oversight',
-    'Signing in lands here, not on a redirect loop. Who he covers, whether their licences are current, what each is credentialed to perform, and the next 14 days of appointments and room rentals interleaved. No money anywhere.',
+    'Signing in lands here, not on a redirect loop. Who he covers, whether their licenses are current, what each is credentialed to perform, and the next 14 days of appointments and room rentals interleaved. No money anywhere.',
   )
 
   // The sidebar is the clearest proof of the scoping.
@@ -194,8 +194,8 @@ async function main() {
   await admin.waitForLoadState('networkidle')
   await capture(
     admin,
-    'admin home with licence panel',
-    'The new panel lists only licences needing action, most urgent first, with a missing date sorted above an expired one. Previously nothing anywhere told Melanite a licence was about to lapse.',
+    'admin home with license panel',
+    'The new panel lists only licenses needing action, most urgent first, with a missing date sorted above an expired one. Previously nothing anywhere told Melanite a license was about to lapse.',
   )
 
   await admin.goto(`${BASE}/app/admin/providers`)
@@ -203,7 +203,7 @@ async function main() {
   await capture(
     admin,
     'providers roster',
-    'The manual database edit, as a screen. Context sits above the controls — licence, medical director, payouts — so enabling booking is a judgement rather than a blind switch.',
+    'The manual database edit, as a screen. Context sits above the controls — license, medical director, payouts — so enabling booking is a judgement rather than a blind switch.',
   )
 
   await admin.goto(`${BASE}/app/admin/tools`)

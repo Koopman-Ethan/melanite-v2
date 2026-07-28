@@ -6,7 +6,7 @@ import type { SessionUser } from '@/lib/auth/session'
 // The booking gates.
 //
 // Three independent conditions, all of which must pass. v1 enforced them in three different
-// places — two in page JavaScript, one inside the create endpoint — which is how the licence
+// places — two in page JavaScript, one inside the create endpoint — which is how the license
 // check came to be the one everybody forgot. Tested here as a single answerable question.
 
 const base: SessionUser = {
@@ -41,12 +41,12 @@ describe('canBook', () => {
     },
   )
 
-  it('blocks on an expired licence even when everything else passes', () => {
+  it('blocks on an expired license even when everything else passes', () => {
     // The gate v1 kept forgetting.
     expect(canBook(user({ licenseExpiry: '2020-01-01' }))).toBe(false)
   })
 
-  it('allows a licence with no expiry on file', () => {
+  it('allows a license with no expiry on file', () => {
     expect(canBook(user({ licenseExpiry: null }))).toBe(true)
   })
 })
@@ -61,7 +61,7 @@ describe('isLicenseExpired', () => {
   })
 
   it('compares as a calendar date, not an instant', () => {
-    // A licence valid "through today" must not expire because the server is ahead of Denver in
+    // A license valid "through today" must not expire because the server is ahead of Denver in
     // UTC. Today in Denver is still today.
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(
       new Date(),
@@ -97,13 +97,13 @@ describe('bookingBlockedReasons', () => {
     const [mdGate] = bookingBlockedReasons(user({ medicalDirectorStatus: 'past_due' }))
     expect(mdGate.href).toBeTruthy()
 
-    // Documents and licence renewal both go through Melanite, so offering a link would be a
+    // Documents and license renewal both go through Melanite, so offering a link would be a
     // dead end dressed up as an action.
     const [docGate] = bookingBlockedReasons(user({ bookingEnabled: false }))
     expect(docGate.href).toBeUndefined()
 
-    const [licenceGate] = bookingBlockedReasons(user({ licenseExpiry: '2020-01-01' }))
-    expect(licenceGate.href).toBeUndefined()
+    const [licenseGate] = bookingBlockedReasons(user({ licenseExpiry: '2020-01-01' }))
+    expect(licenseGate.href).toBeUndefined()
   })
 
   it('says something different for past_due than for none', () => {

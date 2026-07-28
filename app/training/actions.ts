@@ -60,9 +60,9 @@ export async function enrollAndPayDeposit(input: {
   if (!EMAIL.test(email)) return { error: 'Enter a valid email address.' }
   if (!input.phone.trim()) return { error: 'Enter a phone number.' }
   // Required, not optional. This is a clinical laser course — who is being trained, and under
-  // what licence, is the record Melanite has to be able to produce later.
+  // what license, is the record Melanite has to be able to produce later.
   if (!input.licenseNumber.trim()) {
-    return { error: 'Enter your professional licence number.' }
+    return { error: 'Enter your professional license number.' }
   }
 
   const [course] = await db

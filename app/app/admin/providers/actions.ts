@@ -20,7 +20,7 @@ export interface ToggleState {
  * take clients, and these toggles sit alongside the money surfaces.
  *
  * Only these two fields are writable here. A general provider editor would be easier to build
- * and much worse to own — it is how a licence date or a Stripe account id gets overwritten by
+ * and much worse to own — it is how a license date or a Stripe account id gets overwritten by
  * a stale form.
  */
 export async function setProviderAccess(input: {
@@ -53,7 +53,7 @@ export async function setProviderAccess(input: {
   }
 
   // Granting booking to someone still in setup would let them take a client before they have a
-  // licence on file — step 3 has not happened yet.
+  // license on file — step 3 has not happened yet.
   if (input.field === 'bookingEnabled' && input.value && target.status === 'pending') {
     return { error: 'They haven’t finished setting up yet. Booking can’t be enabled until they have.' }
   }

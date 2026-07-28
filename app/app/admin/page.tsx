@@ -15,7 +15,7 @@ export default async function AdminHome() {
   const user = await requireAdmin()
   const [totals, licenses] = await Promise.all([getRevenueTotals(), getProviderLicenses()])
 
-  // Only what needs acting on. A list of every provider whose licence is fine is a list nobody
+  // Only what needs acting on. A list of every provider whose license is fine is a list nobody
   // reads, and a panel that is always there stops being noticed.
   const needsAttention = licenses
     .map((provider) => ({ ...provider, status: licenseStatus(provider.licenseExpiry) }))
@@ -33,11 +33,11 @@ export default async function AdminHome() {
         <section className="rounded-card border border-warning/40 bg-warning/10 p-5">
           <h2 className="text-sm font-medium text-warning">
             {needsAttention.length === 1
-              ? '1 licence needs attention'
-              : `${needsAttention.length} licences need attention`}
+              ? '1 license needs attention'
+              : `${needsAttention.length} licenses need attention`}
           </h2>
           <p className="mt-1 text-xs text-ink-muted">
-            A lapsed licence blocks booking outright, and renewals go through Melanite. This is
+            A lapsed license blocks booking outright, and renewals go through Melanite. This is
             the only place that shows it coming.
           </p>
           <ul className="mt-4 space-y-2">

@@ -9,7 +9,7 @@ import {
 } from '@/lib/license'
 
 // Dates are where this app has been wrong before — an Intl call that dropped the month, a
-// licence gate that read UTC. So the boundaries get pinned down rather than assumed.
+// license gate that read UTC. So the boundaries get pinned down rather than assumed.
 
 /** Noon UTC on a fixed day, which is 6am in Denver — safely inside the same calendar date
  *  either side of a DST change. */
@@ -18,7 +18,7 @@ const at = (iso: string) => new Date(`${iso}T12:00:00Z`)
 describe('denverToday', () => {
   it('is the Denver calendar date, not the UTC one', () => {
     // 01:00 UTC on the 15th is still 18:00 on the 14th in Denver. A gate comparing against the
-    // UTC date would expire a licence most of a day early.
+    // UTC date would expire a license most of a day early.
     expect(denverToday(new Date('2026-07-15T01:00:00Z'))).toBe('2026-07-14')
   })
 
@@ -54,7 +54,7 @@ describe('licenseStatus', () => {
   })
 
   it('treats the expiry day itself as still valid', () => {
-    // A licence valid "through the 22nd" works on the 22nd. Booking stops on the 23rd.
+    // A license valid "through the 22nd" works on the 22nd. Booking stops on the 23rd.
     const status = licenseStatus('2026-07-27', at('2026-07-27'))
     expect(status.state).toBe('expiring')
     expect(status.daysLeft).toBe(0)
@@ -73,7 +73,7 @@ describe('licenseStatus', () => {
     expect(licenseStatus('2026-03-09', at('2026-03-07')).daysLeft).toBe(2)
   })
 
-  it("matches the real provider whose licence is closest to lapsing", () => {
+  it("matches the real provider whose license is closest to lapsing", () => {
     // bmayesthetics@gmail.com, the row that prompted all of this.
     const status = licenseStatus('2026-09-22', at('2026-07-27'))
     expect(status.state).toBe('expiring')
@@ -97,7 +97,7 @@ describe('licenseMessage', () => {
   })
 
   it('tells someone with no date on file what to do', () => {
-    expect(licenseMessage(licenseStatus(null), null)).toContain('no licence expiry date')
+    expect(licenseMessage(licenseStatus(null), null)).toContain('no license expiry date')
   })
 })
 

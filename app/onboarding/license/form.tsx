@@ -33,8 +33,8 @@ export function LicenseForm({
           Verify your <span className="text-gold">credentials</span>.
         </h1>
         <p className="mt-3 text-sm text-ink-muted">
-          Your state licence number — not your title. Required for compliance and platform
-          records. Once submitted, licence details can only be changed by Melanite.
+          Your state license number — not your title. Required for compliance and platform
+          records. Once submitted, license details can only be changed by Melanite.
         </p>
       </div>
 
@@ -47,7 +47,7 @@ export function LicenseForm({
 
       <Field
         id="licenseNumber"
-        label="Licence number"
+        label="License number"
         required
         value={licenseNumber}
         onChange={(e) => setLicenseNumber(e.target.value)}
@@ -57,7 +57,7 @@ export function LicenseForm({
       <div className="grid gap-3 sm:grid-cols-2">
         <Field
           id="licenseState"
-          label="Licence state"
+          label="License state"
           required
           value={licenseState}
           onChange={(e) => setLicenseState(e.target.value)}
@@ -65,7 +65,7 @@ export function LicenseForm({
         />
         <label className="block space-y-1.5">
           <span className="block text-sm font-medium text-ink-secondary after:ml-1 after:text-gold after:content-['*']">
-            Licence expiry
+            License expiry
           </span>
           <input
             type="date"

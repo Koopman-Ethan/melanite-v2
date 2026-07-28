@@ -81,10 +81,10 @@ export default async function AccountPage() {
           {/* The state is in the words, not only in the border colour. */}
           <strong className={license.state === 'expired' ? 'text-danger' : 'text-warning'}>
             {license.state === 'expired'
-              ? 'Licence expired.'
+              ? 'License expired.'
               : license.state === 'missing'
-                ? 'No licence on file.'
-                : 'Licence renewal due.'}
+                ? 'No license on file.'
+                : 'License renewal due.'}
           </strong>{' '}
           {licenseNote}
         </div>
@@ -94,7 +94,7 @@ export default async function AccountPage() {
         title="Profile"
         description="Your email is your sign-in and can’t be changed here — contact Melanite if it needs to move."
       >
-        <ProfileForm values={account} licenceRequired={user.role === 'provider'} />
+        <ProfileForm values={account} licenseRequired={user.role === 'provider'} />
       </Section>
 
       <Section

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 
 import { cn } from '@/lib/cn'
-import type { CalendarBooking, CalendarRoomLet } from '@/lib/db/queries/admin-calendar'
+import type { CalendarBooking, CalendarRoomRental } from '@/lib/db/queries/admin-calendar'
 
 // Layout only. Every position on this grid was computed on the server in Denver wall-clock —
 // this component never touches a timestamp, which is what keeps an admin in another timezone
@@ -131,13 +131,13 @@ const SLOT_LABEL: Record<string, string> = {
 export function WeekGrid({
   days,
   bookings,
-  roomLets,
+  roomRentals,
   openTime,
   closeTime,
 }: {
   days: string[]
   bookings: CalendarBooking[]
-  roomLets: CalendarRoomLet[]
+  roomRentals: CalendarRoomRental[]
   openTime: string
   closeTime: string
 }) {
@@ -179,9 +179,9 @@ export function WeekGrid({
         </label>
         <p className="text-xs text-ink-faint">
           {openTime}–{closeTime} Mountain · one laser, all providers
-          {roomLets.length === 0
-            ? ' · room not let this week'
-            : ` · ${roomLets.length} room let${roomLets.length === 1 ? '' : 's'}`}
+          {roomRentals.length === 0
+            ? ' · nobody has the room this week'
+            : ` · ${roomRentals.length} room rental${roomRentals.length === 1 ? '' : 's'}`}
         </p>
       </div>
 
@@ -230,7 +230,7 @@ export function WeekGrid({
             })}
           </div>
 
-          {/* Room lets.
+          {/* Room rentals.
               A band rather than a block on the timeline: the room is sold by the day, morning
               or afternoon, so a positioned rectangle would imply a precision it does not have
               and would overlap laser appointments it has nothing to do with.
@@ -245,23 +245,23 @@ export function WeekGrid({
                 <span className="text-[9px] uppercase leading-tight text-ink-faint">Room</span>
               </div>
               {days.map((day) => {
-                const lets = roomLets.filter((l) => l.day === day)
+                const rentals = roomRentals.filter((l) => l.day === day)
                 return (
                   <div key={day} className="min-h-11 flex-1 border-l border-line p-1">
-                    {lets.map((let_) => (
+                    {rentals.map((rental) => (
                       <div
-                        key={let_.id}
+                        key={rental.id}
                         className="mb-1 rounded-field border border-gold/40 bg-gold/10 px-1.5 py-1 last:mb-0"
                       >
                         <div className="truncate text-[10px] font-medium text-gold">
-                          {SLOT_LABEL[let_.slotType] ?? let_.slotType}
+                          {SLOT_LABEL[rental.slotType] ?? rental.slotType}
                         </div>
                         <div className="truncate text-[10px] text-ink-secondary">
-                          {let_.providerName}
+                          {rental.providerName}
                         </div>
                         {/* Said in words: a hold is not a confirmed let, and an admin looking at
                             the week needs to know which is which. */}
-                        {let_.status === 'pending' && (
+                        {rental.status === 'pending' && (
                           <div className="text-[9px] text-warning">holding</div>
                         )}
                       </div>

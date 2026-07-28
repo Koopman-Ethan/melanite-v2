@@ -26,7 +26,7 @@ export const STEPS = [
 
 /** The persistent right-hand rail: where you are, and why this step is being asked for.
  *
- *  Not decoration. Someone handing over a licence number and bank details deserves to see what
+ *  Not decoration. Someone handing over a license number and bank details deserves to see what
  *  happens to them, on the screen where they hand them over. */
 export function ProgressRail({
   current,

@@ -38,7 +38,7 @@ function Signal({ ok, label, detail }: { ok: boolean; label: string; detail: str
   )
 }
 
-function licenceDetail(status: LicenseStatus, expiry: string | null): string {
+function licenseDetail(status: LicenseStatus, expiry: string | null): string {
   switch (status.state) {
     case 'missing':
       return 'none on file'
@@ -120,7 +120,7 @@ export function Roster({
 
       <ul className="space-y-3">
         {shown.map((provider) => {
-          const licence = licenseStatus(provider.licenseExpiry)
+          const license = licenseStatus(provider.licenseExpiry)
           const setupIncomplete = provider.status === 'pending'
 
           return (
@@ -146,12 +146,12 @@ export function Roster({
 
               {/* Context before controls. The flip is a judgement about whether someone is
                   ready to take clients, and making it blind is how a provider ends up bookable
-                  with a lapsed licence. */}
+                  with a lapsed license. */}
               <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1.5">
                 <Signal
-                  ok={licence.state === 'ok'}
-                  label="Licence"
-                  detail={licenceDetail(licence, provider.licenseExpiry)}
+                  ok={license.state === 'ok'}
+                  label="License"
+                  detail={licenseDetail(license, provider.licenseExpiry)}
                 />
                 <Signal
                   ok={provider.medicalDirectorStatus === 'active'}
@@ -190,19 +190,19 @@ export function Roster({
                 />
               </div>
 
-              {/* Only an EXPIRED licence blocks. An expiring one still works, and a missing
+              {/* Only an EXPIRED license blocks. An expiring one still works, and a missing
                   one passes the gate entirely — `isLicenseExpired` reads a null as not-expired.
                   Saying "the gate will block them" for either would be plainly false, and a
                   warning that is wrong twice out of three times is one nobody reads. */}
-              {provider.bookingEnabled && licence.state === 'expired' && (
+              {provider.bookingEnabled && license.state === 'expired' && (
                 <p className="mt-2 text-xs text-warning">
-                  Booking is on, but the licence expired — the licence gate blocks them
+                  Booking is on, but the license expired — the license gate blocks them
                   regardless of this toggle.
                 </p>
               )}
-              {provider.bookingEnabled && licence.state === 'missing' && (
+              {provider.bookingEnabled && license.state === 'missing' && (
                 <p className="mt-2 text-xs text-warning">
-                  Booking is on with no licence on file. Nothing stops them: the licence gate
+                  Booking is on with no license on file. Nothing stops them: the license gate
                   treats a missing date as valid.
                 </p>
               )}

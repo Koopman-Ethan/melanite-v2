@@ -63,7 +63,7 @@ export interface CalendarBooking {
  *  across the day instead.
  *
  *  The medical director could already see these; the owner could not, which is backwards. */
-export interface CalendarRoomLet {
+export interface CalendarRoomRental {
   id: string
   day: string
   slotType: string
@@ -75,7 +75,7 @@ export interface CalendarWeek {
   days: string[]
   hours: LaserHours
   bookings: CalendarBooking[]
-  roomLets: CalendarRoomLet[]
+  roomRentals: CalendarRoomRental[]
   stats: {
     booked: number
     cancelled: number
@@ -220,7 +220,7 @@ export async function getCalendarWeek(weekStart: string): Promise<CalendarWeek> 
   // Fetched by rental_date rather than by timestamp range: the room is sold as a named day
   // slot, and its start/end are derived from platform settings that can change. The date is
   // what was actually bought.
-  const lets = await db
+  const rentals = await db
     .select({
       id: roomBookings.id,
       day: roomBookings.rentalDate,
@@ -234,9 +234,9 @@ export async function getCalendarWeek(weekStart: string): Promise<CalendarWeek> 
     .where(and(gte(roomBookings.rentalDate, weekStart), lt(roomBookings.rentalDate, addDays(weekStart, 7))))
     .orderBy(asc(roomBookings.rentalDate))
 
-  const roomLets: CalendarRoomLet[] = lets
+  const roomRentals: CalendarRoomRental[] = rentals
     // A pending hold is someone mid-checkout, which is worth seeing — an abandoned one expires
-    // and disappears on its own. A cancelled let is not.
+    // and disappears on its own. A cancelled rental is not.
     .filter((l) => l.status !== 'cancelled' && l.status !== 'refunded')
     .map((l) => ({
       id: l.id,
@@ -287,7 +287,7 @@ export async function getCalendarWeek(weekStart: string): Promise<CalendarWeek> 
     days,
     hours,
     bookings: entries,
-    roomLets,
+    roomRentals,
     stats: {
       booked: occupying.length,
       cancelled: entries.length - occupying.length,

@@ -17,13 +17,13 @@ export interface AccountState {
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/
 
-/** Profile and licence details.
+/** Profile and license details.
  *
  *  Email is deliberately not editable here: it is the login identity, and changing it needs a
  *  verification round-trip rather than a text box. v1's PATCH /me left it out for the same
  *  reason.
  *
- *  Licence expiry is editable and matters more than it looks — it is one of the three booking
+ *  License expiry is editable and matters more than it looks — it is one of the three booking
  *  gates, so a provider correcting a typo here can unblock or block themselves. The form says
  *  so rather than letting that be a surprise.
  */
@@ -44,20 +44,20 @@ export async function updateProfile(
 
   if (!firstName || !lastName) return { error: 'First and last name are required.' }
 
-  // Onboarding requires the licence, so Account must not let it be erased afterwards. Without
+  // Onboarding requires the license, so Account must not let it be erased afterwards. Without
   // this the strictness of setup is decorative: finish it, then blank every field.
   //
   // Scoped to providers. An owner or the medical director is not practising under a laser
-  // licence, and two of those accounts have never had one — requiring it of them would lock
+  // license, and two of those accounts have never had one — requiring it of them would lock
   // them out of their own profile form over a field that does not apply.
   if (user.role === 'provider') {
-    if (!licenseNumber) return { error: 'Your licence number is required.' }
-    if (!licenseState) return { error: 'The state your licence was issued in is required.' }
-    if (!licenseExpiryRaw) return { error: 'Your licence expiry date is required.' }
+    if (!licenseNumber) return { error: 'Your license number is required.' }
+    if (!licenseState) return { error: 'The state your license was issued in is required.' }
+    if (!licenseExpiryRaw) return { error: 'Your license expiry date is required.' }
   }
 
   if (licenseExpiryRaw && !DATE.test(licenseExpiryRaw)) {
-    return { error: 'Licence expiry must be a valid date.' }
+    return { error: 'License expiry must be a valid date.' }
   }
 
   await db

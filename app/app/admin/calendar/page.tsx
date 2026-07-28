@@ -193,7 +193,7 @@ export default async function AdminCalendarPage({
       <WeekGrid
         days={week.days}
         bookings={week.bookings}
-        roomLets={week.roomLets}
+        roomRentals={week.roomRentals}
         openTime={week.hours.openTime}
         closeTime={week.hours.closeTime}
       />

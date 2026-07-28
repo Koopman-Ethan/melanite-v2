@@ -1,6 +1,6 @@
-// Professional licence state.
+// Professional license state.
 //
-// The licence is one of the three booking gates, and it is the only one that fails on a date
+// The license is one of the three booking gates, and it is the only one that fails on a date
 // rather than on an action. Nobody does anything wrong and one morning booking stops working —
 // which is why "expired" is not enough on its own. It needs a window beforehand, and it needs
 // somebody other than the provider to be able to see that window coming.
@@ -22,7 +22,7 @@ export interface LicenseStatus {
 
 /** Today in America/Denver as YYYY-MM-DD.
  *
- *  A calendar date, never a timestamp. A licence valid "through the 31st" must not expire at
+ *  A calendar date, never a timestamp. A license valid "through the 31st" must not expire at
  *  6pm on the 30th because the server happens to run in UTC. */
 export function denverToday(now: Date = new Date()): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(now)
@@ -59,13 +59,13 @@ export function licenseStatus(
 export function licenseMessage(status: LicenseStatus, expiry: string | null): string | null {
   switch (status.state) {
     case 'expired':
-      return `Your licence expired on ${expiry}, which is blocking booking. Update the date below once you’ve renewed.`
+      return `Your license expired on ${expiry}, which is blocking booking. Update the date below once you’ve renewed.`
     case 'expiring':
       return status.daysLeft === 0
-        ? `Your licence expires today. Booking stops tomorrow unless it’s renewed.`
-        : `Your licence expires in ${status.daysLeft} day${status.daysLeft === 1 ? '' : 's'}, on ${expiry}. Renew before then — booking stops the day after it lapses.`
+        ? `Your license expires today. Booking stops tomorrow unless it’s renewed.`
+        : `Your license expires in ${status.daysLeft} day${status.daysLeft === 1 ? '' : 's'}, on ${expiry}. Renew before then — booking stops the day after it lapses.`
     case 'missing':
-      return 'There’s no licence expiry date on your account. Add it below so Melanite can keep your booking access current.'
+      return 'There’s no license expiry date on your account. Add it below so Melanite can keep your booking access current.'
     default:
       return null
   }

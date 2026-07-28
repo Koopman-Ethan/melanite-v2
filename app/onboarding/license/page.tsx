@@ -8,7 +8,7 @@ import { requireOnboardingStep } from '../guard'
 import { ProgressRail, StepShell } from '../steps'
 import { LicenseForm } from './form'
 
-export const metadata: Metadata = { title: 'Licence & compliance · Melanite' }
+export const metadata: Metadata = { title: 'License & compliance · Melanite' }
 export const dynamic = 'force-dynamic'
 
 export default async function LicenseStep() {
@@ -33,13 +33,13 @@ export default async function LicenseStep() {
           current={3}
           heading={
             <>
-              Why we ask for <span className="text-gold">your licence</span>.
+              Why we ask for <span className="text-gold">your license</span>.
             </>
           }
-          body="Melanite operates under strict compliance standards. Your licence and insurance details are kept on file for platform records and are never shared with clients."
+          body="Melanite operates under strict compliance standards. Your license and insurance details are kept on file for platform records and are never shared with clients."
           aside={{
             title: 'Confidentiality',
-            body: 'Licence numbers, expiry dates and insurance information are visible only to Melanite administrators. They are never displayed on client checkout pages or shared with third parties.',
+            body: 'License numbers, expiry dates and insurance information are visible only to Melanite administrators. They are never displayed on client checkout pages or shared with third parties.',
           }}
         />
       }

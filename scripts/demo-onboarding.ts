@@ -146,13 +146,13 @@ async function main() {
   await capture(page, 'step 2 profile', 'No sidebar and one logo: these pages sit outside the app shell, so there is nothing to navigate to that would not be a dead end.')
   await page.getByRole('button', { name: /continue/i }).click()
 
-  console.log('  step 3 — licence')
+  console.log('  step 3 — license')
   await page.waitForURL(/onboarding\/license/)
-  await page.getByLabel('Licence number').fill('RN-208-44917')
-  await page.getByLabel('Licence state').fill('Idaho')
-  await page.getByLabel('Licence expiry').fill('2028-04-30')
+  await page.getByLabel('License number').fill('RN-208-44917')
+  await page.getByLabel('License state').fill('Idaho')
+  await page.getByLabel('License expiry').fill('2028-04-30')
   await page.getByLabel('Malpractice insurance provider').fill('NSO')
-  await capture(page, 'step 3 licence', 'An already-expired licence is refused outright rather than stored and flagged. Documents are emailed to Melanite — upload comes later.')
+  await capture(page, 'step 3 license', 'An already-expired license is refused outright rather than stored and flagged. Documents are emailed to Melanite — upload comes later.')
   await page.getByRole('button', { name: /continue to stripe/i }).click()
 
   console.log('  step 4 — Stripe')

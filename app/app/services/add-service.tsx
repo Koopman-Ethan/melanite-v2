@@ -67,7 +67,7 @@ export function AddService({ options }: { options: CatalogOption[] }) {
 
       {selected?.advancedTierRequired && (
         <p className="rounded-field border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-ink-secondary">
-          This treatment requires advanced training beyond a standard RN/NP/PA licence. Melanite
+          This treatment requires advanced training beyond a standard RN/NP/PA license. Melanite
           may ask for certification before enabling it.
         </p>
       )}

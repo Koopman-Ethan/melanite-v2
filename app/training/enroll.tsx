@@ -187,11 +187,11 @@ export function Enroll({ courses }: { courses: CourseView[] }) {
             />
             <Field
               id="licenseNumber"
-              label="Professional licence number"
+              label="Professional license number"
               value={licenseNumber}
               onChange={(e) => setLicenseNumber(e.target.value)}
               required
-              hint="Melanite records who was trained and under what licence."
+              hint="Melanite records who was trained and under what license."
             />
           </section>
 

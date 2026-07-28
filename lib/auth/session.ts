@@ -63,7 +63,7 @@ export interface SessionUser {
    *  it independently of laser access. */
   roomRentalEnabled: boolean
   medicalDirectorStatus: (typeof providers.$inferSelect)['medicalDirectorStatus']
-  /** `YYYY-MM-DD`, or null when the provider has none on file. A lapsed licence blocks
+  /** `YYYY-MM-DD`, or null when the provider has none on file. A lapsed license blocks
    *  booking — v1's LICENSE_EXPIRED gate, which is easy to miss because it lives in the
    *  create endpoint rather than alongside the other two gates. */
   licenseExpiry: string | null

@@ -64,7 +64,7 @@ test.describe('medical director', () => {
     // --- He sees who he covers, and what they perform ---------------------------------------
     await expect(page.getByText(/under your direction/i)).toBeVisible()
     // The clinical scope is the point: a calendar alone does not say what procedures are being
-    // performed under his licence.
+    // performed under his license.
     await expect(page.getByText('Performs').first()).toBeVisible()
 
     // --- And none of the money ---------------------------------------------------------------

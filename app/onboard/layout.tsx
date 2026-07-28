@@ -4,7 +4,7 @@ import { Brand } from '@/components/app-shell/brand'
  *
  *  Two columns on a wide screen, matching v1: the form on the left, and on the right a
  *  persistent progress rail explaining why each step is being asked for. That rail is not
- *  decoration — a new provider handing over a licence number and bank details deserves to see
+ *  decoration — a new provider handing over a license number and bank details deserves to see
  *  what happens to them.
  */
 export default function OnboardLayout({ children }: { children: React.ReactNode }) {
