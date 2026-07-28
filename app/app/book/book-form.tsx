@@ -79,6 +79,7 @@ export function BookForm({
 }) {
   const [state, formAction] = useActionState<BookState, FormData>(createBooking, {})
   const [selectedSlot, setSelectedSlot] = useState<string>('')
+  const [externalMethod, setExternalMethod] = useState<'' | 'groupon' | 'cherry' | 'cash' | 'check' | 'other'>('')
   const [discountType, setDiscountType] = useState<'none' | 'percent' | 'amount'>('none')
   const [discountValue, setDiscountValue] = useState(0)
 
@@ -258,6 +259,59 @@ export function BookForm({
           <p className="text-xs text-danger">
             That discount is more than the price. Book it as comped if it&rsquo;s free.
           </p>
+        )}
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">
+          How is this being paid?
+        </h2>
+
+        <input type="hidden" name="externalMethod" value={externalMethod} />
+
+        <div className="flex flex-wrap gap-1.5">
+          {(
+            [
+              ['', 'Payment link'],
+              ['groupon', 'Groupon'],
+              ['cherry', 'Cherry'],
+              ['cash', 'Cash'],
+              ['check', 'Check'],
+              ['other', 'Other'],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={value || 'link'}
+              type="button"
+              onClick={() => setExternalMethod(value)}
+              aria-pressed={externalMethod === value}
+              className={cn(
+                'rounded-field border px-3 py-2 text-xs transition-colors',
+                externalMethod === value
+                  ? 'border-gold bg-gold/10 text-gold'
+                  : 'border-line text-ink-muted hover:border-line-strong hover:text-ink-secondary',
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {externalMethod === '' ? (
+          <p className="text-xs text-ink-faint">
+            A checkout link is created and emailed to the client.
+          </p>
+        ) : (
+          // Said plainly, because the consequence is invisible otherwise: no link is created,
+          // so nothing is emailed, so nobody can pay twice by accident.
+          <div className="rounded-field border border-line p-3 text-xs leading-relaxed text-ink-secondary">
+            <strong className="text-ink">No payment link.</strong> The client pays outside the
+            app, so nothing is emailed. Make sure the price above is what they are actually
+            paying — Melanite works out its share from that figure
+            {externalMethod === 'groupon' || externalMethod === 'cash' || externalMethod === 'check'
+              ? ', and collects it from you rather than paying you out.'
+              : '.'}
+          </div>
         )}
       </section>
 

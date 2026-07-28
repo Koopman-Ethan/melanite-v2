@@ -37,6 +37,7 @@ const STATUS_LABELS: Record<AppointmentStatus, string> = {
 
 const PAYMENT_LABELS: Record<Appointment['paymentSource'], string> = {
   checkout_link: 'Paid by link',
+  external: 'Paid outside the app',
   package_redemption: 'Package session',
   comped: 'Comped',
 }

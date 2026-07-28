@@ -34,6 +34,8 @@ export interface UnpaidBookingView {
   startTime: string
   price: string
   status: string
+  /** Set when the provider already said how the client paid. */
+  externalMethod: string | null
 }
 
 export interface ProviderView {
@@ -179,6 +181,10 @@ function PaymentTool({ unpaid, sharePct }: { unpaid: UnpaidBookingView[]; shareP
             // Prefill with what was charged, since it is right most of the time. Editable
             // because Groupon and Cherry both remit something other than list price.
             setAmount(b ? Number(b.price).toFixed(2) : '')
+            // And with the method the PROVIDER already stated at booking. Keoni confirms a
+            // figure rather than reconstructing one — which is the entire point of asking the
+            // provider for it in the first place.
+            if (b?.externalMethod) setMethod(b.externalMethod as Method)
             setState(null)
           }}
           className={selectClass}
@@ -188,6 +194,7 @@ function PaymentTool({ unpaid, sharePct }: { unpaid: UnpaidBookingView[]; shareP
             <option key={b.id} value={b.id}>
               {dateTimeLabel(b.startTime)} · {b.clientName} · {b.serviceName} · {usd(b.price)} ·{' '}
               {b.providerName}
+              {b.externalMethod ? ` · provider said ${b.externalMethod}` : ''}
             </option>
           ))}
         </select>

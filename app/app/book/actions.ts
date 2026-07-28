@@ -47,7 +47,23 @@ export async function createBooking(_prev: BookState, formData: FormData): Promi
   const discountTypeRaw = String(formData.get('discountType') ?? 'none')
   const discountValue = Number(formData.get('discountValue') ?? 0)
 
+  // How the client is paying. Empty means the normal route: a checkout link, emailed.
+  //
+  // Anything else means the money arrives outside this app — a Groupon voucher, a Cherry plan,
+  // cash, a card in person — and generating a payment link for it would be worse than useless:
+  // the provider has to remember not to send it, and the client might pay twice.
+  const externalMethodRaw = String(formData.get('externalMethod') ?? '').trim()
+
   if (!clientName) return { error: 'Enter the client’s name.' }
+
+  const EXTERNAL_METHODS = ['groupon', 'cherry', 'cash', 'check', 'other'] as const
+  type ExternalMethod = (typeof EXTERNAL_METHODS)[number]
+
+  if (externalMethodRaw && !EXTERNAL_METHODS.includes(externalMethodRaw as ExternalMethod)) {
+    return { error: 'That is not a payment method we can record.' }
+  }
+  const externalMethod = (externalMethodRaw || null) as ExternalMethod | null
+
   if (!providerServiceId) return { error: 'Choose a service.' }
   if (!startTimeRaw) return { error: 'Choose a time.' }
   if (!['none', 'percent', 'amount'].includes(discountTypeRaw)) {
@@ -136,6 +152,15 @@ export async function createBooking(_prev: BookState, formData: FormData): Promi
 
   const price = (originalCents - discountCents) / 100
 
+  // Checked here rather than with the other validation, because the price is only known once
+  // the service and discount have been resolved.
+  //
+  // For an external payment this figure is the whole point: it is what Keoni invoices a share
+  // of. A Groupon booking recorded at $0 tells her to collect half of nothing.
+  if (externalMethod && !(price > 0)) {
+    return { error: 'Enter what the client is paying — Melanite needs it to work out the split.' }
+  }
+
   const bookingId = crypto.randomUUID()
   const token = randomBytes(24).toString('base64url')
   const expiresAt = new Date(Date.now() + CHECKOUT_LINK_TTL_DAYS * 24 * 60 * 60 * 1000)
@@ -154,7 +179,31 @@ export async function createBooking(_prev: BookState, formData: FormData): Promi
   // wrapped below — a violation there means somebody won the race, not that anything is broken.
   let booked
   try {
-    booked = await db.execute(sql`
+    // Two shapes, one query each. An external payment gets NO checkout link — the CTE that
+    // creates one is simply not there, rather than a link being written and then ignored.
+    // A payment page for money that has already changed hands is how a client pays twice.
+    booked = externalMethod
+      ? await db.execute(sql`
+          INSERT INTO bookings
+            (id, provider_id, provider_service_id, client_name, client_phone, client_email,
+             treatment_area, notes, original_price, discount_type, discount_value, price,
+             payment_source, external_method, duration_mins, start_time, end_time, status)
+          SELECT ${bookingId}::uuid, ${user.id}::uuid, ${providerServiceId}::uuid, ${clientName},
+                 ${clientPhone}, ${clientEmail}, ${treatmentArea}, ${notes},
+                 ${originalPrice.toFixed(2)}::numeric, ${discountType}::discount_type,
+                 ${discountValue.toFixed(2)}::numeric, ${price.toFixed(2)}::numeric,
+                 'external'::booking_payment_source, ${externalMethod}::payment_method,
+                 ${svc.durationMins}, ${startTime.toISOString()}::timestamptz,
+                 ${endTime.toISOString()}::timestamptz, 'upcoming'::booking_status
+          WHERE NOT EXISTS (
+            SELECT 1 FROM bookings b
+            WHERE b.status IN ('upcoming', 'completed')
+              AND b.start_time < ${endTime.toISOString()}::timestamptz
+              AND b.end_time   > ${startTime.toISOString()}::timestamptz
+          )
+          RETURNING id AS booking_id
+        `)
+      : await db.execute(sql`
     WITH new_booking AS (
       INSERT INTO bookings
         (id, provider_id, provider_service_id, client_name, client_phone, client_email,
@@ -199,8 +248,11 @@ export async function createBooking(_prev: BookState, formData: FormData): Promi
   //
   // Best effort by design: a booking that succeeded must not be reported as failed because an
   // email bounced, and the link is displayed on the next screen either way.
+  // No link exists for an external payment, so there is nothing to send. Emailing "here is
+  // your payment link" to somebody who already handed over a Groupon voucher is the fastest
+  // way to be paid twice and have to refund one.
   let emailed = false
-  if (clientEmail) {
+  if (clientEmail && !externalMethod) {
     try {
       const result = await sendEmail({
         to: clientEmail,
@@ -226,5 +278,9 @@ export async function createBooking(_prev: BookState, formData: FormData): Promi
     }
   }
 
-  redirect(`/app/appointments?booked=${bookingId}&emailed=${emailed ? '1' : '0'}`)
+  redirect(
+    externalMethod
+      ? `/app/appointments?booked=${bookingId}&external=${externalMethod}`
+      : `/app/appointments?booked=${bookingId}&emailed=${emailed ? '1' : '0'}`,
+  )
 }

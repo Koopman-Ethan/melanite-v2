@@ -20,6 +20,7 @@ const STATUS_STYLES: Record<string, string> = {
 
 const PAYMENT_LABELS: Record<string, string> = {
   checkout_link: 'Paid by link',
+  external: 'Paid outside the app',
   package_redemption: 'Package session',
   comped: 'Comped',
 }

@@ -31,6 +31,7 @@ export interface UnpaidBooking {
   price: string
   status: string
   paymentSource: string
+  externalMethod: string | null
 }
 
 /** Appointments with no money recorded against them.
@@ -50,6 +51,10 @@ export async function getUnpaidBookings(limit = 50): Promise<UnpaidBooking[]> {
       price: bookings.price,
       status: bookings.status,
       paymentSource: bookings.paymentSource,
+      /** What the provider said the client paid with, when they paid outside the app. Carried
+       *  so the reconciliation form can pre-select it — Keoni confirms a figure rather than
+       *  re-deriving one from memory. */
+      externalMethod: bookings.externalMethod,
     })
     .from(bookings)
     .innerJoin(providers, eq(bookings.providerId, providers.id))
@@ -59,7 +64,11 @@ export async function getUnpaidBookings(limit = 50): Promise<UnpaidBooking[]> {
       and(
         // A package redemption is already paid for — the money settled at purchase — and a
         // comp was never going to be paid. Neither belongs on an "unpaid" list.
-        sql`${bookings.paymentSource} = 'checkout_link'`,
+        //
+        // External payments DO belong on it, and this filter excluded them. Without that, a
+        // provider marking a booking as Groupon put it somewhere Keoni would never look — the
+        // exact hole this whole feature exists to close, reproduced one query later.
+        sql`${bookings.paymentSource} in ('checkout_link', 'external')`,
         sql`${bookings.status} <> 'cancelled'`,
         sql`not exists (
           select 1 from ${ledgerEntries}

@@ -90,6 +90,10 @@ export const bookingPaymentSource = pgEnum('booking_payment_source', [
   'checkout_link',
   'package_redemption',
   'comped',
+  /** Paid outside the app — Groupon, Cherry, cash, a card in person. WHICH of those is on
+   *  `bookings.externalMethod`, because the route and the method are different questions and
+   *  v1 could answer neither: four of its five real appointments have money nobody recorded. */
+  'external',
 ])
 
 export const checkoutLinkStatus = pgEnum('checkout_link_status', [
@@ -517,6 +521,13 @@ export const bookings = pgTable('bookings', {
   discountValue: numeric({ precision: 10, scale: 2 }).notNull().default('0'),
   price: money().notNull(),
   paymentSource: bookingPaymentSource().notNull(),
+  /** Which external route, when `paymentSource` is 'external'.
+   *
+   *  Deliberately the same enum the ledger uses, so "Groupon" means one thing in the app. The
+   *  direction of the money differs by method and that is worth knowing: a Stripe booking pays
+   *  the provider automatically via destination charge, but a Groupon voucher is collected BY
+   *  the provider, so Melanite's share becomes something Keoni has to invoice back. */
+  externalMethod: paymentMethod(),
 
   durationMins: integer().notNull(),
   startTime: timestamp({ withTimezone: true }).notNull(),
