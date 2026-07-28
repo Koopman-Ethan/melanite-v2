@@ -26,7 +26,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "etl:verify:providers": "tsx --tsconfig scripts/tsconfig.json scripts/etl/verify-providers.ts",
-    "db:scrub": "tsx --tsconfig scripts/tsconfig.json scripts/scrub-dev.ts"
+    "db:scrub": "tsx --tsconfig scripts/tsconfig.json scripts/scrub-dev.ts",
+    "etl:manifest": "tsx --tsconfig scripts/tsconfig.json scripts/etl/manifest.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
