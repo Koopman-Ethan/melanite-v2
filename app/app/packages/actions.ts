@@ -291,6 +291,8 @@ export async function bookFromPackage(input: {
     .limit(1)
 
   if (!line) return { error: 'That service is not part of this package.' }
+  // A cheap read for immediate feedback. It is NOT the guard — that happens atomically further
+  // down, once everything else about the request has been validated.
   if (line.qtyUsed >= line.qtyTotal) {
     return { error: 'No sessions left for that service on this package.' }
   }
@@ -345,6 +347,39 @@ export async function bookFromPackage(input: {
       ),
     )
 
+  // The session is claimed HERE: after every validation, immediately before the write.
+  //
+  // Reading qty_used early and acting on it later is the shape of the training seat bug. The
+  // increment used to sit after the booking and was clamped with least(), which kept the
+  // COUNTER inside the total but did nothing about the bookings — two concurrent redemptions
+  // of the last session both passed the check, both got an appointment, and the clamp swallowed
+  // one increment. A free treatment, on a package that still looked like it had one left.
+  //
+  // Claiming this late matters as much as claiming atomically. Every `return { error }` above
+  // is a path where nothing was booked, and a claim taken before them would cost a client a
+  // session for mistyping a time.
+  const claimed = await db
+    .update(clientPackageItems)
+    .set({ qtyUsed: sql`${clientPackageItems.qtyUsed} + 1` })
+    .where(
+      and(
+        eq(clientPackageItems.id, input.itemId),
+        sql`${clientPackageItems.qtyUsed} < ${clientPackageItems.qtyTotal}`,
+      ),
+    )
+    .returning({ qtyUsed: clientPackageItems.qtyUsed })
+
+  if (claimed.length === 0) {
+    return { error: 'No sessions left for that service on this package.' }
+  }
+
+  /** Puts the claimed session back when the booking does not happen after all. */
+  const releaseSession = () =>
+    db
+      .update(clientPackageItems)
+      .set({ qtyUsed: sql`greatest(${clientPackageItems.qtyUsed} - 1, 0)` })
+      .where(eq(clientPackageItems.id, input.itemId))
+
   const bookingId = crypto.randomUUID()
 
   // Collision check fused to the insert, exactly as in a paid booking — the laser does not
@@ -371,6 +406,8 @@ export async function bookFromPackage(input: {
   `)
 
   if ((booked.rows?.length ?? 0) === 0) {
+    // The slot went to someone else, so the session was never actually used.
+    await releaseSession()
     return { error: 'Someone just booked that slot. Pick another time.' }
   }
 
@@ -381,13 +418,6 @@ export async function bookFromPackage(input: {
     overallIndex: (live[0]?.overall ?? 0) + 1,
     serviceIndex: (live[0]?.forService ?? 0) + 1,
   })
-
-  // Guarded in SQL rather than read-modify-write, so two concurrent redemptions cannot both
-  // read the same qty_used and oversell the package.
-  await db
-    .update(clientPackageItems)
-    .set({ qtyUsed: sql`least(${clientPackageItems.qtyUsed} + 1, ${clientPackageItems.qtyTotal})` })
-    .where(eq(clientPackageItems.id, input.itemId))
 
   // Exhausted once every line is used up.
   const remaining = await db

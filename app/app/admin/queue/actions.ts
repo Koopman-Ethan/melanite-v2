@@ -7,6 +7,8 @@ import { requireAdmin } from '@/lib/auth/dal'
 import { db } from '@/lib/db'
 import { bookings, ledgerEntries, roomBookings, trainingEnrollments } from '@/lib/db/schema'
 import { friendlyStripeError, stripePost, stripeWritesEnabled } from '@/lib/stripe/client'
+import { toCents } from '@/lib/money'
+import { planRefund } from '@/lib/refunds'
 import { chargeBookingFee } from '@/lib/stripe/fees'
 
 export interface QueueState {
@@ -167,52 +169,46 @@ export async function refundEnrollment(
       ),
     )
 
-  const purchases = entries.filter((e) => e.entryType === 'purchase' && e.paymentIntentId)
-  if (purchases.length === 0) {
-    return { error: 'No Stripe payment is recorded for this student — refund by hand.' }
-  }
   if (!stripeWritesEnabled()) return { error: 'Payments are not configured in this environment.' }
 
-  const paid = entries.reduce(
-    (sum, e) => sum + (e.entryType === 'refund' ? -Number(e.gross) : Number(e.gross)),
-    0,
+  // A deposit and a balance are two separate charges, so a full refund means reversing both.
+  // The arithmetic lives in lib/refunds.ts, in integer cents, where it can be tested.
+  const plan = planRefund(
+    entries.map((e) => ({
+      paymentIntentId: e.paymentIntentId ?? '',
+      gross: e.gross,
+      entryType: e.entryType,
+    })),
+    amount === null ? null : toCents(amount),
   )
-  let remaining = amount === null ? paid : amount
 
-  if (!(remaining > 0)) return { error: 'Enter an amount greater than zero.' }
-  if (remaining > paid) return { error: `That is more than the ${paid.toFixed(2)} paid.` }
+  if ('error' in plan) return { error: plan.error }
 
-  // A deposit and a balance are two separate charges, so a full refund means refunding both.
-  // Walked newest first purely so a partial refund comes off the most recent payment.
-  for (const purchase of [...purchases].reverse()) {
-    if (remaining <= 0) break
-    const take = Math.min(remaining, Number(purchase.gross))
-    if (take <= 0) continue
-
+  let refundedCents = 0
+  for (const charge of plan.charges) {
     try {
       await stripePost(
         '/refunds',
         {
-          payment_intent: purchase.paymentIntentId!,
-          amount: Math.round(take * 100),
+          payment_intent: charge.paymentIntentId,
+          amount: charge.amountCents,
           metadata: { reason: 'training_course_cancelled' },
         },
-        { idempotencyKey: `training-refund:${purchase.paymentIntentId}:${Math.round(take * 100)}` },
+        { idempotencyKey: `training-refund:${charge.paymentIntentId}:${charge.amountCents}` },
       )
     } catch (err) {
       return {
         error: friendlyStripeError(
           err,
-          `Refunded ${(Number(amount ?? paid) - remaining).toFixed(2)} before failing. Check Stripe.`,
+          `Refunded ${(refundedCents / 100).toFixed(2)} before failing. Check Stripe.`,
         ),
       }
     }
-
-    remaining -= take
+    refundedCents += charge.amountCents
   }
 
   revalidatePath('/app/admin/queue')
-  return { success: `Refunded $${(amount === null ? paid : amount).toFixed(2)}.` }
+  return { success: `Refunded $${(plan.totalCents / 100).toFixed(2)}.` }
 }
 
 /** Moves a student from a cancelled course onto a scheduled one, keeping what they paid. */
