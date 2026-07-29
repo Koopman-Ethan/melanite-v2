@@ -57,4 +57,20 @@ describe('parseEnvFile', () => {
   it('lets a later line win, as a shell would', () => {
     expect(parseEnvFile('A=1\nA=2')).toEqual({ A: '2' })
   })
+
+  it('reads Windows line endings', () => {
+    // The one that actually bit. The parser this replaced ended with `$`, which does not match
+    // a line terminating in `\r` — so the moment .env.local was saved with CRLF, every variable
+    // silently disappeared and 150 tests failed insisting DATABASE_URL was unset. On Windows a
+    // file gets CRLF just by being written by the wrong tool.
+    expect(parseEnvFile('MELANITE_ENV=dev\r\nDATABASE_URL=postgres://x/y\r\n')).toEqual({
+      MELANITE_ENV: 'dev',
+      DATABASE_URL: 'postgres://x/y',
+    })
+  })
+
+  it('reads a file with mixed line endings', () => {
+    // Which is what you get when one tool appends to another tool's file.
+    expect(parseEnvFile('A=1\r\nB=2\nC=3\r\n')).toEqual({ A: '1', B: '2', C: '3' })
+  })
 })
