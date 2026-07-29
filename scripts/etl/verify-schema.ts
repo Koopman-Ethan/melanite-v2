@@ -1,4 +1,4 @@
-import { neon } from '@neondatabase/serverless'
+import { neon, type NeonQueryFunction } from '@neondatabase/serverless'
 
 import '../../envConfig'
 import { describeDatabase, requireEnv } from '../../lib/env-guard'
@@ -24,10 +24,12 @@ interface Check {
   label: string
   /** Why it matters, in the terms of what breaks. Printed on failure. */
   because: string
-  run: (q: ReturnType<typeof neon>) => Promise<boolean>
+  run: (q: Sql) => Promise<boolean>
 }
 
-const rows = async (q: ReturnType<typeof neon>, sql: string) =>
+type Sql = NeonQueryFunction<false, false>
+
+const rows = async (q: Sql, sql: string) =>
   (await q.query(sql)) as Record<string, unknown>[]
 
 const CHECKS: Check[] = [
