@@ -587,6 +587,70 @@ async functions, so the sync helper there was a build error TypeScript could not
 form needs to import the rules anyway. One definition means a client rule the server does not
 enforce, and a server rule the client does not show, are both impossible.
 
+### Client email: what is sent, and where it can go — 2026-07-30
+
+**Receipts are Stripe's, not ours.** `receipt_email` is set on the booking and package intents,
+as training already did. Stripe's receipt carries the card's last four and a permanent hosted
+URL, and a refund later produces a matching refund receipt for free. The pay page had always
+asked for the address under the words "Email for your receipt" and sent none.
+
+Requires **Settings → Business → Customer emails → Successful payments / Refunds** to be on in
+the Stripe dashboard, in each mode separately. `receipt_email` alone does nothing without it.
+Stripe does not send receipts in test mode at all, except to a verified team member.
+
+**Confirmations go out when the money lands**, from the webhook — not when the booking row is
+created. Confirming at creation tells somebody an appointment is theirs before they have paid
+for it. A package redemption gets one too, and needs it most: no payment, no link, no receipt,
+so nothing else in that flow says a word to the client.
+
+**Cancellations are not optional.** Once somebody has been told an appointment exists they act
+on it until told otherwise, so confirming without cancelling is worse than sending neither.
+
+**Outside production, nothing reaches a stranger.** Resend has no test mode — one account, one
+key, every address a real inbox — and appdev runs on a copy of production data. So:
+
+- `MELANITE_ENV=prod` sends to the intended recipient, and ignores `EMAIL_REDIRECT_TO`
+  entirely, so a stale variable cannot divert real client mail to a developer.
+- Anywhere else, everything is redirected to `EMAIL_REDIRECT_TO` with the intended recipient
+  moved into the subject, so a redirected message can never be mistaken for one that arrived.
+- With no redirect configured, nothing is sent. Falling back to the real recipient is how a
+  fresh preview environment mails clients with nothing about the setup looking wrong.
+- Reserved domains (RFC 2606 / 6761) send nothing even with a redirect set. The e2e suite
+  addresses its fixtures at `example.com` precisely because nothing can be delivered there;
+  redirecting them turned a guaranteed no-op into real mail, and one full test run put five
+  messages in a real person's inbox.
+
+### Cherry is package-only — 2026-07-30
+
+Cherry was offered on the booking form and should never have been. It is the one external
+method where the money moves toward Melanite rather than toward the provider: the client
+finances a package, Cherry pays Melanite, and Melanite then owes the provider their half.
+
+Every other external method — Groupon, cash, cheque — is handed to the provider, who owes
+Melanite its share. Marking an appointment as Cherry would have put a provider on the
+collections list for money they never touched.
+
+Removed from the picker and from the form's type. The `payment_method` enum keeps it, because
+packages legitimately use it and imported v1 rows carry it.
+
+The same distinction decides `payout_status` when a payment is recorded by hand, and lives in
+`lib/payments/direction.ts` so both places read it from one list. Recording a Groupon payment as
+`pending` told a provider Melanite owed them money they were already holding, and the figure
+grew with every such appointment.
+
+### Training enrolment lives in the app — 2026-07-30
+
+The marketing site links to `app.melanitesuite.com/training`; the form is not rebuilt in
+Webflow.
+
+Card entry has to happen on a page we control — Stripe Elements on Webflow means embedding an
+iframe from the app or redirecting to Checkout, so the payment leaves Webflow either way. Given
+that, a second form is a second write path to keep in step, and duplicated write paths are the
+v1 pattern that produced three separate ledgers.
+
+Seat counts reinforce it: a number on a marketing page is decoration. What matters is
+`claimSeat`, which takes the seat under a row lock at payment time.
+
 ## Backlog
 
 ### Multi-service bookings
@@ -604,6 +668,79 @@ Scope when unblocked — this is a model change, not a UI change:
   check.
 - Earnings attribution per service has to split across the line items.
 - Package redemption has to decide whether one booking can consume sessions from several lines.
+
+### Training: balance reminders — 2026-07-30
+
+A student who pays a deposit gets an enrolment email with a link to pay the balance, and Keoni
+can resend that link by hand from the course page. Nothing nudges them as day one approaches.
+
+Deliberately deferred, not forgotten: the manual path works, and the automatic one needs
+infrastructure this project does not have yet.
+
+Scope when wanted:
+
+- A scheduled job. There is no cron in the repo at all — no GitHub Actions, no Vercel cron — so
+  this is the first one, and picking where it runs is most of the decision.
+- Idempotency at the reminder, not the run. A job that fires twice must not email twice, which
+  means recording that a reminder was sent rather than inferring it from dates.
+- The same reserved-domain and non-production guards `sendEmail` already applies. A reminder job
+  is exactly the kind of thing that would quietly mail a hundred real people from a test
+  environment.
+
+The same machinery would serve appointment reminders, which nobody has asked for yet.
+
+### Training courses have no name — 2026-07-30
+
+A course is identified by its date. That is enough while Melanite runs one offering, and the
+public page and the marketing site both call it "Laser Certification Training" as a constant.
+
+The moment there is a second course type, `training_courses` needs a name and every screen that
+says "Monday, September 14" needs to say what it is. Cheap now, awkward once there are two.
+
+### Live seat counts on the marketing site — 2026-07-30
+
+The Webflow page links to `app.melanitesuite.com/training`, which shows real seats-left from the
+same counter the claim checks. If Keoni wants the number on the Webflow page too, that is a
+small public read-only endpoint (next date, seats left) which Webflow fetches.
+
+Display only. The authority stays with `claimSeat`, which takes the seat under a row lock at
+payment time — a number on a marketing page can never be the thing that decides.
+
+### What Melanite owes providers — 2026-07-30
+
+Revenue shows what providers owe Melanite from Groupon, cash and cheques. The reverse — what
+Melanite owes a provider from a Cherry-financed package, where Cherry pays Melanite directly —
+has no summary anywhere.
+
+Not built because there is no such data yet: no package has settled through Cherry. Worth
+building when the first one does, and it is the mirror of `getOwedByProvider`.
+
+### Nightly prod → dev copy-down — 2026-07-30
+
+Discussed and deliberately not built before launch. Dev data would come from production, which
+makes appdev genuinely representative.
+
+The job is copy → migrate → scrub → verify, in that order, and the verify step must be able to
+fail the run:
+
+- `scrub-dev.ts` must run every time and be checked with `--check`. appdev is publicly
+  reachable, and a copy-down brings real client names, emails and treatment notes straight back.
+- `dev-connect-accounts.ts` must run too, or every payment path in dev breaks — imported rows
+  carry live Stripe Connect ids a test key cannot see.
+- Dev's schema is usually AHEAD of production, so migrations run after the restore, never
+  before.
+
+Cheapest version is a Neon branch reset, but that needs dev to be a branch of the production
+project rather than its own — a one-time repoint, not a decision that has to be made now.
+
+### `reconcileSeats` has no caller — 2026-07-30
+
+A repair utility for `training_courses.seats_taken`, written and never wired up. The counter is
+maintained by `refreshPaymentStatus`, which recomputes rather than increments, so drift should
+not be possible — but if it ever happens there is no way to run the repair short of a script.
+
+Either give it a home in the admin course page or delete it. A repair function nobody can invoke
+is not a safety net.
 
 ### v1 questions still open, carried forward
 
