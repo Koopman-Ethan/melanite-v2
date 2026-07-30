@@ -408,7 +408,11 @@ export async function inviteProvider(email: string): Promise<ToolState & { url?:
   return {
     success: sent.delivered
       ? `Invite emailed to ${address}. It expires in ${INVITE_TTL_DAYS} days.`
-      : sent.reason === 'not-configured'
+      : // `not-configured` used to mean one thing — no API key. It now also covers "this is not
+        // production and no redirect address is set", which is a different fix, so the detail
+        // is printed whenever there is one. Without it both read "email isn't set up yet",
+        // which sent me looking in the wrong place for twenty minutes.
+        sent.reason === 'not-configured' && !sent.detail
         ? `Invite created for ${address}. Email isn't set up yet, so send this link yourself.`
         : `Invite created, but the email didn't send — ${sent.detail}. Send this link yourself.`,
     url,
