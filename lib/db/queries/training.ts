@@ -243,12 +243,24 @@ export async function refreshPaymentStatus(enrollmentId: string): Promise<void> 
              ELSE 'unpaid'::training_payment_status
            END
       FROM training_courses c,
-           LATERAL (
+           -- Keyed on the parameter, NOT on e.id.
+           --
+           -- This was a LATERAL correlated on e.id, and e is the UPDATE target rather than a
+           -- FROM entry, so Postgres rejected the whole statement with "invalid reference to
+           -- FROM-clause entry for table e" — every single time it ran. Training payment status
+           -- therefore never changed: a student could pay in full and still read as unpaid,
+           -- and Keoni's balances screen showed everyone owing everything.
+           --
+           -- It threw from inside the webhook, after the ledger row was already written, so the
+           -- money was always recorded correctly and Stripe simply retried a handler that could
+           -- not succeed. Nothing was lost, and nothing was right either.
+           (
              SELECT coalesce(sum(
                CASE WHEN l.entry_type = 'refund' THEN -l.gross_amount ELSE l.gross_amount END
              ), 0) AS total
              FROM ledger_entries l
-             WHERE l.subject_type = 'training_enrollment' AND l.subject_id = e.id
+             WHERE l.subject_type = 'training_enrollment'
+               AND l.subject_id = ${enrollmentId}
            ) paid
      WHERE e.id = ${enrollmentId}
        AND c.id = e.training_course_id

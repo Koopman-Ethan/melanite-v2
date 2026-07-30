@@ -22,13 +22,18 @@ import {
   services,
 } from '@/lib/db/schema'
 
-import { refreshPaymentStatus } from '@/lib/db/queries/training'
+import { getEnrollmentDetail, refreshPaymentStatus } from '@/lib/db/queries/training'
 
-import { appointmentWhen, bookingConfirmedEmail, sendEmail } from '@/lib/email'
+import {
+  appointmentWhen,
+  bookingConfirmedEmail,
+  sendEmail,
+  trainingEnrolledEmail,
+} from '@/lib/email'
 
 import { splitClientPayment, toCents, toMoney } from '@/lib/money'
 
-import { planFromMetadata } from './config'
+import { appOrigin, planFromMetadata } from './config'
 import { stripeGet } from './client'
 import type {
   StripeAccountObject,
@@ -500,7 +505,50 @@ async function trainingPaid(
   // Derived from the ledger, the two cannot disagree.
   await refreshPaymentStatus(enrollmentId)
 
+  // AFTER the status is recomputed, so the balance quoted is the balance that exists. Sending
+  // before this would tell somebody who just paid in full that they still owe the balance.
+  await confirmEnrolment(enrollmentId, kind)
+
   return { handled: true, detail: `${kind} recorded` }
+}
+
+/** Tells a student their seat is confirmed, and what is left to pay.
+ *
+ *  `trainingEnrolledEmail` was written and called from nowhere, so a student who reserved a
+ *  seat and paid a deposit heard nothing at all — while the public page promised "we'll email
+ *  you a secure payment link". The link exists, the template exists; only the sending was
+ *  missing.
+ *
+ *  Sent on the deposit only. A balance payment is the END of the conversation, and Stripe's own
+ *  receipt already covers it — a second "you're enrolled" at that point reads as a duplicate of
+ *  something they got weeks ago.
+ *
+ *  Never throws: the seat is claimed and the money is banked either way, and a webhook that
+ *  reported failure over an email would be replayed and double-count.
+ */
+async function confirmEnrolment(
+  enrollmentId: string,
+  kind: 'training_deposit' | 'training_balance',
+): Promise<void> {
+  if (kind !== 'training_deposit') return
+
+  try {
+    const detail = await getEnrollmentDetail(enrollmentId)
+    if (!detail?.email) return
+
+    await sendEmail({
+      to: detail.email,
+      ...trainingEnrolledEmail({
+        firstName: detail.firstName,
+        courseDate: detail.day1Date,
+        deposit: `$${detail.paid}`,
+        balance: `$${detail.owed}`,
+        url: `${await appOrigin()}/pay/training/${enrollmentId}`,
+      }),
+    })
+  } catch (err) {
+    console.error('[email] enrolment confirmation failed for', enrollmentId, err)
+  }
 }
 
 // ---------------------------------------------------------------------------

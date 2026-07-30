@@ -84,3 +84,48 @@ describe('everywhere else', () => {
     }
   })
 })
+
+describe('addresses that can never receive mail', () => {
+  // The e2e suite books, cancels, invites and enrols on every run, all addressed to reserved
+  // domains because nothing can be delivered there. Resend rejects them, so before the redirect
+  // existed the suite sent nothing at all.
+  //
+  // Redirecting them undid that: a full run put five real messages in a real inbox. The guard
+  // was supposed to stop test runs reaching people, and it caused it.
+  it('sends nothing to the reserved domains, rather than redirecting them', () => {
+    process.env.MELANITE_ENV = 'dev'
+    process.env.EMAIL_REDIRECT_TO = 'me@mine.com'
+
+    for (const address of [
+      'zz.e2e@example.com',
+      'zz.onboard.admin.1785445076619@example.com',
+      'someone@example.org',
+      'someone@example.net',
+      'user@my.test',
+      'user@thing.invalid',
+      'user@localhost',
+    ]) {
+      const route = resolveRecipient(address)
+      expect(route.to, `${address} must not be redirected to a real inbox`).toBeNull()
+      expect(route.note).toMatch(/reserved/)
+    }
+  })
+
+  it('still redirects addresses that could be real', () => {
+    // The distinction that matters: a plausible address is exactly what we DO want to catch,
+    // because that is the one that would otherwise reach a stranger.
+    process.env.MELANITE_ENV = 'dev'
+    process.env.EMAIL_REDIRECT_TO = 'me@mine.com'
+    expect(resolveRecipient('a.real.client@gmail.com').to).toBe('me@mine.com')
+    // Not fooled by a lookalike: the reserved name has to be the registrable domain.
+    expect(resolveRecipient('someone@notexample.com').to).toBe('me@mine.com')
+    expect(resolveRecipient('someone@example.com.co').to).toBe('me@mine.com')
+  })
+
+  it('does not silently drop them in production', () => {
+    // A reserved address in production is a data problem. Better to watch Resend reject it than
+    // to swallow it here and wonder why a client never heard anything.
+    process.env.MELANITE_ENV = 'prod'
+    expect(resolveRecipient('someone@example.com').to).toBe('someone@example.com')
+  })
+})

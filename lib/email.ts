@@ -55,6 +55,15 @@ function friendlyReason(status: number, body: string): string {
  * Returns null when there is nowhere safe to send, and the caller does not send at all. Refusing
  * is the right default: the failure mode of guessing wrong is mailing a stranger.
  */
+/** Domains reserved by IANA for documentation and testing. No mailbox behind any of them,
+ *  ever, by standard — RFC 2606 and RFC 6761.
+ *
+ *  The e2e suite addresses its fixtures here precisely because they cannot reach anybody, and
+ *  Resend rejects them outright. Redirecting one to a real inbox turns a guaranteed no-op into
+ *  real mail: a full test run put five messages in a real person's inbox, which is worse than
+ *  the behaviour the redirect was added to prevent. */
+const NOWHERE = /@(?:[^@]*\.)?(?:example\.(?:com|org|net)|test|invalid|localhost)$/i
+
 export function resolveRecipient(intended: string): {
   to: string | null
   subject(original: string): string
@@ -63,6 +72,16 @@ export function resolveRecipient(intended: string): {
   const env = process.env.MELANITE_ENV?.trim().toLowerCase()
 
   if (env === 'prod') return { to: intended, subject: (s) => s }
+
+  // Checked before the redirect, and deliberately not in production — a reserved address in a
+  // production database is a data problem worth seeing Resend reject, not something to swallow.
+  if (NOWHERE.test(intended.trim())) {
+    return {
+      to: null,
+      subject: (s) => s,
+      note: `${intended} is a reserved address that can never receive mail — nothing sent`,
+    }
+  }
 
   const redirect = process.env.EMAIL_REDIRECT_TO?.trim()
   if (!redirect) {

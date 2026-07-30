@@ -210,9 +210,14 @@ export function Enroll({ courses }: { courses: CourseView[] }) {
                       : 'border-line text-ink-muted hover:border-line-strong',
                   )}
                 >
+                  {/* No `opacity-*` on this text. It is 12px, sits on a gold tint, and dimming
+                      it put contrast under AA — the exact dark-theme failure the ink ramp was
+                      raised to fix, reintroduced by an opacity modifier. Nothing caught it for
+                      weeks because the accessibility spec scans this page, and with no course
+                      scheduled there was no form on it to scan. */}
                   <span className="block font-medium">Deposit now</span>
                   <span className="block tabular-nums">{usd(course.depositAmount)}</span>
-                  <span className="block opacity-80">{usd(balance)} due before the course</span>
+                  <span className="block">{usd(balance)} due before the course</span>
                 </button>
                 <button
                   type="button"
@@ -227,7 +232,7 @@ export function Enroll({ courses }: { courses: CourseView[] }) {
                 >
                   <span className="block font-medium">Pay in full</span>
                   <span className="block tabular-nums">{usd(course.totalPrice)}</span>
-                  <span className="block opacity-80">nothing left to pay</span>
+                  <span className="block">nothing left to pay</span>
                 </button>
               </div>
             </section>
