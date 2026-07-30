@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { PROVIDER_ALREADY_HOLDS } from '@/lib/payments/direction'
 import { getOwedByProvider } from '@/lib/db/queries/revenue'
 
 // What providers are holding on Melanite's behalf.
@@ -119,5 +120,32 @@ describe('what a provider owes Melanite', () => {
     made.push(rows[0].id)
 
     expect(await owedNow()).toBeCloseTo(before, 2)
+  })
+})
+
+describe('after Keoni records it, is the provider still owed anything?', () => {
+  // The question `payout_status` answers, and it depends entirely on who took the money.
+  //
+  // Every method here was handed to the PROVIDER by the client. They kept the whole amount and
+  // passed Melanite its half, so nothing further will ever be sent to them. Recording it as
+  // pending told a provider Melanite owed them money they were holding themselves — and the
+  // figure grew with every Groupon appointment they took.
+  const SETTLED_ON_THE_SPOT = ['groupon', 'cash', 'check', 'other']
+  const OWED_UNTIL_SENT = ['cherry', 'stripe']
+
+  it('marks provider-collected methods as already paid', () => {
+    for (const method of SETTLED_ON_THE_SPOT) {
+      expect(PROVIDER_ALREADY_HOLDS.has(method), `${method} reaches the provider directly`).toBe(
+        true,
+      )
+    }
+  })
+
+  it('leaves Melanite-collected methods outstanding', () => {
+    // Cherry pays Melanite and Stripe holds the funds, so in both cases the provider's share is
+    // genuinely still travelling and belongs in "awaiting payout".
+    for (const method of OWED_UNTIL_SENT) {
+      expect(PROVIDER_ALREADY_HOLDS.has(method), `${method} reaches Melanite first`).toBe(false)
+    }
   })
 })

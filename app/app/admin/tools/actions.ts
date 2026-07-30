@@ -10,6 +10,7 @@ import { db } from '@/lib/db'
 import { bookingHasPayment, getProviderSharePct } from '@/lib/db/queries/admin-tools'
 import { INVITE_TTL_DAYS, providerExists } from '@/lib/db/queries/invites'
 import { splitClientPayment, toCents, toMoney } from '@/lib/money'
+import { PROVIDER_ALREADY_HOLDS } from '@/lib/payments/direction'
 import { denverInstant, getLaserHours } from '@/lib/db/queries/availability'
 import {
   bookings,
@@ -117,9 +118,17 @@ export async function recordBookingPayment(input: {
     melaniteCut: toMoney(cutCents),
     paymentMethod: input.method,
     externalReference: input.externalReference?.trim() || null,
-    // Stripe Connect cannot pay out money it never received, so a manual payment implies a
-    // manual settlement. Left pending so it shows up in what the provider is owed.
-    payoutStatus: 'pending',
+    // Whether anything is still owed to the provider depends on WHO took the money.
+    //
+    // A Groupon voucher, cash or a cheque is handed to the provider. They kept the whole
+    // amount and handed Melanite its half — so their share is not awaiting a payout, it is
+    // already in their pocket, and no payout will ever be sent. Marking it pending told a
+    // provider Melanite owed them $100 they were holding themselves, and that figure would
+    // have grown with every Groupon appointment they ever took.
+    //
+    // Cherry and Stripe are the other direction: Melanite (or Stripe) received the money, so
+    // the provider's share genuinely is outstanding until it is settled.
+    payoutStatus: PROVIDER_ALREADY_HOLDS.has(input.method) ? 'paid' : 'pending',
     payoutMethod: 'other',
     note: input.note?.trim() || null,
     recordedBy: admin.id,
