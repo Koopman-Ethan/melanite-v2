@@ -1,9 +1,17 @@
 import 'server-only'
 
-import { desc, eq, sql } from 'drizzle-orm'
+import { and, desc, eq, sql } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
-import { ledgerEntries, ledgerSource, paymentMethod, providers, services } from '@/lib/db/schema'
+import {
+  bookings,
+  ledgerEntries,
+  ledgerSource,
+  paymentMethod,
+  platformSettings,
+  providers,
+  services,
+} from '@/lib/db/schema'
 
 // The whole point of the unified ledger.
 //
@@ -166,6 +174,76 @@ export async function getRevenueByProvider(): Promise<ProviderRevenue[]> {
     .orderBy(desc(sql`sum(${ledgerEntries.melaniteCut})`))
 }
 
+export interface OwedByProvider {
+  providerId: string
+  providerName: string
+  appointments: number
+  /** What the clients handed over, in total. */
+  collected: string
+  /** Melanite's half of it — the figure to invoice. */
+  owed: string
+  /** Oldest outstanding appointment, in days. Age is what makes one of these worth chasing. */
+  oldestDays: number
+}
+
+/**
+ * Money providers are holding on Melanite's behalf.
+ *
+ * A Groupon voucher, cash or a cheque is handed to the PROVIDER. They keep the whole amount at
+ * the moment of the appointment, so Melanite's half is not a payout waiting to be sent — it is
+ * a debt waiting to be collected, and it exists the instant the appointment is booked.
+ *
+ * Every other route settles itself: a card payment splits at Stripe, a package settles at
+ * purchase, a room rental and a membership are charged to the provider directly. This is the
+ * only direction of money in the whole system that nothing automatic will ever resolve, which
+ * is why it needs somewhere to be seen rather than being derivable in principle.
+ *
+ * An appointment leaves this list the moment a ledger entry is written against it — recording
+ * the payment IS the act of saying "collected". Cancelled appointments are excluded: nobody
+ * owes anything for a treatment that did not happen.
+ *
+ * Cherry is deliberately absent. It is package financing, it pays Melanite directly, and the
+ * debt runs the other way — a provider on this list for Cherry money would be asked for
+ * something they never held.
+ */
+export async function getOwedByProvider(): Promise<OwedByProvider[]> {
+  const rows = await db
+    .select({
+      providerId: bookings.providerId,
+      providerName: sql<string>`${providers.firstName} || ' ' || ${providers.lastName}`,
+      appointments: sql<number>`count(*)::int`,
+      collected: sql<string>`coalesce(sum(${bookings.price}), 0)`,
+      owed: sql<string>`coalesce(sum(${bookings.price}) * ${platformSettings.providerSharePct}, 0)`,
+      oldestDays: sql<number>`coalesce(floor(extract(epoch from now() - min(${bookings.startTime})) / 86400), 0)::int`,
+    })
+    .from(bookings)
+    .innerJoin(providers, eq(bookings.providerId, providers.id))
+    // The share is configuration, not a constant. Cross-joined to the singleton settings row so
+    // one number governs this and the ledger alike.
+    .innerJoin(platformSettings, eq(platformSettings.id, 1))
+    .where(
+      and(
+        eq(bookings.paymentSource, 'external'),
+        sql`${bookings.externalMethod} <> 'cherry'`,
+        sql`${bookings.status} <> 'cancelled'`,
+        sql`not exists (
+          select 1 from ${ledgerEntries}
+          where ${ledgerEntries}.subject_type = 'booking'
+            and ${ledgerEntries}.subject_id = ${bookings}.id
+        )`,
+      ),
+    )
+    .groupBy(
+      bookings.providerId,
+      providers.firstName,
+      providers.lastName,
+      platformSettings.providerSharePct,
+    )
+    .orderBy(desc(sql`sum(${bookings.price})`))
+
+  return rows
+}
+
 export interface ServiceRevenue {
   serviceId: string | null
   serviceName: string
@@ -226,15 +304,17 @@ export async function getRecentEntries(limit = 15): Promise<RecentEntry[]> {
 
 /** Everything the admin revenue page needs, in parallel. */
 export async function getAdminRevenue() {
-  const [totals, bySource, byMethod, byProvider, byService, series, recent] = await Promise.all([
-    getRevenueTotals(),
-    getRevenueBySource(),
-    getRevenueByMethod(),
-    getRevenueByProvider(),
-    getRevenueByService(),
-    getMonthlySeries(),
-    getRecentEntries(),
-  ])
+  const [totals, bySource, byMethod, byProvider, byService, series, recent, owed] =
+    await Promise.all([
+      getRevenueTotals(),
+      getRevenueBySource(),
+      getRevenueByMethod(),
+      getRevenueByProvider(),
+      getRevenueByService(),
+      getMonthlySeries(),
+      getRecentEntries(),
+      getOwedByProvider(),
+    ])
 
-  return { totals, bySource, byMethod, byProvider, byService, series, recent }
+  return { totals, bySource, byMethod, byProvider, byService, series, recent, owed }
 }

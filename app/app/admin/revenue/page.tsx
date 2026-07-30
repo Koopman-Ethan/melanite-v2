@@ -60,7 +60,7 @@ const METHOD_LABELS: Record<string, string> = {
 export default async function AdminRevenuePage() {
   // Authorization happens here, not in proxy.ts — the DAL is the boundary.
   await requireAdmin()
-  const { totals, bySource, byMethod, byProvider, byService, series, recent } =
+  const { totals, bySource, byMethod, byProvider, byService, series, recent, owed } =
     await getAdminRevenue()
 
   const lifetime = Number(totals.lifetimeRevenue)
@@ -79,6 +79,52 @@ export default async function AdminRevenuePage() {
         <Stat label="Gross collected" value={usd(totals.lifetimeGross)} hint="before the provider split" />
         <Stat label="Paid to providers" value={usd(totals.lifetimePayouts)} />
       </section>
+
+      {/* Placed above every other breakdown on purpose. Everything below is a record of money
+          that has already settled; this is the only figure on the page that somebody still has
+          to go and do something about. */}
+      {owed.length > 0 && (
+        <section className="space-y-3">
+          <div>
+            <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">
+              To collect from providers
+            </h2>
+            <p className="mt-1 text-xs text-ink-faint">
+              Groupon, cash and cheques go straight to the provider, so Melanite&rsquo;s half has
+              to be invoiced. Recording the payment under Tools clears it from here.
+            </p>
+          </div>
+
+          <div className="rounded-card border border-warning/40 bg-warning/5 divide-y divide-line">
+            {owed.map((row) => (
+              <div key={row.providerId} className="flex flex-wrap items-center gap-4 p-4">
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium">{row.providerName}</div>
+                  <div className="mt-0.5 text-xs text-ink-faint">
+                    {row.appointments}{' '}
+                    {row.appointments === 1 ? 'appointment' : 'appointments'} ·{' '}
+                    {usd(row.collected)} collected from clients
+                    {row.oldestDays > 0 && ` · oldest ${row.oldestDays}d ago`}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-lg font-semibold tabular-nums text-warning">
+                    {usd(row.owed)}
+                  </div>
+                  <div className="text-xs text-ink-faint">to invoice</div>
+                </div>
+              </div>
+            ))}
+
+            <div className="flex items-center justify-between p-4">
+              <span className="text-sm text-ink-muted">Total outstanding</span>
+              <span className="text-lg font-semibold tabular-nums">
+                {usd(owed.reduce((sum, r) => sum + Number(r.owed), 0))}
+              </span>
+            </div>
+          </div>
+        </section>
+      )}
 
       <section className="space-y-3">
         <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">By source</h2>

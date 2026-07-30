@@ -79,7 +79,7 @@ export function BookForm({
 }) {
   const [state, formAction] = useActionState<BookState, FormData>(createBooking, {})
   const [selectedSlot, setSelectedSlot] = useState<string>('')
-  const [externalMethod, setExternalMethod] = useState<'' | 'groupon' | 'cherry' | 'cash' | 'check' | 'other'>('')
+  const [externalMethod, setExternalMethod] = useState<'' | 'groupon' | 'cash' | 'check' | 'other'>('')
   const [discountType, setDiscountType] = useState<'none' | 'percent' | 'amount'>('none')
   const [discountValue, setDiscountValue] = useState(0)
 
@@ -274,7 +274,11 @@ export function BookForm({
             [
               ['', 'Payment link'],
               ['groupon', 'Groupon'],
-              ['cherry', 'Cherry'],
+              // No Cherry. Cherry is patient financing for a PACKAGE — the client applies,
+              // Cherry pays Melanite directly, and Melanite owes the provider their half. It
+              // is the only external method where the money moves toward Melanite rather than
+              // toward the provider, so recording it against a single appointment would put a
+              // provider on the collections list for money they never touched.
               ['cash', 'Cash'],
               ['check', 'Check'],
               ['other', 'Other'],
@@ -308,9 +312,8 @@ export function BookForm({
             <strong className="text-ink">No payment link.</strong> The client pays outside the
             app, so nothing is emailed. Make sure the price above is what they are actually
             paying — Melanite works out its share from that figure
-            {externalMethod === 'groupon' || externalMethod === 'cash' || externalMethod === 'check'
-              ? ', and collects it from you rather than paying you out.'
-              : '.'}
+            , and collects it from you rather than paying you out — every method here is one
+            the client hands to you, not to Melanite.
           </div>
         )}
       </section>
