@@ -24,7 +24,12 @@ import {
   providerServices,
   services,
 } from '@/lib/db/schema'
-import { packageLinkEmail, sendEmail } from '@/lib/email'
+import {
+  appointmentWhen,
+  bookingConfirmedEmail,
+  packageLinkEmail,
+  sendEmail,
+} from '@/lib/email'
 import { appOrigin } from '@/lib/stripe/config'
 
 /** Package links live longer than booking links: a four-figure package is a decision, not a
@@ -451,6 +456,38 @@ export async function bookFromPackage(input: {
       .update(clientPackages)
       .set({ status: 'exhausted' })
       .where(eq(clientPackages.id, input.clientPackageId))
+  }
+
+  // Nothing else in this flow says a word to the client. A paid booking at least sends them a
+  // payment link they can look at; a redemption has no payment, no link and no receipt, so
+  // without this they are told about their appointment by the provider or not at all.
+  //
+  // Best effort, after the session is claimed and the booking exists: a bounced email must not
+  // undo a booking that has already happened.
+  if (pkg.clientEmail) {
+    try {
+      const [svcName] = await db
+        .select({ name: services.name })
+        .from(providerServices)
+        .innerJoin(services, eq(providerServices.serviceId, services.id))
+        .where(eq(providerServices.id, input.providerServiceId))
+        .limit(1)
+
+      await sendEmail({
+        to: pkg.clientEmail,
+        ...bookingConfirmedEmail({
+          clientName: pkg.clientName ?? 'there',
+          providerName: `${user.firstName} ${user.lastName}`,
+          serviceName: svcName?.name ?? 'Your appointment',
+          when: appointmentWhen(startTime),
+          // Null, not "$0.00": nothing was charged today, and a receipt-shaped zero invites
+          // the question of what happened to their money.
+          amount: null,
+        }),
+      })
+    } catch (err) {
+      console.error('[email] redemption confirmation failed', err)
+    }
   }
 
   revalidatePath('/app/packages')

@@ -120,6 +120,11 @@ export async function createBookingIntent(input: {
       currency: 'usd',
       customer: customerId,
       payment_method_types: PAYMENT_METHODS,
+      // The page asks for this address under the words "Email for your receipt", and until now
+      // nothing sent one. Stripe's own receipt is better than anything written here: it carries
+      // the card's last four and a permanent hosted URL, and a refund later produces a matching
+      // refund receipt with no work at all. Training already did this; bookings never did.
+      receipt_email: input.clientEmail,
       transfer_data: { destination: provider.stripeAccountId },
       application_fee_amount: feeCents,
       // Saving the card is what makes a no-show fee collectable at all. It is the client's
@@ -225,6 +230,7 @@ export async function createPackageIntent(input: {
       currency: 'usd',
       customer: customerId,
       payment_method_types: PAYMENT_METHODS,
+      receipt_email: email,
       transfer_data: { destination: provider.stripeAccountId },
       application_fee_amount: feeCents,
       ...(input.saveCard ? { setup_future_usage: 'off_session' } : {}),

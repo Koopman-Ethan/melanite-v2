@@ -39,9 +39,66 @@ function friendlyReason(status: number, body: string): string {
   return `the email service returned ${status}`
 }
 
+/**
+ * Where this message may actually be sent.
+ *
+ * Resend has no test mode. One account, one set of credentials, and an address in a dev
+ * database is a real inbox — appdev is a full copy of production data, so "send the client a
+ * booking confirmation" from a test run means emailing an actual client of Melanite's about an
+ * appointment that does not exist.
+ *
+ * So outside production, every message is redirected to a single address and the real recipient
+ * is moved into the subject, where it is still testable but harmless. The scrubber rewrites
+ * client addresses to example.com, which Resend rejects outright — that protected us by
+ * accident, and only for rows the scrubber reaches.
+ *
+ * Returns null when there is nowhere safe to send, and the caller does not send at all. Refusing
+ * is the right default: the failure mode of guessing wrong is mailing a stranger.
+ */
+export function resolveRecipient(intended: string): {
+  to: string | null
+  subject(original: string): string
+  note?: string
+} {
+  const env = process.env.MELANITE_ENV?.trim().toLowerCase()
+
+  if (env === 'prod') return { to: intended, subject: (s) => s }
+
+  const redirect = process.env.EMAIL_REDIRECT_TO?.trim()
+  if (!redirect) {
+    return {
+      to: null,
+      subject: (s) => s,
+      note:
+        'MELANITE_ENV is not prod and EMAIL_REDIRECT_TO is not set, so there is nowhere safe ' +
+        'to send. Set EMAIL_REDIRECT_TO to your own address.',
+    }
+  }
+
+  // The intended recipient in the subject, so a redirected message is never mistaken for one
+  // that reached the person named inside it.
+  return { to: redirect, subject: (s) => `[to: ${intended}] ${s}` }
+}
+
 export async function sendEmail(message: EmailMessage): Promise<SendResult> {
   const apiKey = process.env.RESEND_API_KEY
   const from = process.env.RESEND_FROM ?? 'Melanite Laser Suite <noreply@melanitesuite.com>'
+
+  const route = resolveRecipient(message.to)
+  if (route.to === null) {
+    console.warn(
+      `\n[email] NOT SENT — ${route.note}\n` +
+        `  intended: ${message.to}\n` +
+        `  subject:  ${message.subject}\n`,
+    )
+    return { delivered: false, reason: 'not-configured', detail: route.note }
+  }
+
+  if (route.to !== message.to) {
+    console.log(`[email] ${message.to} -> ${route.to} (non-production redirect)`)
+  }
+
+  message = { ...message, to: route.to, subject: route.subject(message.subject) }
 
   if (!apiKey) {
     console.warn(
@@ -145,6 +202,21 @@ function wrap(heading: string, body: string, cta?: { label: string; url: string 
 
 const p = (text: string) => `<p style="margin:0 0 16px;line-height:1.6">${text}</p>`
 
+/** How an appointment is named to a client: weekday, date, and the time they must arrive.
+ *
+ *  Always Denver, never the server's zone. A confirmation is the one message where an hour's
+ *  drift is the difference between arriving and missing it. */
+export function appointmentWhen(startTime: Date): string {
+  return startTime.toLocaleString('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone: 'America/Denver',
+  })
+}
+
 export function bookingPaymentLinkEmail(input: {
   clientName: string
   providerName: string
@@ -175,6 +247,98 @@ export function bookingPaymentLinkEmail(input: {
         p(`Amount due: <strong>${input.amount}</strong>`) +
         p('You can add a tip at checkout.'),
       { label: `Pay ${input.amount}`, url: input.url },
+    ),
+  }
+}
+
+/** The appointment is on. Sent when the money lands, or when a prepaid session is booked.
+ *
+ *  Deliberately NOT sent when the booking row is created: at that point nothing has been paid,
+ *  and telling somebody their appointment is confirmed before they have paid for it invites
+ *  them to turn up for one that was never held.
+ *
+ *  A package redemption has no payment at all, so this is the only thing that ever tells that
+ *  client anything. */
+export function bookingConfirmedEmail(input: {
+  clientName: string
+  providerName: string
+  serviceName: string
+  when: string
+  /** Null for a package redemption — nothing was charged today. */
+  amount: string | null
+}): Omit<EmailMessage, 'to'> {
+  const first = input.clientName.split(' ')[0]
+  const paid = input.amount
+    ? `Paid: ${input.amount}. Stripe has emailed your receipt separately.`
+    : 'This session came from a package you have already paid for.'
+
+  return {
+    subject: `Confirmed: ${input.serviceName} on ${input.when}`,
+    text: [
+      `Hi ${first},`,
+      '',
+      'Your appointment is confirmed.',
+      '',
+      `${input.serviceName} with ${input.providerName}`,
+      input.when,
+      '',
+      paid,
+      '',
+      'Need to change or cancel? Contact your provider directly — please give as much notice',
+      'as you can, as a late cancellation may be charged.',
+    ].join('\n'),
+    html: wrap(
+      'Your appointment is confirmed',
+      p(`Hi ${first},`) +
+        p(`<strong>${input.serviceName}</strong> with ${input.providerName}<br>${input.when}`) +
+        p(paid) +
+        p(
+          'Need to change or cancel? Contact your provider directly — please give as much ' +
+            'notice as you can, as a late cancellation may be charged.',
+        ),
+    ),
+  }
+}
+
+/** The appointment is off.
+ *
+ *  The counterpart to the confirmation, and arguably the more important of the two: once a
+ *  client has been told an appointment exists, they will act on that until told otherwise.
+ *  Confirming without cancelling is worse than sending neither, because it earns trust in a
+ *  channel that then goes quiet at the one moment it matters. */
+export function bookingCancelledEmail(input: {
+  clientName: string
+  providerName: string
+  serviceName: string
+  when: string
+  /** True when the session went back onto a package, so they know they have not lost it. */
+  sessionReturned: boolean
+}): Omit<EmailMessage, 'to'> {
+  const first = input.clientName.split(' ')[0]
+  const reassurance = input.sessionReturned
+    ? 'The session has been returned to your package — nothing has been lost, and you can book it again whenever suits.'
+    : 'If you have already paid, any refund will come back to your original payment method.'
+
+  return {
+    subject: `Cancelled: ${input.serviceName} on ${input.when}`,
+    text: [
+      `Hi ${first},`,
+      '',
+      'Your appointment has been cancelled.',
+      '',
+      `${input.serviceName} with ${input.providerName}`,
+      input.when,
+      '',
+      reassurance,
+      '',
+      'To rebook, contact your provider directly.',
+    ].join('\n'),
+    html: wrap(
+      'Your appointment has been cancelled',
+      p(`Hi ${first},`) +
+        p(`<strong>${input.serviceName}</strong> with ${input.providerName}<br>${input.when}`) +
+        p(reassurance) +
+        p('To rebook, contact your provider directly.'),
     ),
   }
 }

@@ -19,9 +19,12 @@ import {
   providerServices,
   providers,
   roomBookings,
+  services,
 } from '@/lib/db/schema'
 
 import { refreshPaymentStatus } from '@/lib/db/queries/training'
+
+import { appointmentWhen, bookingConfirmedEmail, sendEmail } from '@/lib/email'
 
 import { splitClientPayment, toCents, toMoney } from '@/lib/money'
 
@@ -232,7 +235,50 @@ async function bookingPaid(pi: StripePaymentIntentObject): Promise<HandlerResult
       .where(eq(checkoutLinks.id, link.id))
   }
 
+  // The appointment is confirmed HERE, not when the booking row was created — at that point
+  // nothing had been paid. Sent after the ledger entry, and deliberately not awaited into the
+  // handler's result: the money is recorded either way, and a webhook that reports failure
+  // because an email bounced would be replayed and double-count.
+  await confirmBooking(bookingId)
+
   return { handled: true, detail: `booking ${bookingId} paid` }
+}
+
+/** Tells the client their appointment is on. Never throws — see the call site. */
+async function confirmBooking(bookingId: string): Promise<void> {
+  try {
+    const [row] = await db
+      .select({
+        clientName: bookings.clientName,
+        clientEmail: bookings.clientEmail,
+        startTime: bookings.startTime,
+        price: bookings.price,
+        serviceName: services.name,
+        providerFirst: providers.firstName,
+        providerLast: providers.lastName,
+      })
+      .from(bookings)
+      .innerJoin(providerServices, eq(bookings.providerServiceId, providerServices.id))
+      .innerJoin(services, eq(providerServices.serviceId, services.id))
+      .innerJoin(providers, eq(bookings.providerId, providers.id))
+      .where(eq(bookings.id, bookingId))
+      .limit(1)
+
+    if (!row?.clientEmail) return
+
+    await sendEmail({
+      to: row.clientEmail,
+      ...bookingConfirmedEmail({
+        clientName: row.clientName,
+        providerName: `${row.providerFirst} ${row.providerLast}`,
+        serviceName: row.serviceName,
+        when: appointmentWhen(row.startTime),
+        amount: `$${Number(row.price).toFixed(2)}`,
+      }),
+    })
+  } catch (err) {
+    console.error('[email] booking confirmation failed', err)
+  }
 }
 
 async function serviceIdFor(providerServiceId: string): Promise<string | null> {

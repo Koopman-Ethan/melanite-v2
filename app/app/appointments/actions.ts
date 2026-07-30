@@ -12,7 +12,11 @@ import {
   clientPackageItems,
   clientPackages,
   packageRedemptions,
+  providerServices,
+  providers,
+  services,
 } from '@/lib/db/schema'
+import { appointmentWhen, bookingCancelledEmail, sendEmail } from '@/lib/email'
 import { chargeBookingFee } from '@/lib/stripe/fees'
 
 // Ported from v1's three booking-action endpoints. The preconditions are theirs, deliberately
@@ -77,6 +81,10 @@ export async function cancelBooking(
 
   revalidatePath('/app/appointments')
 
+  // Before the fee branch, so the ordinary no-fee cancellation notifies too — that is the
+  // common case and the one most likely to be forgotten.
+  await notifyCancelled(bookingId, false)
+
   // The fee is opt-in per cancellation, never automatic. Charging a card without the provider
   // deciding to is not a default anyone should be able to stumble into.
   if (!chargeLateFee) return { success: 'Appointment cancelled.' }
@@ -106,6 +114,51 @@ export async function cancelBooking(
  *  Locked v1 decisions kept: always restore, with no cancellation-window cutoff; and an
  *  EXPIRED package gets its session back but stays expired.
  */
+/** Tells the client their appointment is off.
+ *
+ *  The counterpart to the confirmation sent when a payment lands. Once somebody has been told
+ *  an appointment exists they will act on it until told otherwise, so confirming without
+ *  cancelling is worse than sending neither — it earns trust in a channel that then goes quiet
+ *  at the one moment it matters.
+ *
+ *  Best effort, always after the cancellation is committed: a bounced email must never leave a
+ *  client believing an appointment still stands.
+ */
+async function notifyCancelled(bookingId: string, sessionReturned: boolean): Promise<void> {
+  try {
+    const [row] = await db
+      .select({
+        clientName: bookings.clientName,
+        clientEmail: bookings.clientEmail,
+        startTime: bookings.startTime,
+        serviceName: services.name,
+        providerFirst: providers.firstName,
+        providerLast: providers.lastName,
+      })
+      .from(bookings)
+      .innerJoin(providerServices, eq(bookings.providerServiceId, providerServices.id))
+      .innerJoin(services, eq(providerServices.serviceId, services.id))
+      .innerJoin(providers, eq(bookings.providerId, providers.id))
+      .where(eq(bookings.id, bookingId))
+      .limit(1)
+
+    if (!row?.clientEmail) return
+
+    await sendEmail({
+      to: row.clientEmail,
+      ...bookingCancelledEmail({
+        clientName: row.clientName,
+        providerName: `${row.providerFirst} ${row.providerLast}`,
+        serviceName: row.serviceName,
+        when: appointmentWhen(row.startTime),
+        sessionReturned,
+      }),
+    })
+  } catch (err) {
+    console.error('[email] cancellation notice failed for booking', bookingId, err)
+  }
+}
+
 export async function cancelPackageRedemption(bookingId: string): Promise<ActionState> {
   const user = await requireProvider()
 
@@ -184,6 +237,10 @@ export async function cancelPackageRedemption(bookingId: string): Promise<Action
     // The redemption was voided by someone else between the read above and this write.
     return { error: 'That session was already returned. Refresh to see the current state.' }
   }
+
+  // `true`: the session went back onto the package, and saying so is the difference between
+  // "your appointment is cancelled" and "your appointment is cancelled and you have lost $200".
+  await notifyCancelled(bookingId, true)
 
   revalidatePath('/app/appointments')
   // And the page that shows the count this just changed. Returning a session is the whole
