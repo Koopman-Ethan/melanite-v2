@@ -13,7 +13,7 @@ import {
 import { canBook, bookingBlockedReasons, requireProvider } from '@/lib/auth/dal'
 import { db } from '@/lib/db'
 import { isExclusionViolation } from '@/lib/db/errors'
-import { denverInstant, getLaserHours } from '@/lib/db/queries/availability'
+import { denverInstant, getAvailability, getLaserHours } from '@/lib/db/queries/availability'
 import {
   clientPackageItems,
   clientPackages,
@@ -173,6 +173,54 @@ export async function setTemplateActive(
 
   revalidatePath('/app/packages')
   return { success: active ? 'Package reactivated.' : 'Package retired.' }
+}
+
+/** Open times for a redemption, on one date.
+ *
+ *  The booking page server-renders its slots from the URL, which suits a page whose whole job
+ *  is picking a time. A redemption is chosen from a list of client balances, so it asks for
+ *  times without navigating away — same availability query underneath, so the two can never
+ *  disagree about what is free.
+ *
+ *  The laser is shared, so these openings account for every provider's bookings, not just
+ *  this one's.
+ */
+export async function redemptionSlots(input: {
+  providerServiceId: string
+  date: string
+}): Promise<{ error?: string; slots?: Array<{ startTime: string; label: string }> }> {
+  const user = await requireProvider()
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) return { error: 'Pick a date.' }
+
+  const [svc] = await db
+    .select({ durationMins: providerServices.durationMins })
+    .from(providerServices)
+    .where(
+      and(
+        eq(providerServices.id, input.providerServiceId),
+        eq(providerServices.providerId, user.id),
+        eq(providerServices.isActive, true),
+      ),
+    )
+    .limit(1)
+
+  if (!svc) return { error: 'That service is not on your profile.' }
+
+  const { slots } = await getAvailability(input.date, svc.durationMins)
+
+  return {
+    slots: slots
+      .filter((s) => s.available)
+      .map((s) => ({
+        startTime: s.startTime.toISOString(),
+        label: s.startTime.toLocaleTimeString('en-US', {
+          hour: 'numeric',
+          minute: '2-digit',
+          timeZone: 'America/Denver',
+        }),
+      })),
+  }
 }
 
 /** Book a prepaid session against a client's package balance.
@@ -346,12 +394,17 @@ export async function bookFromPackage(input: {
     booked = await db.execute(sql`
     INSERT INTO bookings
       (id, provider_id, provider_service_id, client_id, client_name, client_email,
-       treatment_area, notes, original_price, discount_pct, price, payment_source,
+       treatment_area, notes, original_price, price, payment_source,
        duration_mins, start_time, end_time, status)
     SELECT ${bookingId}::uuid, ${user.id}::uuid, ${input.providerServiceId}::uuid,
            ${pkg.clientId}::uuid, ${pkg.clientName ?? 'Client'}, ${pkg.clientEmail},
            ${input.treatmentArea}, ${input.notes},
-           ${line.perSessionValue}::numeric, 0::numeric, 0::numeric,
+           -- No discount columns: there was a discount_pct here and that has never existed on
+           -- this table. The real columns are discount_type and discount_value, both
+           -- defaulting to none. A redemption is not a discounted booking anyway; it is a
+           -- session the client already owns, which is what original_price and a price of
+           -- zero say between them.
+           ${line.perSessionValue}::numeric, 0::numeric,
            'package_redemption'::booking_payment_source,
            ${svc.durationMins}, ${startTime.toISOString()}::timestamptz,
            ${endTime.toISOString()}::timestamptz, 'upcoming'::booking_status

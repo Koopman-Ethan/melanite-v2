@@ -46,10 +46,14 @@ export async function getProviderServices(providerId: string): Promise<ProviderS
       offeredPlatformWide: services.active,
       packageEligible: services.packageEligible,
       advancedTierRequired: services.advancedTierRequired,
+      // Columns written out. Interpolated, `${providerServices.id}` renders as a bare `"id"`
+      // inside this subquery and binds to `bookings` instead — so it counted bookings whose
+      // provider_service_id equalled their own id, which is none of them. The warning that a
+      // service still has appointments on it therefore never appeared.
       upcomingBookings: sql<number>`(
         select count(*) from ${bookings}
-        where ${bookings.providerServiceId} = ${providerServices.id}
-          and ${bookings.status} = 'upcoming'
+        where ${bookings}.provider_service_id = ${providerServices}.id
+          and ${bookings}.status = 'upcoming'
       )::int`,
     })
     .from(providerServices)

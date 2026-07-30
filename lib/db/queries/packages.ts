@@ -51,9 +51,20 @@ export async function getPackageTemplates(providerId: string): Promise<PackageTe
       expiresAfterDays: packageTemplates.expiresAfterDays,
       active: packageTemplates.active,
       createdAt: packageTemplates.createdAt,
+      // Columns written out rather than interpolated, and it matters.
+      //
+      // Inside a `sql` fragment in a SELECT projection, drizzle renders a column as a bare
+      // name — `${packageTemplates.id}` becomes `"id"`, not `"package_templates"."id"`. In a
+      // correlated subquery the inner table then wins the name, so this read
+      // `where client_packages.package_template_id = client_packages.id`: a comparison between
+      // two unrelated ids that is never true. It returned 0 for every template, so a package
+      // that had sold still said "Not sold yet".
+      //
+      // The same fragment inside `.where()` IS qualified, which is why this survived review —
+      // the identical pattern is correct three files away.
       soldCount: sql<number>`(
         select count(*) from ${clientPackages}
-        where ${clientPackages.packageTemplateId} = ${packageTemplates.id}
+        where ${clientPackages}.package_template_id = ${packageTemplates}.id
       )::int`,
     })
     .from(packageTemplates)

@@ -93,10 +93,19 @@ export async function getAppointments(
       serviceName: services.name,
       serviceColor: services.colorHex,
       providerServiceId: bookings.providerServiceId,
+      // Columns spelled out, not interpolated. A `sql` fragment in a SELECT projection renders
+      // `${bookings.id}` as a bare `"id"`, which the inner table claims — so this compared
+      // `package_redemptions.booking_id` to `package_redemptions.id` and was false for every
+      // appointment that has ever existed.
+      //
+      // Not a cosmetic flag: it decides which cancel the provider is offered. Always-false
+      // meant a package redemption was cancelled as an ordinary booking and the client's paid
+      // session was NOT returned — the exact v1 failure the comment on AppointmentActions says
+      // this field exists to prevent.
       isPackageRedemption: sql<boolean>`exists (
         select 1 from ${packageRedemptions}
-        where ${packageRedemptions.bookingId} = ${bookings.id}
-          and ${packageRedemptions.voidedAt} is null
+        where ${packageRedemptions}.booking_id = ${bookings}.id
+          and ${packageRedemptions}.voided_at is null
       )`,
     })
     .from(bookings)
@@ -138,10 +147,19 @@ async function getAppointmentsById(providerId: string, bookingId: string) {
       serviceName: services.name,
       serviceColor: services.colorHex,
       providerServiceId: bookings.providerServiceId,
+      // Columns spelled out, not interpolated. A `sql` fragment in a SELECT projection renders
+      // `${bookings.id}` as a bare `"id"`, which the inner table claims — so this compared
+      // `package_redemptions.booking_id` to `package_redemptions.id` and was false for every
+      // appointment that has ever existed.
+      //
+      // Not a cosmetic flag: it decides which cancel the provider is offered. Always-false
+      // meant a package redemption was cancelled as an ordinary booking and the client's paid
+      // session was NOT returned — the exact v1 failure the comment on AppointmentActions says
+      // this field exists to prevent.
       isPackageRedemption: sql<boolean>`exists (
         select 1 from ${packageRedemptions}
-        where ${packageRedemptions.bookingId} = ${bookings.id}
-          and ${packageRedemptions.voidedAt} is null
+        where ${packageRedemptions}.booking_id = ${bookings}.id
+          and ${packageRedemptions}.voided_at is null
       )`,
     })
     .from(bookings)

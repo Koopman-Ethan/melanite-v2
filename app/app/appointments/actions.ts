@@ -140,32 +140,56 @@ export async function cancelPackageRedemption(bookingId: string): Promise<Action
     return { error: 'That package belongs to another provider.' }
   }
 
-  await db.transaction(async (tx) => {
-    // Floored at 0 in SQL rather than read-modify-write, so two concurrent cancellations
-    // cannot both read the same qty_used and drive it negative.
-    await tx
-      .update(clientPackageItems)
-      .set({ qtyUsed: sql`greatest(${clientPackageItems.qtyUsed} - 1, 0)` })
-      .where(eq(clientPackageItems.id, redemption.itemId))
+  // One statement, not a transaction.
+  //
+  // This was `db.transaction(async tx => …)`, which the neon-http driver does not implement —
+  // it throws "No transactions support in neon-http driver" before touching anything. So this
+  // path had never once run: cancelling a package session reported success and returned
+  // nothing, which is precisely the outcome the whole feature exists to prevent.
+  //
+  // A single statement with CTEs is atomic in Postgres and needs no interactive transaction.
+  // The ordering is deliberate: `voided` is the gate, and everything downstream reads from it,
+  // so if the redemption was already voided nothing else fires.
+  //
+  // `voided_at is null` is what makes a second click harmless. Without it, cancelling twice
+  // would hand back two sessions for one appointment — a package that grows when you poke it.
+  const undone = await db.execute(sql`
+    WITH voided AS (
+      UPDATE package_redemptions SET voided_at = now()
+       WHERE id = ${redemption.id}::uuid AND voided_at IS NULL
+      RETURNING client_package_item_id, client_package_id
+    ),
+    restored AS (
+      -- greatest(...) rather than read-modify-write, so concurrent cancellations cannot drive
+      -- the count below zero.
+      UPDATE client_package_items
+         SET qty_used = greatest(qty_used - 1, 0)
+       WHERE id = (SELECT client_package_item_id FROM voided)
+      RETURNING id
+    ),
+    reopened AS (
+      -- Exhausted becomes usable again now a session is back. Expired deliberately stays
+      -- expired: the session returns, the expiry still stands.
+      UPDATE client_packages SET status = 'active'
+       WHERE id = (SELECT client_package_id FROM voided) AND status = 'exhausted'
+      RETURNING id
+    )
+    UPDATE bookings SET status = 'cancelled'
+     WHERE id = ${bookingId}::uuid
+       AND EXISTS (SELECT 1 FROM voided)
+    RETURNING id
+  `)
 
-    // An exhausted package becomes usable again now that a session is back. An expired one
-    // deliberately stays expired — the session returns, the expiry still stands.
-    if (redemption.packageStatus === 'exhausted') {
-      await tx
-        .update(clientPackages)
-        .set({ status: 'active' })
-        .where(eq(clientPackages.id, redemption.packageId))
-    }
-
-    await tx
-      .update(packageRedemptions)
-      .set({ voidedAt: new Date() })
-      .where(eq(packageRedemptions.id, redemption.id))
-
-    await tx.update(bookings).set({ status: 'cancelled' }).where(eq(bookings.id, bookingId))
-  })
+  if ((undone.rows?.length ?? 0) === 0) {
+    // The redemption was voided by someone else between the read above and this write.
+    return { error: 'That session was already returned. Refresh to see the current state.' }
+  }
 
   revalidatePath('/app/appointments')
+  // And the page that shows the count this just changed. Returning a session is the whole
+  // point of this action, and the balance it returns to is rendered somewhere else — without
+  // this the provider cancels, goes to look, and sees the session still gone.
+  revalidatePath('/app/packages')
   return { success: 'Appointment cancelled and the session returned to the package.' }
 }
 

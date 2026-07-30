@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 
 import { requireProvider } from '@/lib/auth/dal'
 import { cn } from '@/lib/cn'
+import { getBookableServices } from '@/lib/db/queries/availability'
 import {
   getClientPackages,
   getOutstandingPackageLinks,
@@ -9,6 +10,7 @@ import {
   getPackageableServices,
 } from '@/lib/db/queries/packages'
 
+import { BalanceLines } from './balance-lines'
 import { TemplateList } from './template-list'
 
 export const metadata: Metadata = { title: 'Packages · Melanite' }
@@ -36,12 +38,17 @@ const STATUS = {
 
 export default async function PackagesPage() {
   const user = await requireProvider()
-  const [templates, balances, offered, pendingLinks] = await Promise.all([
+  const [templates, balances, offered, pendingLinks, bookableServices] = await Promise.all([
     getPackageTemplates(user.id),
     getClientPackages(user.id),
     getPackageableServices(user.id),
     getOutstandingPackageLinks(user.id),
+    getBookableServices(user.id),
   ])
+
+  // A package line stores a service, but booking needs the provider's own offering of it —
+  // that is where the duration and the price live. Built once rather than per line.
+  const bookable = new Map(bookableServices.map((s) => [s.serviceId, s.providerServiceId]))
 
   const live = balances.filter((b) => b.status === 'active' && !b.expiredByDate)
   const outstanding = live.reduce((s, b) => s + Number(b.remainingValue), 0)
@@ -170,27 +177,18 @@ export default async function PackagesPage() {
                   </div>
                 </div>
 
-                <ul className="mt-4 space-y-1.5">
-                  {b.lines.map((l) => {
-                    const left = l.qtyTotal - l.qtyUsed
-                    return (
-                      <li key={l.itemId} className="flex items-center gap-3 text-sm">
-                        <span className="min-w-0 flex-1 truncate text-ink-secondary">
-                          {l.serviceName}
-                        </span>
-                        <span className="h-1.5 w-24 overflow-hidden rounded-full bg-line">
-                          <span
-                            className="block h-full rounded-full bg-gold"
-                            style={{ width: `${(l.qtyUsed / l.qtyTotal) * 100}%` }}
-                          />
-                        </span>
-                        <span className="w-20 text-right tabular-nums text-ink-faint">
-                          {left} of {l.qtyTotal}
-                        </span>
-                      </li>
-                    )
-                  })}
-                </ul>
+                {/* A line the provider no longer offers gets no provider_service_id, and the
+                    form says so rather than offering a button that can only fail. The client
+                    has already paid for that session either way. */}
+                <BalanceLines
+                  clientPackageId={b.id}
+                  clientName={b.clientName ?? b.clientEmail ?? 'Client'}
+                  expired={b.expiredByDate || b.status !== 'active'}
+                  lines={b.lines.map((l) => ({
+                    ...l,
+                    providerServiceId: bookable.get(l.serviceId) ?? null,
+                  }))}
+                />
 
                 {/* v1 only flipped a package to expired when someone tried to redeem it, so a
                     list could show one as active that was not. Computed on read here. */}
