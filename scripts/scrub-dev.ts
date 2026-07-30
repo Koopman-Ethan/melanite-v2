@@ -25,6 +25,11 @@ import { requireEnv } from '../lib/env-guard'
 //   - Stripe ids. A scrubbed customer id would break the payment paths this environment exists
 //     to test, and those ids identify nobody on their own.
 //
+//     Provider CONNECT ids are a separate matter and are not handled here: they arrive from the
+//     v1 export as LIVE accounts, which a test key cannot see at all, so every payment in this
+//     environment fails until they are replaced. That is
+//     `scripts/dev-connect-accounts.ts`, and it needs running after every import too.
+//
 // It rewrites names, emails, phone numbers and free-text notes — the fields that identify a
 // person to somebody who opens the page.
 

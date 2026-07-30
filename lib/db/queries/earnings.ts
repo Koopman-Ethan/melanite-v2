@@ -214,7 +214,24 @@ export async function getRecentPayouts(providerId: string, limit = 20): Promise<
       and(eq(ledgerEntries.subjectType, 'booking'), eq(ledgerEntries.subjectId, bookings.id)),
     )
     .leftJoin(services, eq(ledgerEntries.serviceId, services.id))
-    .where(eq(ledgerEntries.providerId, providerId))
+    .where(
+      and(
+        eq(ledgerEntries.providerId, providerId),
+        // Money the provider PAID is not earnings.
+        //
+        // `provider_id` on a ledger row means "the provider this concerns", which is not the
+        // same as "the provider who earned this". A membership charge, a day's room rental and
+        // an Epicutis subscription all carry the provider's id and are all money going the
+        // other way — the schema's own words: `provider charges = SUM(gross_amount) WHERE
+        // payer = 'provider'`.
+        //
+        // Listing them here put a provider's own bills on their earnings page, each showing a
+        // $0.00 share, which invites exactly one question: why am I being shown this, and is
+        // something broken? The totals already filtered by source and were right; only this
+        // list was not.
+        sql`${ledgerEntries.payer} <> 'provider'`,
+      ),
+    )
     .orderBy(desc(ledgerEntries.createdAt))
     .limit(limit)
 }

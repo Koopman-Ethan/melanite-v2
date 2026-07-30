@@ -84,6 +84,45 @@ test.describe('booking to payment link', () => {
     await expect(clientPage.getByText(/Keep my card on file/)).toBeVisible()
     await expect(clientPage.getByText(/do not attend this appointment/)).toBeVisible()
 
+    // AND THE PAYMENT ACTUALLY STARTS.
+    //
+    // This spec used to stop at "the page renders", which is how appdev reached a demo unable
+    // to take a single payment. Every provider carried a LIVE Connect account id from the v1
+    // migration; a test key cannot see one, so `transfer_data.destination` failed and the
+    // client got "Could not start the payment. Try again shortly." — advice that would never
+    // come true however many times they tried.
+    //
+    // Rendering a checkout page proves nothing about whether money can move. Creating the
+    // PaymentIntent is the first step that touches Stripe with the provider's account id, so
+    // it is the first step that can catch this. No card is entered and nothing is charged.
+    await clientPage.getByRole('button', { name: /Continue to payment/ }).click()
+
+    // Wait for one of the two outcomes before judging either. Asserting the error is absent on
+    // its own would pass instantly — it is absent for the whole round trip, right up until it
+    // is not — so it has to be a race between the success signal and the failure signal.
+    const cardFrame = clientPage.locator('iframe[name^="__privateStripeFrame"]').first()
+    const failure = clientPage.getByText(/Could not start the payment/)
+
+    await expect(async () => {
+      const started = (await cardFrame.count()) > 0
+      const failed = (await failure.count()) > 0
+      expect(
+        started || failed,
+        'neither the card fields nor an error appeared — the intent request never resolved',
+      ).toBe(true)
+    }).toPass({ timeout: 20_000 })
+
+    await expect(
+      failure,
+      'PaymentIntent creation failed. Usually a provider Stripe account the current key cannot ' +
+        'see: dev data carries LIVE Connect ids from the v1 migration and a test key gets 403. ' +
+        'Run scripts/dev-connect-accounts.ts.',
+    ).toHaveCount(0)
+
+    // Stripe's own iframe only mounts once the intent exists, so this is the positive proof
+    // that money could move — not merely that a page rendered.
+    await expect(cardFrame).toBeAttached()
+
     await clientPage.close()
 
     // --- Clean up ---------------------------------------------------------------------------
