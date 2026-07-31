@@ -901,3 +901,41 @@ loud when it applies a file whose SQL matches an earlier one.
 
 Worth knowing generally: any two migrations with identical SQL would have hit this. Reverting a
 migration and later reinstating it is the ordinary way to produce that.
+
+### The ETL would have erased the LHR catalogue — 2026-07-31
+
+`scripts/etl/load.ts` TRUNCATEs `services` and repopulates it from the v1 export. Correct in
+itself — the catalogue is v1 data and the loader owns it — but it erases every catalogue
+decision v2 has made since, and migration 0024 is exactly that: twelve laser hair removal body
+areas, four size brackets retired, everything grouped by category.
+
+Found while writing the cutover runbook, which was about to say "apply migrations, then run the
+ETL" — an order that silently undoes 0024. Production would have ended up with v1's four sizes
+active, no body areas, and every category null. Migrations run once, so 0024 would never repair
+it, and **nothing would fail**: the booking form would simply offer Small/Medium/Large again,
+which is what it did for two years, so nobody would think to look.
+
+Fixed by moving the catalogue decisions out of the migration's reach and into
+`scripts/etl/catalogue.ts`, which is idempotent, `--check`-able and runs after every import. It
+is allowed against both environments deliberately — a catalogue that differs between dev and
+prod is a bug you only find in production.
+
+Proved by breaking dev's catalogue on purpose (a size reactivated, an area deleted, categories
+nulled), confirming `--check` reported all three, repairing, and re-checking clean.
+
+The general lesson is worth keeping: **a migration is not a safe place for anything the ETL
+rebuilds.** Any table `load.ts` truncates — services, provider_services, platform_settings, the
+package templates — can only hold v2 decisions if something re-applies them after a load.
+
+### Cutover runbook — docs/cutover.md — 2026-07-31
+
+The Xano → production sequence, written to be followed at 11pm by somebody tired. Two things in
+it are worth knowing even if the file is never opened:
+
+**Xano stays running after cutover, read-only, for at least two weeks.** Neon Free keeps a
+6-hour restore window, which is not a safety net for a migration run at night and inspected the
+next morning. Xano is the only complete copy of the truth independent of v2, and switching it
+off is the step that ends the ability to roll back — so it is last, not part of the cutover.
+
+**Production is empty as of 2026-07-31** — 0 rows across 24 tables — and was two migrations
+behind. So the cutover has genuinely not happened yet and nothing is at risk until it does.
