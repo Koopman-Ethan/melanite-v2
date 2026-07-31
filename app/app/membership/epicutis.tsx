@@ -5,6 +5,8 @@ import { useState, useTransition } from 'react'
 import { Button } from '@/components/ui/button'
 import { Notice } from '@/components/ui/field'
 
+import { GROWTH_HUB } from '@/lib/product-names'
+
 import { startEpicutisSubscription } from './actions'
 
 export interface EpicutisView {
@@ -16,11 +18,13 @@ export interface EpicutisView {
 
 const BENEFITS = [
   'New content every month',
-  'Client inquiries from the Epicutis website',
+  'Client inquiries from the Melanite website',
+  // Stays Epicutis: that is the product brand whose wholesale pricing is the perk, not the
+  // name of the membership.
   'Wholesale pricing on Epicutis products',
 ]
 
-/** The Epicutis membership.
+/** The optional provider membership.
  *
  *  Sits beside the medical director plan and is charged the same way, which is exactly why the
  *  copy says plainly that it changes nothing about booking. Two subscriptions on one page,
@@ -36,7 +40,7 @@ export function Epicutis({ epicutis }: { epicutis: EpicutisView }) {
     <section className="rounded-card border border-line bg-surface p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h2 className="text-lg font-semibold">Epicutis</h2>
+          <h2 className="text-lg font-semibold">{GROWTH_HUB}</h2>
           <p className="mt-1 text-sm text-ink-muted">
             Optional. $95 / month, cancel anytime.
           </p>

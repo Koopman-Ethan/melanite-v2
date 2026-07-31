@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 
 import { requireAdmin } from '@/lib/auth/dal'
+import { GROWTH_HUB } from '@/lib/product-names'
 import { getAdminRevenue } from '@/lib/db/queries/revenue'
 
 export const metadata: Metadata = { title: 'Revenue · Melanite Admin' }
@@ -13,7 +14,7 @@ const SOURCE_LABELS: Record<string, string> = {
   package: 'Packages',
   room_rental: 'Room rental',
   membership: 'Medical director',
-  epicutis: 'Epicutis',
+  epicutis: GROWTH_HUB,
   training: 'Training',
 }
 

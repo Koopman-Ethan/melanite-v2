@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 
 import { requireProvider } from '@/lib/auth/dal'
 import { cn } from '@/lib/cn'
+import { GROWTH_HUB, MEDICAL_DIRECTOR } from '@/lib/product-names'
 import { getEpicutis, getMembership, getMembershipCharges } from '@/lib/db/queries/membership'
 
 import { Epicutis } from './epicutis'
@@ -43,13 +44,15 @@ export default async function MembershipPage() {
   return (
     <main className="mx-auto w-full max-w-3xl px-6 py-10 space-y-8">
       <header>
-        <h1 className="text-2xl font-semibold">Medical director</h1>
+        <h1 className="text-2xl font-semibold">My memberships</h1>
         <p className="mt-1 text-sm text-ink-muted">
-          Idaho requires medical direction for these treatments. Melanite can supply one, or you
-          can bring your own.
+          What you pay Melanite each month, and what each one gets you.
         </p>
       </header>
 
+      {/* Same shape as the growth hub card below, with one deliberate difference: this one
+          takes a warning tint when it is not active. The two memberships look alike because
+          they are billed alike, but only this one decides whether somebody can work. */}
       <section
         className={cn(
           'rounded-card border p-6',
@@ -58,25 +61,35 @@ export default async function MembershipPage() {
       >
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2">
-              <span
-                className={cn(
-                  'rounded border px-2 py-0.5 text-[11px] uppercase tracking-wide',
-                  status.className,
-                )}
-              >
-                {status.label}
-              </span>
-              {membership.type && (
-                <span className="text-sm text-ink-muted">
-                  {membership.type === 'melanite' ? 'Melanite plan' : 'Your own director'}
-                </span>
-              )}
-            </div>
+            <h2 className="text-lg font-semibold">{MEDICAL_DIRECTOR}</h2>
+            <p className="mt-1 text-sm text-ink-muted">
+              {/* Required, and the price depends on whose director it is. Said here rather
+                  than in the page header now that the header covers both memberships. */}
+              Required to book laser time. $150 / month from Melanite, or bring your own.
+            </p>
+          </div>
 
-            {/* The consequence, stated first. This status is the booking gate, and a provider
+          <span
+            className={cn(
+              'rounded-field border px-2.5 py-1 text-xs',
+              status.className,
+            )}
+          >
+            {status.label}
+          </span>
+        </div>
+
+        <div className="mt-4">
+          <div>
+            {membership.type && (
+              <p className="text-sm text-ink-muted">
+                {membership.type === 'melanite' ? 'Melanite plan' : 'Your own director'}
+              </p>
+            )}
+
+            {/* The consequence, stated plainly. This status is the booking gate, and a provider
                 seeing "past due" should not have to work out what that costs them. */}
-            <p className="mt-3 text-sm text-ink-secondary">
+            <p className="mt-2 text-sm text-ink-secondary">
               {blocksBooking
                 ? 'You can’t book laser time until this is active.'
                 : 'You’re covered — laser booking is open.'}
@@ -96,7 +109,11 @@ export default async function MembershipPage() {
               </p>
             )}
           </div>
+        </div>
 
+        {/* Below the detail and left-aligned, the same place the growth hub puts its button.
+            Two cards billed the same way should not put their one control in two places. */}
+        <div className="mt-5">
           <MembershipActions
             type={membership.type}
             status={membership.status}
@@ -198,8 +215,8 @@ export default async function MembershipPage() {
                       {c.entryType === 'refund'
                         ? 'Refund'
                         : c.plan === 'epicutis'
-                          ? 'Epicutis — monthly'
-                          : 'Medical director — monthly'}
+                          ? `${GROWTH_HUB} — monthly`
+                          : `${MEDICAL_DIRECTOR} — monthly`}
                     </td>
                     <td className="p-3 text-right tabular-nums">{usd(c.amount)}</td>
                   </tr>

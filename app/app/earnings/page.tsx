@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 
 import { requireProvider } from '@/lib/auth/dal'
+import { GROWTH_HUB } from '@/lib/product-names'
 import { cn } from '@/lib/cn'
 import { getEarnings } from '@/lib/db/queries/earnings'
 
@@ -24,7 +25,7 @@ const SOURCE_LABELS: Record<string, string> = {
   package: 'Package sale',
   room_rental: 'Room rental',
   membership: 'Membership',
-  epicutis: 'Epicutis',
+  epicutis: GROWTH_HUB,
   training: 'Training',
 }
 
