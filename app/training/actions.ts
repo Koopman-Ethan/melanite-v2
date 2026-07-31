@@ -13,6 +13,7 @@ import {
 } from '@/lib/db/queries/training'
 import { platformSettings, trainingCourses, trainingEnrollments } from '@/lib/db/schema'
 import { friendlyStripeError, stripePost } from '@/lib/stripe/client'
+import { emailError, phoneError } from '@/lib/validation'
 
 // PUBLIC — no session. Anyone can enrol; that is the point of a training course.
 //
@@ -42,7 +43,6 @@ export interface EnrollState {
  *  Card covers Apple Pay and Google Pay — those ride on the card rail, not separate types. */
 const PAYMENT_METHODS = ['card', 'link'] as const
 
-const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
 
 export interface EnrolInput {
   courseId: string
@@ -81,8 +81,15 @@ async function reserveSeat(
   const email = input.email.trim().toLowerCase()
 
   if (!firstName || !lastName) return { error: 'Enter your first and last name.' }
-  if (!EMAIL.test(email)) return { error: 'Enter a valid email address.' }
-  if (!input.phone.trim()) return { error: 'Enter a phone number.' }
+  // Shared with the form, so the two cannot disagree. This used to be a private regex here —
+  // a second copy of the rule, which is how a browser starts accepting what the server rejects.
+  // Blank and malformed get different sentences, as everywhere else. Both are refused: the
+  // enrolment confirmation and the balance link are emailed weeks apart, so a typo here is a
+  // student who paid a deposit and then hears nothing.
+  const emailProblem = emailError(email)
+  if (emailProblem) return { error: `${emailProblem} The enrolment link goes there.` }
+  const phoneProblem = phoneError(input.phone)
+  if (phoneProblem) return { error: phoneProblem }
   // Required, not optional. This is a clinical laser course — who is being trained, and under
   // what license, is the record Melanite has to be able to produce later.
   if (!input.licenseNumber.trim()) {

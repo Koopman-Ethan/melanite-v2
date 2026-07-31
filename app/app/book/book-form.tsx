@@ -5,6 +5,7 @@ import { useFormStatus } from 'react-dom'
 
 import { Button } from '@/components/ui/button'
 import { Field, Notice } from '@/components/ui/field'
+import { EmailField, PhoneField } from '@/components/ui/validated-field'
 import { cn } from '@/lib/cn'
 import { groupByCategory } from '@/lib/service-groups'
 
@@ -198,8 +199,10 @@ export function BookForm({
         <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">Client</h2>
         <Field id="clientName" name="clientName" label="Name" required />
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field id="clientPhone" name="clientPhone" label="Phone" type="tel" />
-          <Field id="clientEmail" name="clientEmail" label="Email" type="email" />
+          {/* Optional, but validated when filled — a client email with a typo is worse than
+              a blank one, because the payment link silently reaches nobody. */}
+          <PhoneField id="clientPhone" name="clientPhone" label="Phone" optional />
+          <EmailField id="clientEmail" name="clientEmail" label="Email" optional />
         </div>
         <Field
           id="treatmentArea"

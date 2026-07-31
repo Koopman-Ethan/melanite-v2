@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Field, Notice } from '@/components/ui/field'
+import { EmailField } from '@/components/ui/validated-field'
 import { cn } from '@/lib/cn'
 import { cherryAvailable } from '@/lib/payments/cherry'
 
@@ -206,13 +207,13 @@ export function BookingCheckout({
           </section>
 
           <section className="space-y-3 rounded-card border border-line bg-surface p-5">
-            <Field
+            <EmailField
               id="clientEmail"
               label="Email for your receipt"
-              type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={setEmail}
               placeholder="you@example.com"
+              optional
             />
 
             {/* The consent artifact. Specific about what the card may be used for, sitting

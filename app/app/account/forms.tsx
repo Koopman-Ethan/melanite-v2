@@ -5,6 +5,7 @@ import { useFormStatus } from 'react-dom'
 
 import { Button } from '@/components/ui/button'
 import { Field, Notice } from '@/components/ui/field'
+import { PhoneField } from '@/components/ui/validated-field'
 
 import {
   changePassword,
@@ -55,7 +56,7 @@ export function ProfileForm({
       <div className="grid gap-4 sm:grid-cols-2">
         <Field id="firstName" name="firstName" label="First name" defaultValue={values.firstName} required />
         <Field id="lastName" name="lastName" label="Last name" defaultValue={values.lastName} required />
-        <Field id="phone" name="phone" label="Phone" type="tel" defaultValue={values.phone ?? ''} />
+        <PhoneField id="phone" name="phone" label="Phone" defaultValue={values.phone ?? ''} optional />
         <Field
           id="credentials"
           name="credentials"

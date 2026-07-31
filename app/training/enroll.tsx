@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Field, Notice } from '@/components/ui/field'
+import { EmailField, PhoneField } from '@/components/ui/validated-field'
 import { cn } from '@/lib/cn'
 
 import { CardForm } from '../pay/card-form'
@@ -201,22 +202,15 @@ export function Enroll({
                 required
               />
             </div>
-            <Field
+            <EmailField
               id="email"
               label="Email"
-              type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={setEmail}
               required
+              hint="Your enrolment confirmation and payment link go here."
             />
-            <Field
-              id="phone"
-              label="Phone"
-              type="tel"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              required
-            />
+            <PhoneField id="phone" label="Phone" value={phone} onChange={setPhone} required />
             <Field
               id="licenseNumber"
               label="Professional license number"

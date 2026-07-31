@@ -12,6 +12,7 @@ import { isExclusionViolation } from '@/lib/db/errors'
 import { providerServices, services } from '@/lib/db/schema'
 import { bookingPaymentLinkEmail, sendEmail } from '@/lib/email'
 import { appOrigin } from '@/lib/stripe/config'
+import { isValidEmail, isValidPhone } from '@/lib/validation'
 
 export interface BookState {
   error?: string
@@ -44,6 +45,16 @@ export async function createBooking(_prev: BookState, formData: FormData): Promi
   const clientEmail = String(formData.get('clientEmail') ?? '').trim().toLowerCase() || null
   const treatmentArea = String(formData.get('treatmentArea') ?? '').trim() || null
   const notes = String(formData.get('notes') ?? '').trim() || null
+  // Both optional, both validated when present. A client email with a typo is worse than a
+  // blank one: the payment link is generated, sent, and silently reaches nobody, while the
+  // booking sits looking as though the client was contacted.
+  if (clientEmail && !isValidEmail(clientEmail)) {
+    return { error: 'That client email doesn’t look right. Check it, or leave it blank.' }
+  }
+  if (clientPhone && !isValidPhone(clientPhone)) {
+    return { error: 'That client phone number doesn’t look right. Check it, or leave it blank.' }
+  }
+
   const discountTypeRaw = String(formData.get('discountType') ?? 'none')
   const discountValue = Number(formData.get('discountValue') ?? 0)
 

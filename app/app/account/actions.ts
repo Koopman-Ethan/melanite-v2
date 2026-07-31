@@ -9,6 +9,7 @@ import { validatePassword } from '@/lib/auth/reset'
 import { destroyOtherSessions } from '@/lib/auth/session'
 import { db } from '@/lib/db'
 import { providers } from '@/lib/db/schema'
+import { isValidPhone } from '@/lib/validation'
 
 export interface AccountState {
   error?: string
@@ -43,6 +44,9 @@ export async function updateProfile(
   const malpracticeInsurance = String(formData.get('malpracticeInsurance') ?? '').trim() || null
 
   if (!firstName || !lastName) return { error: 'First and last name are required.' }
+  if (phone && !isValidPhone(phone)) {
+    return { error: 'That phone number doesn’t look right — 10 digits, or leave it blank.' }
+  }
 
   // Onboarding requires the license, so Account must not let it be erased afterwards. Without
   // this the strictness of setup is decorative: finish it, then blank every field.

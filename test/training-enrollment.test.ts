@@ -67,7 +67,12 @@ describe('what the form will not accept', () => {
   it('needs an email that could exist', async () => {
     // The balance link is emailed weeks later, so a typo here is a student who never gets it.
     for (const email of ['', 'nope', 'a@b', 'a b@c.com']) {
-      expect((await enrollAndPayDeposit({ ...valid, courseId, email })).error).toMatch(/valid email/i)
+      // Matches the intent, not the exact sentence — the wording differs between "blank" and
+      // "malformed" on purpose, and asserting one string made this fail when it improved.
+      expect(
+        (await enrollAndPayDeposit({ ...valid, courseId, email })).error,
+        `${email || '(blank)'} was accepted as an email address`,
+      ).toMatch(/email/i)
     }
   })
 

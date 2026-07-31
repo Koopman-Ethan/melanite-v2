@@ -14,6 +14,7 @@ import {
 } from '@/lib/db/schema'
 import { splitClientPayment, toCents, toMoney } from '@/lib/money'
 import { friendlyStripeError, stripePost } from '@/lib/stripe/client'
+import { isValidEmail } from '@/lib/validation'
 
 // PUBLIC actions — reachable by anyone holding a link token. No session, no provider identity.
 //
@@ -61,6 +62,11 @@ export async function createBookingIntent(input: {
 }): Promise<IntentState> {
   const checkout = await getBookingCheckout(input.token)
   if (!checkout) return { error: 'That payment link does not exist.' }
+  // Optional — a walk-in can pay without one — but a malformed address is not "no address":
+  // Stripe would reject `receipt_email` outright and take the payment with no receipt at all.
+  if (input.clientEmail && !isValidEmail(input.clientEmail)) {
+    return { error: 'That doesn’t look like an email address. Check it, or leave it blank.' }
+  }
   if (checkout.state !== 'payable') {
     return { error: notPayableMessage(checkout.state) }
   }
@@ -205,6 +211,9 @@ export async function createPackageIntent(input: {
   // A package creates a durable balance owned by a client row, so unlike a booking there is no
   // walk-in path — without an identity there is nothing to attach the sessions to.
   if (!email) return { error: 'Enter an email so your package can be tracked.' }
+  // The package balance is keyed on this address and the receipt goes to it. A typo here means
+  // a client who paid four figures and can never be found by the email they gave.
+  if (!isValidEmail(email)) return { error: 'That doesn’t look like an email address.' }
 
   const settings = await getSplitSettings()
   const priceCents = toCents(checkout.price)

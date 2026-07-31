@@ -4,6 +4,7 @@ import { useState, useTransition, type ReactNode } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Field, Notice } from '@/components/ui/field'
+import { EmailField, PhoneField } from '@/components/ui/validated-field'
 import { cn } from '@/lib/cn'
 import type { ServiceOption } from '@/lib/db/queries/admin-tools'
 
@@ -551,19 +552,19 @@ function BookingTool({
             required
           />
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field
+            <PhoneField
               id="mb-phone"
               label="Phone"
-              type="tel"
               value={clientPhone}
-              onChange={(e) => setClientPhone(e.target.value)}
+              onChange={setClientPhone}
+              optional
             />
-            <Field
+            <EmailField
               id="mb-email"
               label="Email"
-              type="email"
               value={clientEmail}
-              onChange={(e) => setClientEmail(e.target.value)}
+              onChange={setClientEmail}
+              optional
               hint="Links to an existing client record, or creates one"
             />
           </div>

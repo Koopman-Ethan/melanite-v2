@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Field, Notice } from '@/components/ui/field'
+import { EmailField } from '@/components/ui/validated-field'
 import { cherryAvailable } from '@/lib/payments/cherry'
 
 import { createPackageIntent, noteCherryHandoff } from '../../actions'
@@ -137,12 +138,11 @@ export function PackageCheckout({
               value={name}
               onChange={(e) => setName(e.target.value)}
             />
-            <Field
+            <EmailField
               id="clientEmail"
               label="Email"
-              type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={setEmail}
               placeholder="you@example.com"
               hint="Your package balance is tracked against this address"
             />

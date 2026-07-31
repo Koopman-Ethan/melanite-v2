@@ -9,6 +9,7 @@ import { SUPERVISED_PROCEDURES, requiresMedicalDirection } from '@/lib/room-proc
 import { providerServices, providers } from '@/lib/db/schema'
 import { toCents, toMoney } from '@/lib/money'
 import { nextStepSlug } from '@/lib/onboarding'
+import { phoneError } from '@/lib/validation'
 
 export interface StepState {
   error?: string
@@ -52,7 +53,10 @@ export async function saveProfile(input: {
   const credentials = input.credentials.trim()
 
   if (!firstName || !lastName) return { error: 'Enter your first and last name.' }
-  if (!phone) return { error: 'Enter a phone number — bookings and client messages use it.' }
+  const phoneProblem = phoneError(phone)
+  if (phoneProblem) {
+    return { error: `${phoneProblem} Bookings and client messages use it.` }
+  }
   if (!credentials) {
     return { error: 'Enter your professional credentials — clients see them at checkout.' }
   }

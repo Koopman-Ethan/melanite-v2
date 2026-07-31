@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Field, Notice } from '@/components/ui/field'
+import { PhoneField } from '@/components/ui/validated-field'
 
 import { saveProfile } from '../actions'
 
@@ -64,14 +65,12 @@ export function ProfileForm({
         />
       </div>
 
-      <Field
+      <PhoneField
         id="phone"
         label="Phone number"
         required
-        type="tel"
         value={phone}
-        onChange={(e) => setPhone(e.target.value)}
-        autoComplete="tel"
+        onChange={setPhone}
         placeholder="(208) 555-0142"
         hint="Used for booking notifications and client messages. Not shown publicly."
       />

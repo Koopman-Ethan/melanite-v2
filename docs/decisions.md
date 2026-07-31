@@ -939,3 +939,39 @@ off is the step that ends the ability to roll back — so it is last, not part o
 
 **Production is empty as of 2026-07-31** — 0 rows across 24 tables — and was two migrations
 behind. So the cutover has genuinely not happened yet and nothing is at risk until it does.
+
+### Field validation — 2026-07-31
+
+`type="tel"` and `type="email"` were on most fields and doing almost nothing. `type="tel"` has
+never validated anything in any browser — it picks a keypad on a phone and accepts "hello"
+everywhere. `type="email"` does validate, but only on a native form SUBMIT, and the checkout,
+onboarding and training forms are React-controlled with an onClick handler and no `<form>`, so
+that check never ran at all. Training had its own private email regex; nothing else checked
+anything beyond "not empty".
+
+`lib/validation.ts` holds the rules, called from BOTH the form and the server action. One module
+on purpose: two copies diverge the first time one is edited, and the resulting bug — a browser
+that accepts what the server rejects, or the reverse — is invisible until a real person hits it.
+The forms are UX; the server action is the only actual gate, which is why every rule is applied
+in both places.
+
+Choices worth keeping:
+
+- **Phone filters keystrokes; email cannot.** There is no reason to accept a letter into a phone
+  field and then explain it was wrong. Email has no illegal characters to filter, so it
+  validates on blur and names the specific problem — a missing @ gets its own sentence because
+  it is by far the most common.
+- **Blur, then live.** Validating on every keystroke tells somebody their email is invalid while
+  they are typing the third character. These wait until the field is left, then re-check on
+  every keystroke so a correction clears immediately.
+- **Names are length-checked only.** Every "letters only" rule ever written has told somebody
+  their own name is invalid. O'Brien, Anne-Marie, Nguyễn and 李 all pass.
+- **No zod.** Three field types deep, in a codebase that already hand-rolls its env parser and
+  money handling. A schema library earns its place at ten times this complexity.
+
+**The bug this turned up, which is the reason to write the browser test.** `maxLength={14}` on
+the phone input looked obviously right — that is exactly `(208) 555-0134`. It truncates the RAW
+value before the formatter runs, so a pasted `+1 208 555 0134` (15 characters) was clipped to
+`+1 208 555 013` and formatted to `(120) 855-5013`. A plausible-looking wrong number, which is
+far worse than a rejected one. The unit test passed throughout, because it called `formatPhone`
+directly and never went through the field.
