@@ -5,8 +5,9 @@ import { useOptimistic, useState, useTransition } from 'react'
 import { Notice } from '@/components/ui/field'
 import { cn } from '@/lib/cn'
 import { licenseStatus, type LicenseStatus } from '@/lib/license'
+import { requiresMedicalDirection, supervisedLabels } from '@/lib/room-procedures'
 
-import { setProviderAccess, type ToggleState } from './actions'
+import { setPracticeType, setProviderAccess, type ToggleState } from './actions'
 
 export interface RosterView {
   id: string
@@ -20,6 +21,10 @@ export interface RosterView {
   licenseExpiry: string | null
   medicalDirectorType: string | null
   medicalDirectorStatus: string
+  practiceType: string
+  roomProcedures: string[] | null
+  /** Whether they were ASKED, not what they answered. `[]` alone cannot tell the two apart. */
+  declared: boolean
   stripeConnected: boolean
   payoutsEnabled: boolean
 }
@@ -103,6 +108,14 @@ export function Roster({
       setState(await setProviderAccess({ providerId, field, value }))
     })
 
+  // Not optimistic. Moving somebody to the laser can send their account back into setup, and a
+  // row that rearranged itself before the server agreed would be showing a state that might not
+  // survive the round trip.
+  const move = (providerId: string, practiceType: 'laser' | 'room_only') =>
+    start(async () => {
+      setState(await setPracticeType({ providerId, practiceType }))
+    })
+
   return (
     <div className="space-y-4">
       {!roomRentalGloballyOn && (
@@ -123,6 +136,15 @@ export function Roster({
           const license = licenseStatus(provider.licenseExpiry)
           const setupIncomplete = provider.status === 'pending'
 
+          // Somebody who only rents the room. They never touch the laser and Melanite never
+          // handles their client money, so most of this row means something different for them.
+          const roomOnly = provider.practiceType === 'room_only'
+          const supervised = supervisedLabels(provider.roomProcedures)
+          const needsDirector = roomOnly
+            ? requiresMedicalDirection(provider.roomProcedures)
+            : true
+          const directorOnFile = provider.medicalDirectorStatus === 'active'
+
           return (
             <li
               key={provider.id}
@@ -139,6 +161,7 @@ export function Roster({
                   <span className="ml-2 text-xs text-ink-faint">{provider.email}</span>
                 </div>
                 <span className="text-xs text-ink-muted">
+                  {roomOnly && <span className="text-gold">room only · </span>}
                   {provider.role.replace(/_/g, ' ')}
                   {setupIncomplete && ' · still in setup'}
                 </span>
@@ -154,25 +177,50 @@ export function Roster({
                   detail={licenseDetail(license, provider.licenseExpiry)}
                 />
                 <Signal
-                  ok={provider.medicalDirectorStatus === 'active'}
+                  ok={directorOnFile || !needsDirector}
                   label="Medical director"
                   detail={
-                    provider.medicalDirectorType === 'own'
-                      ? `own (${provider.medicalDirectorStatus})`
-                      : provider.medicalDirectorStatus
+                    !needsDirector
+                      ? 'not required'
+                      : provider.medicalDirectorType === 'own'
+                        ? `own (${provider.medicalDirectorStatus})`
+                        : provider.medicalDirectorStatus
                   }
                 />
-                <Signal
-                  ok={provider.payoutsEnabled}
-                  label="Payouts"
-                  detail={
-                    !provider.stripeConnected
-                      ? 'no Stripe account'
-                      : provider.payoutsEnabled
-                        ? 'enabled'
-                        : 'Stripe still verifying'
-                  }
-                />
+
+                {/* What they said they would be doing in that room. Melanite cannot see inside
+                    it, so this declaration is the only basis for the toggle below — and a
+                    toggle whose reason is invisible is one that gets flipped back on. */}
+                {roomOnly && (
+                  <Signal
+                    ok={provider.declared && !needsDirector}
+                    label="Performs"
+                    detail={
+                      !provider.declared
+                        ? 'never asked'
+                        : supervised.length > 0
+                          ? supervised.join(', ').toLowerCase()
+                          : 'nothing needing supervision'
+                    }
+                  />
+                )}
+
+                {/* Payouts are the rail for a provider's share of what a CLIENT paid Melanite.
+                    A room renter has no share, so an empty Connect account is the correct state
+                    rather than an outstanding task. */}
+                {!roomOnly && (
+                  <Signal
+                    ok={provider.payoutsEnabled}
+                    label="Payouts"
+                    detail={
+                      !provider.stripeConnected
+                        ? 'no Stripe account'
+                        : provider.payoutsEnabled
+                          ? 'enabled'
+                          : 'Stripe still verifying'
+                    }
+                  />
+                )}
               </div>
 
               <div className="mt-3 flex flex-wrap items-center gap-x-6 border-t border-line pt-2">
@@ -188,6 +236,16 @@ export function Roster({
                   label="Can rent the room"
                   onChange={(next) => flip(provider.id, 'roomRentalEnabled', next)}
                 />
+
+                {/* People change what they do. This exists so that never means a database
+                    edit — the reason the column was added rather than inferred. */}
+                <button
+                  type="button"
+                  onClick={() => move(provider.id, roomOnly ? 'laser' : 'room_only')}
+                  className="ml-auto text-xs text-ink-muted underline decoration-line-control underline-offset-4 hover:text-ink"
+                >
+                  {roomOnly ? 'Move to laser' : 'Move to room only'}
+                </button>
               </div>
 
               {/* Only an EXPIRED license blocks. An expiring one still works, and a missing
@@ -204,6 +262,27 @@ export function Roster({
                 <p className="mt-2 text-xs text-warning">
                   Booking is on with no license on file. Nothing stops them: the license gate
                   treats a missing date as valid.
+                </p>
+              )}
+
+              {/* The one that matters most, because the toggle above will happily undo it.
+                  Onboarding turns room rental off when somebody declares a supervised
+                  procedure; without this line, turning it back on looks like fixing a glitch
+                  rather than permitting unsupervised injections. */}
+              {roomOnly && needsDirector && !directorOnFile && (
+                <p className="mt-2 text-xs text-warning">
+                  {provider.roomRentalEnabled ? 'Room rental is on, but they' : 'They'} declared{' '}
+                  {supervised.join(', ').toLowerCase()} with no medical director on file. Melanite
+                  owns the room, so it carries the consequence — get a director on file before
+                  {provider.roomRentalEnabled ? ' leaving this on' : ' turning this on'}.
+                </p>
+              )}
+
+              {/* Not a warning. They finished setup without being asked, which only happens to
+                  the providers imported from v1 — the question did not exist then. */}
+              {roomOnly && !provider.declared && !setupIncomplete && (
+                <p className="mt-2 text-xs text-ink-muted">
+                  Never asked what they perform in the room — this account predates the question.
                 </p>
               )}
             </li>

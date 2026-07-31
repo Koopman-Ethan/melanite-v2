@@ -20,6 +20,7 @@ export default async function ProfileStep() {
       lastName: providers.lastName,
       phone: providers.phone,
       credentials: providers.credentials,
+      practiceType: providers.practiceType,
     })
     .from(providers)
     .where(eq(providers.id, user.id))
@@ -28,9 +29,11 @@ export default async function ProfileStep() {
   return (
     <StepShell
       current={2}
+      practice={row?.practiceType ?? 'laser'}
       rail={
         <ProgressRail
           current={2}
+          practice={row?.practiceType ?? 'laser'}
           heading={
             <>
               Your name is your <span className="text-gold">credential</span>.
@@ -46,6 +49,7 @@ export default async function ProfileStep() {
           lastName: row?.lastName ?? '',
           phone: row?.phone ?? '',
           credentials: row?.credentials ?? '',
+          practiceType: row?.practiceType ?? 'laser',
         }}
       />
     </StepShell>

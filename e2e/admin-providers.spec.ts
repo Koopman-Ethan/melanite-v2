@@ -121,3 +121,102 @@ test.describe('provider access', () => {
     await query.query(`DELETE FROM providers WHERE id = $1`, [rows[0].id])
   })
 })
+
+test.describe('room-only providers on the roster', () => {
+  test.skip(({ browserName }) => browserName !== 'chromium', 'workflow, covered once')
+
+  // Melanite cannot see inside the rented room, so a room renter's declaration of what they
+  // perform is the ONLY basis for the room-rental toggle. That makes the roster the place where
+  // the toggle either explains itself or becomes a switch somebody flips back on to "fix" it.
+
+  test('shows what they declared, and warns before the toggle undoes it', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name === 'phone', 'workflow covered once, on desktop')
+
+    const query = await sql()
+    const email = `zz.onboard.roomroster.${Date.now()}@example.com`
+
+    // Declared injections, no director on file — so onboarding closed the room.
+    const rows = (await query.query(
+      `INSERT INTO providers (email, password_hash, requires_password_reset, first_name,
+                              last_name, role, status, onboarding_step, booking_enabled,
+                              room_rental_enabled, practice_type, room_procedures,
+                              room_procedures_declared_at)
+       VALUES ($1, 'x', true, 'Zzroomonly', 'Subject', 'provider', 'active', 5, false,
+               false, 'room_only', ARRAY['injections'], now())
+       RETURNING id`,
+      [email],
+    )) as { id: string }[]
+    const id = rows[0].id
+
+    await page.goto('/app/admin/providers')
+    const row = page.locator('li', { hasText: 'Zzroomonly Subject' })
+    await expect(row).toBeVisible()
+
+    await expect(row, 'nothing said this provider only rents the room').toContainText('room only')
+    await expect(row, 'the declaration was not shown').toContainText('injections')
+
+    // The line that stops the toggle being flipped back on blind.
+    await expect(
+      row,
+      'no warning that turning the room back on permits unsupervised injections',
+    ).toContainText(/no medical director on file/i)
+
+    // Payouts are not a task for somebody with no share to be paid.
+    await expect(
+      row,
+      'the roster asked a room renter for a Stripe account they will never be paid through',
+    ).not.toContainText('no Stripe account')
+
+    // --- moving them to the laser --------------------------------------------------------
+    await row.getByRole('button', { name: 'Move to laser' }).click()
+    await expect(page.getByText(/asked to connect Stripe and pick services/i)).toBeVisible()
+
+    const [after] = (await query.query(
+      `SELECT practice_type, status, onboarding_step FROM providers WHERE id = $1`,
+      [id],
+    )) as Record<string, unknown>[]
+
+    // Flipping the column alone would leave somebody marked as a laser provider with no way to
+    // be paid — a failed payout weeks later. They go back to setup and walk the two steps.
+    expect(after.practice_type).toBe('laser')
+    expect(after.status, 'moved to laser without being asked for Stripe or services').toBe(
+      'pending',
+    )
+    expect(after.onboarding_step).toBe(3)
+
+    await query.query(`DELETE FROM providers WHERE id = $1`, [id])
+  })
+
+  test('a clean declaration reads as settled, not as an outstanding task', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name === 'phone', 'workflow covered once, on desktop')
+
+    const query = await sql()
+    const email = `zz.onboard.roomclean.${Date.now()}@example.com`
+    const rows = (await query.query(
+      `INSERT INTO providers (email, password_hash, requires_password_reset, first_name,
+                              last_name, role, status, onboarding_step, booking_enabled,
+                              room_rental_enabled, practice_type, room_procedures,
+                              room_procedures_declared_at)
+       VALUES ($1, 'x', true, 'Zzroomclean', 'Subject', 'provider', 'active', 5, false,
+               true, 'room_only', ARRAY[]::text[], now())
+       RETURNING id`,
+      [email],
+    )) as { id: string }[]
+    const id = rows[0].id
+
+    await page.goto('/app/admin/providers')
+    const row = page.locator('li', { hasText: 'Zzroomclean Subject' })
+
+    await expect(row).toContainText('nothing needing supervision')
+    // A director they do not need must not read as a missing one — a warning that is wrong
+    // most of the time is one nobody reads.
+    await expect(row).toContainText('Medical director: not required')
+    await expect(row).not.toContainText(/no medical director on file/i)
+
+    await query.query(`DELETE FROM providers WHERE id = $1`, [id])
+  })
+})

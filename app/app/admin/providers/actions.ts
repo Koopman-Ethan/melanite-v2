@@ -77,3 +77,82 @@ export async function setProviderAccess(input: {
     success: `${what} ${input.value ? 'enabled' : 'disabled'} for ${who}.`,
   }
 }
+
+/**
+ * Moves a provider between renting the room and using the laser.
+ *
+ * People change what they do, and this must not require a database edit. The two directions are
+ * not symmetrical, though, and pretending otherwise is where this would go wrong:
+ *
+ * Going to `laser` opens two steps that were never asked — a Connect account, so Melanite can
+ * pay them their share, and a service menu, so there is something to book. Neither can be
+ * conjured by an admin, so the account is returned to setup at step 3 and the provider walks
+ * them itself on next sign-in. Flipping the column alone would leave somebody marked as a laser
+ * provider with no way to be paid, which surfaces as a failed payout weeks later.
+ *
+ * Going to `room_only` takes nothing away that matters: an unused Connect account and a service
+ * list nobody can book are harmless, and they are worth keeping in case the person moves back.
+ * But booking is revoked, because "room only" and "may use the laser" cannot both be true.
+ *
+ * What this does NOT do is edit their declaration of what they perform. That is the provider's
+ * own statement with a date on it, and its whole value is that Melanite did not write it.
+ */
+export async function setPracticeType(input: {
+  providerId: string
+  practiceType: 'laser' | 'room_only'
+}): Promise<ToggleState> {
+  await requireAdmin()
+
+  if (input.practiceType !== 'laser' && input.practiceType !== 'room_only') {
+    return { error: 'That is not a practice type.' }
+  }
+
+  const [target] = await db
+    .select({
+      id: providers.id,
+      firstName: providers.firstName,
+      lastName: providers.lastName,
+      status: providers.status,
+      practiceType: providers.practiceType,
+      stripeOnboardingComplete: providers.stripeOnboardingComplete,
+    })
+    .from(providers)
+    .where(eq(providers.id, input.providerId))
+    .limit(1)
+
+  if (!target) return { error: 'That provider does not exist.' }
+  if (target.practiceType === input.practiceType) return { success: 'No change.' }
+
+  const who = `${target.firstName} ${target.lastName}`
+
+  if (input.practiceType === 'room_only') {
+    await db
+      .update(providers)
+      .set({ practiceType: 'room_only', bookingEnabled: false })
+      .where(eq(providers.id, input.providerId))
+
+    revalidatePath('/app/admin/providers')
+    return { success: `${who} now rents the room only. Laser booking has been turned off.` }
+  }
+
+  // Somebody already through Stripe has nothing left to walk, so do not send them back through
+  // setup for the sake of it — the services step alone is not worth locking an account for.
+  const needsSetup = !target.stripeOnboardingComplete
+
+  await db
+    .update(providers)
+    .set(
+      needsSetup
+        ? { practiceType: 'laser', status: 'pending', onboardingStep: 3 }
+        : { practiceType: 'laser' },
+    )
+    .where(eq(providers.id, input.providerId))
+
+  revalidatePath('/app/admin/providers')
+
+  return {
+    success: needsSetup
+      ? `${who} moved to laser. They'll be asked to connect Stripe and pick services next time they sign in.`
+      : `${who} moved to laser.`,
+  }
+}

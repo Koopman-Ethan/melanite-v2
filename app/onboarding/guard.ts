@@ -27,13 +27,19 @@ export async function requireOnboardingStep(slug: OnboardingSlug) {
   if (!isOnboarding(user)) redirect('/app/dashboard')
 
   const [row] = await db
-    .select({ step: providers.onboardingStep })
+    .select({ step: providers.onboardingStep, practiceType: providers.practiceType })
     .from(providers)
     .where(eq(providers.id, user.id))
     .limit(1)
 
   const step = row?.step ?? 1
-  if (!canOpenStep(slug, step)) redirect(`/onboarding/${nextStepSlug(step)}`)
+  // The path differs by practice type, so the guard has to know it. Without this a room renter
+  // is bounced to the Connect step they can never complete, and can never reach step 5.
+  const practice = row?.practiceType ?? 'laser'
 
-  return user
+  if (!canOpenStep(slug, step, practice)) {
+    redirect(`/onboarding/${nextStepSlug(step, practice)}`)
+  }
+
+  return { ...user, practiceType: practice }
 }

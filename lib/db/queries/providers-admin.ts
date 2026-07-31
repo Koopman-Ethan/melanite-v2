@@ -24,6 +24,12 @@ export interface RosterRow {
   licenseExpiry: string | null
   medicalDirectorType: string | null
   medicalDirectorStatus: string
+  practiceType: string
+  roomProcedures: string[] | null
+  /** Whether they were ASKED what they perform in the room, which `[]` alone cannot express —
+   *  "nothing supervised" and "the question did not exist when they signed up" look identical
+   *  without it, and only one of those should read as settled. */
+  declared: boolean
   stripeConnected: boolean
   payoutsEnabled: boolean
 }
@@ -52,6 +58,9 @@ export async function getRoster(): Promise<Roster> {
         licenseExpiry: providers.licenseExpiry,
         medicalDirectorType: providers.medicalDirectorType,
         medicalDirectorStatus: providers.medicalDirectorStatus,
+        practiceType: providers.practiceType,
+        roomProcedures: providers.roomProcedures,
+        roomProceduresDeclaredAt: providers.roomProceduresDeclaredAt,
         stripeAccountId: providers.stripeAccountId,
         payoutsEnabled: providers.stripeOnboardingComplete,
       })
@@ -68,9 +77,13 @@ export async function getRoster(): Promise<Roster> {
   ])
 
   return {
-    rows: rows.map(({ stripeAccountId, ...rest }) => ({
+    rows: rows.map(({ stripeAccountId, roomProceduresDeclaredAt, ...rest }) => ({
       ...rest,
       stripeConnected: Boolean(stripeAccountId),
+      // The timestamp itself is not shown; what the roster needs is the DIFFERENCE between
+      // "told us they do nothing supervised" and "was never asked", which an empty array alone
+      // cannot express. Both look like `[]`.
+      declared: roomProceduresDeclaredAt !== null,
     })),
     roomRentalGloballyOn: settings?.roomRentalEnabled ?? false,
   }

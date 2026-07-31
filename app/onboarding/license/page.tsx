@@ -20,17 +20,24 @@ export default async function LicenseStep() {
       licenseState: providers.licenseState,
       licenseExpiry: providers.licenseExpiry,
       malpracticeInsurance: providers.malpracticeInsurance,
+      practiceType: providers.practiceType,
     })
     .from(providers)
     .where(eq(providers.id, user.id))
     .limit(1)
 
+  // The rail counts only the steps this provider walks. By now they have chosen, so a room
+  // renter sees "3 of 4" and no Connect step waiting for them.
+  const practice = row?.practiceType ?? 'laser'
+
   return (
     <StepShell
       current={3}
+      practice={practice}
       rail={
         <ProgressRail
           current={3}
+          practice={practice}
           heading={
             <>
               Why we ask for <span className="text-gold">your license</span>.

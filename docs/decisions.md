@@ -669,52 +669,53 @@ Scope when unblocked — this is a model change, not a UI change:
 - Earnings attribution per service has to split across the line items.
 - Package redemption has to decide whether one booking can consume sessions from several lines.
 
-### Room-only providers — BLOCKED on a list from Keoni — 2026-07-30
+### Room-only providers — BUILT — 2026-07-31
 
 Some providers only rent the treatment room by the day. They bring their own clients, bill them
 directly, and pay for the room out of their own pocket. Melanite never touches their client
 money.
 
-**Decided, and half built.** `providers.practiceType` is `laser` or `room_only`, defaults to
-`laser`, and is meant to be changeable by an admin afterwards — a room renter who later wants
-laser time must not need a database edit. The onboarding flow knows which steps apply:
+`providers.practiceType` is `laser` or `room_only` and defaults to `laser`. The onboarding flow
+knows which steps apply:
 
 - **Connect (step 4) does not apply.** It is the rail that pays a provider their share of what a
   client paid Melanite. There is no share, so the account would sit empty forever. The room
   itself is a one-off Stripe Checkout with a typed card, which needs nothing set up in advance.
 - **The service menu (step 6) does not apply.** It is the Melanite laser catalogue, priced for
   the booking flow. What happens in that room never touches this system.
-- **`bookingEnabled` already defaults false**, so "cannot use the laser" needs no new flag, and
+- **`bookingEnabled` already defaults false**, so "cannot use the laser" needed no new flag, and
   `roomRentalEnabled` already defaults true.
 
 Numbering stays canonical for everybody and only the PATH differs, which is what lets
 `onboardingStep` keep one meaning across both kinds of provider — including the nine imported
-ones who all sit at 5.
+ones who all sit at 5. The DISPLAY counts only applicable steps, so a room renter sees "Step 4
+of 4" rather than "Step 5 of 6" with a Connect step ticked off that they never did.
 
-`lib/onboarding.ts` and the migration are done and tested. Nothing reads `practiceType` yet, so
-the behaviour is unchanged for everybody; it is inert until the piece below lands.
+Because there is no step 6 for them, the flip to `status: 'active'` moved into the declaration
+action. Missing that would have left every room renter stuck in `pending` after finishing setup.
 
-**BLOCKED: which procedures require medical direction.**
+**How medical direction is decided.**
 
-The remaining question is whether a room renter needs a medical director, and the app cannot
-observe the answer — their appointments never touch this system. Two ways to ask:
+The app cannot observe the answer — their appointments never touch this system. A bare yes/no
+would ask the PROVIDER to know Idaho's supervision rules, where most will guess, and "no" is
+unfalsifiable so nothing could be gated on it. So they declare what they intend to PERFORM and
+the app applies Melanite's rule (`lib/room-procedures.ts`). The rule lives in one place; it is
+enforceable, because a supervised declaration with no director on file closes room rental; and
+it is a dated record, which a ticked box is not.
 
-- A bare yes/no. Fast, and it asks the PROVIDER to know Idaho's supervision rules. Most will
-  guess. "No" is unfalsifiable, so nothing can be gated on it.
-- **Chosen:** they tick what they intend to perform, from a short list where each category
-  carries a `requiresMedicalDirection` flag, and the app derives the answer.
+**Keoni's list, 2026-07-31:** microneedling, injections, IV therapy. Extending it is a code
+change on purpose — this is medical policy and should be reviewed, not edited in a form field.
 
-The second is better for three reasons. The rule lives in one place, so a change in the law is
-one edit rather than re-asking everybody. It is enforceable — declared a supervised procedure
-with no director on file, and room rental is blocked until there is one. And it is a real
-record: "she told us on 14 September she would be doing fillers" is defensible in a way that a
-ticked box is not.
+**Changeable afterwards, by design.** `setPracticeType` moves a provider either way from the
+roster, so this never needs a database edit. The directions are not symmetrical: moving to
+`laser` returns the account to setup at step 3 so they walk Connect and services themselves
+(unless Stripe is already done), because flipping the column alone would leave somebody marked
+as a laser provider with no way to be paid — which surfaces as a failed payout weeks later.
+Moving to `room_only` revokes booking and keeps everything else, in case they move back.
 
-It is the same pattern as `services.advancedTierRequired`, which already stores a clinical rule
-as data rather than leaving it to memory.
-
-**Waiting on:** the category list from Keoni, with which require supervision. Inventing it would
-be inventing medical policy, which is the same reason multi-service bookings are blocked.
+An admin can NOT edit the declaration. It is the provider's own statement with a date on it, and
+its whole value is that Melanite did not write it. The remedy for a supervised declaration is a
+director on file, not a rewritten answer.
 
 **Honest limit, worth saying to Keoni:** this records INTENT. Nothing stops somebody declaring
 facials and doing fillers behind a closed door. The enforcement is her plus documents, exactly
@@ -802,3 +803,21 @@ is not a safety net.
 - **`reverse_transfer`** — refunds currently assume the provider keeps their share, which is
   what live data showed (`transfer_reversal: null`). If refunds start being issued WITH
   transfer reversal, `handleChargeRefunded` needs the proportional split instead.
+
+### Laser hair removal by body area — durations from Keoni, 2026-07-31
+
+Small / Medium / Large (and XSmall) are being retired in favour of named areas. Keoni gave the
+timings as a pair: what a treatment actually takes, and the longest a provider should be able to
+book for it. The second number is the one the calendar needs — booking the optimistic figure is
+how a day runs late — so the DEFAULT duration is the ceiling, not the typical.
+
+| Area | Typical | Book no more than |
+| --- | --- | --- |
+| Back, full legs, chest, abs | 1 hour | 1 hour 30 |
+| Half legs, Brazilian | 30 min | 1 hour |
+| Upper lip, underarms, full face | 15 min | 30 min |
+
+Bikini, full arms and half arms were not in her reply and still need timings. Underarms was in
+her answer but not in the original list of areas, so it is included.
+
+Providers set their own duration per service, so these are the defaults offered, not a cap.

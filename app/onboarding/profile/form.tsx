@@ -10,12 +10,19 @@ import { saveProfile } from '../actions'
 export function ProfileForm({
   initial,
 }: {
-  initial: { firstName: string; lastName: string; phone: string; credentials: string }
+  initial: {
+    firstName: string
+    lastName: string
+    phone: string
+    credentials: string
+    practiceType: 'laser' | 'room_only'
+  }
 }) {
   const [firstName, setFirstName] = useState(initial.firstName)
   const [lastName, setLastName] = useState(initial.lastName)
   const [phone, setPhone] = useState(initial.phone)
   const [credentials, setCredentials] = useState(initial.credentials)
+  const [practiceType, setPracticeType] = useState<'laser' | 'room_only'>(initial.practiceType)
   const [error, setError] = useState<string | null>(null)
   const [pending, start] = useTransition()
 
@@ -79,6 +86,64 @@ export function ProfileForm({
         hint="Appears next to your name (e.g. “Jane Doe, RN”) on client checkout pages."
       />
 
+      {/* Asked here because it decides which of the remaining steps apply. A room renter needs
+          no Connect account and no laser service menu, and finding that out after making them
+          do both would be too late to spare them either. */}
+      <fieldset className="space-y-2">
+        <legend className="text-sm font-medium text-ink-secondary">
+          How will you be working at Melanite?{' '}
+          <span className="text-gold" aria-hidden>
+            *
+          </span>
+        </legend>
+
+        {(
+          [
+            {
+              key: 'laser' as const,
+              title: 'Using the laser',
+              blurb:
+                'You book laser time and your clients pay through Melanite. Your half reaches your own bank automatically.',
+            },
+            {
+              key: 'room_only' as const,
+              title: 'Renting the room only',
+              blurb:
+                'You rent the treatment room by the day and bring your own clients. You bill them yourself and pay for the room out of pocket.',
+            },
+          ]
+        ).map((option) => (
+          <button
+            key={option.key}
+            type="button"
+            onClick={() => setPracticeType(option.key)}
+            aria-pressed={practiceType === option.key}
+            className={
+              'block w-full rounded-field border px-4 py-3 text-left transition-colors ' +
+              (practiceType === option.key
+                ? 'border-gold bg-gold/10'
+                : 'border-line-control hover:border-line-strong')
+            }
+          >
+            <span
+              className={
+                'block text-sm font-medium ' +
+                (practiceType === option.key ? 'text-gold' : 'text-ink')
+              }
+            >
+              {option.title}
+            </span>
+            <span className="mt-1 block text-xs leading-relaxed text-ink-muted">
+              {option.blurb}
+            </span>
+          </button>
+        ))}
+
+        <p className="text-xs text-ink-faint">
+          Melanite can change this later if what you do here changes.
+        </p>
+      </fieldset>
+
       {error && <Notice>{error}</Notice>}
 
       <Button
@@ -86,7 +151,13 @@ export function ProfileForm({
         disabled={pending}
         onClick={() =>
           start(async () => {
-            const result = await saveProfile({ firstName, lastName, phone, credentials })
+            const result = await saveProfile({
+              firstName,
+              lastName,
+              phone,
+              credentials,
+              practiceType,
+            })
             if (result?.error) setError(result.error)
           })
         }

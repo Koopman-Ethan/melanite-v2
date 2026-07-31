@@ -98,3 +98,39 @@ describe('what a provider may open', () => {
     expect(canOpenStep('director', 3, 'room_only')).toBe(true)
   })
 })
+
+describe('what a room renter declares', () => {
+  // The question is what they PERFORM, not whether they need supervision. Asking the second puts
+  // Idaho's rules in their head, and "no" is unfalsifiable so nothing could be gated on it.
+  it('requires a director for the three Keoni named', async () => {
+    const { requiresMedicalDirection } = await import('@/lib/room-procedures')
+    for (const key of ['microneedling', 'injections', 'iv_therapy']) {
+      expect(requiresMedicalDirection([key]), key).toBe(true)
+    }
+  })
+
+  it('does not require one when they declared nothing supervised', async () => {
+    const { requiresMedicalDirection } = await import('@/lib/room-procedures')
+    expect(requiresMedicalDirection([])).toBe(false)
+  })
+
+  it('requires one if ANY declared procedure needs it', async () => {
+    const { requiresMedicalDirection } = await import('@/lib/room-procedures')
+    expect(requiresMedicalDirection(['injections'])).toBe(true)
+  })
+
+  it('ignores a key that is no longer on the list', async () => {
+    // The list is code, so it can change. A renamed or removed key means the LIST moved, not
+    // that somebody declared something dangerous — refusing them the room over a rename would
+    // be the wrong way to fail.
+    const { requiresMedicalDirection } = await import('@/lib/room-procedures')
+    expect(requiresMedicalDirection(['something_retired'])).toBe(false)
+  })
+
+  it('says which supervised procedures were declared', async () => {
+    // For showing back to them, and to Keoni. "Requires a director" without saying why leaves
+    // her unable to answer the provider who asks.
+    const { supervisedLabels } = await import('@/lib/room-procedures')
+    expect(supervisedLabels(['injections', 'iv_therapy'])).toEqual(['Injections', 'IV therapy'])
+  })
+})

@@ -305,6 +305,15 @@ export const providers = pgTable('providers', {
   /** Chosen during setup and changeable afterwards by an admin — a room renter who later wants
    *  laser time should not need a database edit. */
   practiceType: practiceType().notNull().default('laser'),
+  /** What a room renter said they would perform, from `lib/room-procedures.ts`.
+   *
+   *  A DECLARATION, not an observation. Their appointments never touch this system, so this is
+   *  the only thing that says whether a medical director is needed — and it is a record of what
+   *  they told Melanite, which is the artifact that matters if anybody ever asks. */
+  roomProcedures: text().array(),
+  /** When they made that declaration. Without it, an empty list cannot be told apart from a
+   *  question nobody has answered yet — and those need very different handling. */
+  roomProceduresDeclaredAt: timestamp({ withTimezone: true }),
 
   // Stripe Connect (money out, to the provider).
   stripeAccountId: text(),

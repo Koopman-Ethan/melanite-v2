@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation'
 
 import { requireProvider } from '@/lib/auth/dal'
 import { db } from '@/lib/db'
+import { SUPERVISED_PROCEDURES, requiresMedicalDirection } from '@/lib/room-procedures'
 import { providerServices, providers } from '@/lib/db/schema'
 import { toCents, toMoney } from '@/lib/money'
 import { nextStepSlug } from '@/lib/onboarding'
@@ -36,6 +37,11 @@ export async function saveProfile(input: {
   lastName: string
   phone: string
   credentials: string
+  /** Laser provider, or somebody who only rents the room. Asked HERE rather than later
+   *  because it decides which of the remaining steps apply — a room renter needs no Connect
+   *  account and no laser service menu, and discovering that after making them do both is too
+   *  late to save them anything. */
+  practiceType: 'laser' | 'room_only'
 }): Promise<StepState> {
   const user = await requireProvider()
 
@@ -51,7 +57,17 @@ export async function saveProfile(input: {
     return { error: 'Enter your professional credentials — clients see them at checkout.' }
   }
 
-  await completeStep(user.id, 2, { firstName, lastName, phone, credentials })
+  if (input.practiceType !== 'laser' && input.practiceType !== 'room_only') {
+    return { error: 'Choose how you will be working at Melanite.' }
+  }
+
+  await completeStep(user.id, 2, {
+    firstName,
+    lastName,
+    phone,
+    credentials,
+    practiceType: input.practiceType,
+  })
 
   redirect('/onboarding/license')
 }
@@ -167,6 +183,45 @@ export async function saveDirectorChoice(choice: 'melanite' | 'own'): Promise<St
 
   await completeStep(user.id, 5, { medicalDirectorType: choice })
   redirect('/onboarding/services')
+}
+
+/**
+ * Step 5 for somebody who only rents the room.
+ *
+ *  They declare what they will perform; the app decides whether that needs a medical director.
+ *  Asking "do you need one?" would put Idaho's supervision rules in their head, and "no" is
+ *  unfalsifiable — nothing could be gated on it.
+ *
+ *  Declaring a supervised procedure does NOT block finishing setup. It records what they said
+ *  and leaves room rental closed until a director is on file, because refusing to let somebody
+ *  finish creating an account is a worse answer than letting them in and withholding the one
+ *  thing that needs supervision.
+ */
+export async function saveRoomProcedures(procedures: string[]): Promise<StepState> {
+  const user = await requireProvider()
+
+  const known = new Set(SUPERVISED_PROCEDURES.map((p) => p.key))
+  const declared = procedures.filter((p) => known.has(p))
+
+  if (declared.length !== procedures.length) {
+    return { error: 'Something went wrong with that selection. Try again.' }
+  }
+
+  // Timestamped, because an empty list and an unanswered question look identical without it —
+  // and "she told us on this date" is the part that matters later.
+  await completeStep(user.id, 5, {
+    roomProcedures: declared,
+    roomProceduresDeclaredAt: new Date(),
+    // Room rental stays closed while supervision is owed. Not a punishment: Melanite owns the
+    // room, and it is Melanite that carries the consequence of unsupervised work in it.
+    roomRentalEnabled: !requiresMedicalDirection(declared),
+    // ACTIVE HERE. For a laser provider that happens at step 6 when they pick their services,
+    // but a room renter has no step 6 — leaving the flip there would strand every one of them
+    // as `pending` forever, unable to sign in to anything.
+    status: 'active' as const,
+  })
+
+  redirect('/onboarding/done')
 }
 
 /** Step 6 — the services offered, and the last step.
