@@ -3,12 +3,14 @@
 import { useState, useTransition } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { groupByCategory } from '@/lib/service-groups'
 
 import { addProviderService, type ServiceActionState } from './actions'
 
 export interface CatalogOption {
   id: string
   name: string
+  category: string | null
   description: string | null
   suggestedDurationMins: number
   minDurationMins: number
@@ -55,11 +57,20 @@ export function AddService({ options }: { options: CatalogOption[] }) {
           onChange={(e) => choose(e.target.value)}
           className="w-full rounded-field border border-line bg-overlay px-3 py-2 text-sm text-ink"
         >
-          {options.map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.name}
-            </option>
-          ))}
+          {groupByCategory(options).map((group) => {
+            const opts = group.items.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.name}
+              </option>
+            ))
+            return group.category ? (
+              <optgroup key={group.category} label={group.category}>
+                {opts}
+              </optgroup>
+            ) : (
+              opts
+            )
+          })}
         </select>
       </label>
 

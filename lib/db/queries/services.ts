@@ -65,6 +65,7 @@ export async function getProviderServices(providerId: string): Promise<ProviderS
 export interface CatalogService {
   id: string
   name: string
+  category: string | null
   description: string | null
   suggestedDurationMins: number
   minDurationMins: number
@@ -82,6 +83,7 @@ export async function getAvailableServices(providerId: string): Promise<CatalogS
     .select({
       id: services.id,
       name: services.name,
+      category: services.category,
       description: services.description,
       suggestedDurationMins: services.suggestedDurationMins,
       minDurationMins: services.minDurationMins,
@@ -97,5 +99,5 @@ export async function getAvailableServices(providerId: string): Promise<CatalogS
       ),
     )
     .where(and(eq(services.active, true), isNull(providerServices.id)))
-    .orderBy(asc(services.name))
+    .orderBy(asc(services.category), asc(services.name))
 }

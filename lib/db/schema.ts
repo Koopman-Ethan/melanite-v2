@@ -492,6 +492,17 @@ export const services = pgTable('services', {
   packageEligible: boolean().notNull().default(false),
   /** Ablative lasers (CO2, Erbium) need training beyond the standard RN/NP/PA license. */
   advancedTierRequired: boolean().notNull().default(false),
+  /** How the catalogue is grouped when somebody has to pick from it.
+   *
+   *  Presentation, not policy — nothing is gated on it. It exists because laser hair removal
+   *  went from four sizes to twelve named body areas, which turned every service dropdown into
+   *  a flat list of twenty-odd options where the twelve that belong together are only adjacent
+   *  by luck of the alphabet.
+   *
+   *  Free text rather than an enum: adding a group is a catalogue decision, not a schema one,
+   *  and an enum would need a migration to sell something new. Null means ungrouped, which
+   *  renders last rather than disappearing. */
+  category: text(),
   colorHex: text(),
   active: boolean().notNull().default(true),
 }, (t) => [index().on(t.active)])

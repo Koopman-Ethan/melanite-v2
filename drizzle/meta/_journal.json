@@ -169,6 +169,13 @@
       "when": 1785526278703,
       "tag": "0023_booking_cherry",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1785527517137,
+      "tag": "0024_lhr_body_areas",
+      "breakpoints": true
     }
   ]
 }

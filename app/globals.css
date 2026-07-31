@@ -63,8 +63,13 @@
    * through whatever happens to be behind it and lands somewhere nobody checked. It has now
    * failed axe twice, both times on 10–12px text, which is where the margin is thinnest — and
    * both times only once the page had real data to render, so the accessibility suite had been
-   * passing on an empty screen. `opacity` on a whole inactive card is fine; on a line of text
-   * it is a contrast bug waiting for content. */
+   * passing on an empty screen.
+   *
+   * This note used to say `opacity` on a whole inactive CARD was fine. It is not, and that
+   * carve-out is what let the third failure through: `opacity-70` on a retired service card
+   * multiplied through its 10px badges and landed them at 2.95:1. Recede a card with a
+   * background token instead — `bg-canvas` against `bg-surface` reads as inactive and changes
+   * no text contrast at all. */
 
   /* Severity palette, carried from v1. */
   --color-success: #4c9a5e;

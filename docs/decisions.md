@@ -804,23 +804,56 @@ is not a safety net.
   what live data showed (`transfer_reversal: null`). If refunds start being issued WITH
   transfer reversal, `handleChargeRefunded` needs the proportional split instead.
 
-### Laser hair removal by body area — durations from Keoni, 2026-07-31
+### Laser hair removal by body area — BUILT — 2026-07-31
 
-Small / Medium / Large (and XSmall) are being retired in favour of named areas. Keoni gave the
-timings as a pair: what a treatment actually takes, and the longest a provider should be able to
-book for it. The second number is the one the calendar needs — booking the optimistic figure is
-how a day runs late — so the DEFAULT duration is the ceiling, not the typical.
+XSmall / Small / Medium / Large are retired; twelve named body areas replace them. The sizes
+asked a client to classify their own body against a bracket and asked the provider to agree —
+"is a Brazilian medium?" is not a question a booking page can settle, and both people already
+say "Brazilian" out loud.
 
-| Area | Typical | Book no more than |
+**Retired, not deleted.** `provider_services.service_id` is ON DELETE RESTRICT and appointments
+reference the provider service, so deleting the sizes would either fail or destroy the record of
+what a past client was actually treated for. `services.active = false` removes them from every
+path that creates a NEW appointment — `getAvailableServices` and `getBookableServices` both
+filter on it — while history keeps naming them correctly. Providers who offered one keep their
+row, marked "retired by Melanite", which is the cue to add the areas they actually perform.
+
+**Durations, from Keoni 2026-07-31.** She gave a pair for each: what it typically takes, and the
+longest a provider should book. Those map onto `suggested_duration_mins` and
+`max_duration_mins` — NOT both onto the default. An earlier note here said the default should be
+her ceiling; that was wrong. Defaulting every back to 90 minutes would block most of a treatment
+slot a day for time she said is not normally used.
+
+| Area | Default | Max |
 | --- | --- | --- |
-| Back, full legs, chest, abs | 1 hour | 1 hour 30 |
-| Half legs, Brazilian | 30 min | 1 hour |
-| Upper lip, underarms, full face | 15 min | 30 min |
+| Back, full legs, chest, abs | 60 | 90 |
+| Half legs, Brazilian | 30 | 60 |
+| Upper lip, underarms, full face | 15 | 30 |
 
-Bikini, full arms and half arms were not in her reply and still need timings. Underarms was in
-her answer but not in the original list of areas, so it is included.
+**Three areas were not in her reply** and are marked as proposed in migration 0024, so they can
+be corrected without re-deriving which were guessed:
 
-Providers set their own duration per service, so these are the defaults offered, not a cap.
+| Area | Default | Max | Basis |
+| --- | --- | --- | --- |
+| Half arms | 30 | 60 | old Medium bracket, alongside half leg which she timed at 30/60 |
+| Full arms | 45 | 60 | between half arms and full legs |
+| Bikini | 30 | 60 | smaller than a Brazilian, timed the same to be safe |
+
+Underarms was in her durations but not her original list of areas, so it is included.
+
+Providers set their own duration per service, so these are the defaults offered and the bounds
+allowed, not a cap. **Existing providers must add the areas they perform when this goes live** —
+prices cannot be carried over, because a size bracket does not map onto one area.
+
+**Grouping.** Twelve areas took the catalogue from 15 options to 23, so `services.category`
+groups both service dropdowns into `<optgroup>`s. Presentation only, nothing is gated on it, and
+free text rather than an enum so adding a group is not a migration. Ordering is decided in SQL
+in both queries — category, then name — because two places sorting the same list eventually
+disagree. A lone group renders without a heading: "Laser hair removal" over twelve options each
+named "Laser Hair Removal — …" is noise.
+
+No LHR package template exists yet. That is not a gap in this change — it belongs with
+Nichole's Groupon entry, which is the thing that needs one.
 
 ### Cherry on appointments — BUILT — 2026-07-31
 

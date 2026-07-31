@@ -6,6 +6,7 @@ import { useFormStatus } from 'react-dom'
 import { Button } from '@/components/ui/button'
 import { Field, Notice } from '@/components/ui/field'
 import { cn } from '@/lib/cn'
+import { groupByCategory } from '@/lib/service-groups'
 
 import { createBooking, type BookState } from './actions'
 import { MonthCalendar, type DayView } from './month-calendar'
@@ -18,6 +19,7 @@ export interface SlotView {
 
 export interface ServiceView {
   providerServiceId: string
+  category: string | null
   name: string
   price: string
   durationMins: number
@@ -112,11 +114,20 @@ export function BookForm({
           aria-label="Service"
           className="w-full rounded-field border border-line bg-surface px-3 py-2 text-sm text-ink"
         >
-          {services.map((s) => (
-            <option key={s.providerServiceId} value={s.providerServiceId}>
-              {s.name} — {usd(s.price)} · {s.durationMins} min
-            </option>
-          ))}
+          {groupByCategory(services).map((group) => {
+            const options = group.items.map((s) => (
+              <option key={s.providerServiceId} value={s.providerServiceId}>
+                {s.name} — {usd(s.price)} · {s.durationMins} min
+              </option>
+            ))
+            return group.category ? (
+              <optgroup key={group.category} label={group.category}>
+                {options}
+              </optgroup>
+            ) : (
+              options
+            )
+          })}
         </select>
       </section>
 

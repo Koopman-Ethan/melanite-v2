@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { and, eq, gt, inArray, lt, sql } from 'drizzle-orm'
+import { and, asc, eq, gt, inArray, lt, sql } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
 import { bookings, platformSettings, providerServices, services } from '@/lib/db/schema'
@@ -272,6 +272,8 @@ export interface BookableService {
   providerServiceId: string
   serviceId: string
   name: string
+  /** Which group this sits under in the dropdown. Null renders last, not nowhere. */
+  category: string | null
   price: string
   durationMins: number
   minDurationMins: number
@@ -291,6 +293,7 @@ export async function getBookableServices(providerId: string): Promise<BookableS
       providerServiceId: providerServices.id,
       serviceId: services.id,
       name: services.name,
+      category: services.category,
       price: providerServices.price,
       durationMins: providerServices.durationMins,
       minDurationMins: services.minDurationMins,
@@ -306,5 +309,7 @@ export async function getBookableServices(providerId: string): Promise<BookableS
         eq(services.active, true),
       ),
     )
-    .orderBy(services.name)
+    // Grouped in the dropdown, so grouped here. Alphabetical within the group: twelve hair
+    // removal areas in one list is scanned by first letter, not by anatomy.
+    .orderBy(asc(services.category), asc(services.name))
 }

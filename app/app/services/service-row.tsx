@@ -51,8 +51,13 @@ export function ServiceRow({ service }: { service: ServiceRowData }) {
   return (
     <li
       className={cn(
-        'rounded-card border bg-surface p-5',
-        retired ? 'border-line/60 opacity-70' : 'border-line',
+        // Recessed by BACKGROUND, not by opacity. `opacity-70` here multiplied through every
+        // child, and the 10px badges inside landed at 2.95:1 — axe caught it the first time a
+        // service was actually retired, which is to say the first time this branch rendered
+        // with real content. The badge, the explanation and the absent buttons are what say
+        // "retired"; the tint only has to make the card recede.
+        'rounded-card border p-5',
+        retired ? 'border-line/60 bg-canvas' : 'border-line bg-surface',
       )}
     >
       <div className="flex flex-wrap items-start justify-between gap-4">

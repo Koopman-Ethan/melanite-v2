@@ -90,6 +90,7 @@ export default async function BookPage({
         services={services.map((s) => ({
           providerServiceId: s.providerServiceId,
           name: s.name,
+          category: s.category,
           price: s.price,
           durationMins: s.durationMins,
         }))}
