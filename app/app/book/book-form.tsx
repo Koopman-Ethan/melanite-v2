@@ -13,7 +13,7 @@ import { MonthCalendar, type DayView } from './month-calendar'
 export interface SlotView {
   startTime: string
   available: boolean
-  reason?: 'taken' | 'past' | 'after-hours'
+  reason?: 'taken' | 'past' | 'after-hours' | 'training'
 }
 
 export interface ServiceView {
@@ -159,11 +159,13 @@ export function BookForm({
                 title={
                   slot.reason === 'taken'
                     ? 'Already booked — the laser is shared between providers'
-                    : slot.reason === 'past'
-                      ? 'Already passed'
-                      : slot.reason === 'after-hours'
-                        ? 'Would run past closing'
-                        : undefined
+                    : slot.reason === 'training'
+                      ? 'Melanite is running a training course that day'
+                      : slot.reason === 'past'
+                        ? 'Already passed'
+                        : slot.reason === 'after-hours'
+                          ? 'Would run past closing'
+                          : undefined
                 }
                 className={cn(
                   'rounded-field border px-2 py-2 text-xs tabular-nums transition-colors',

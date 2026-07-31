@@ -78,11 +78,24 @@ export interface CalendarRoomRental {
   status: string
 }
 
+/** A training course, as it appears on the calendar. Derived from the course rather than
+ *  stored: a course that moves takes its block with it, which duplicated blackout rows would
+ *  not. */
+export interface CalendarTraining {
+  courseId: string
+  day: string
+  startTime: Date
+  endTime: Date
+  /** Which of the two days this block is, so the label can say so. */
+  dayNumber: 1 | 2
+}
+
 export interface CalendarWeek {
   days: string[]
   hours: LaserHours
   bookings: CalendarBooking[]
   roomRentals: CalendarRoomRental[]
+  training: CalendarTraining[]
   stats: {
     booked: number
     cancelled: number
@@ -259,6 +272,42 @@ export async function getCalendarWeek(weekStart: string): Promise<CalendarWeek> 
       providerName: `${l.firstName} ${l.lastName}`,
     }))
 
+  // Training courses overlapping this week. Two rows per course at most — day one and day two
+  // have their own hours — and only `scheduled` ones, matching the rule the availability grid
+  // and every booking guard use. Three places agreeing on "when is the laser out of service" is
+  // the point of deriving it rather than storing it.
+  const courseRows = (await db.execute(sql`
+    select course_id, day_number, starts_at, ends_at from (
+      select tc.id as course_id, 1 as day_number,
+             (tc.day1_date + tc.day1_start::time) AT TIME ZONE 'America/Denver' as starts_at,
+             (tc.day1_date + tc.day1_end::time)   AT TIME ZONE 'America/Denver' as ends_at
+        from training_courses tc where tc.status = 'scheduled'
+      union all
+      select tc.id, 2,
+             (tc.day2_date + tc.day2_start::time) AT TIME ZONE 'America/Denver',
+             (tc.day2_date + tc.day2_end::time)   AT TIME ZONE 'America/Denver'
+        from training_courses tc
+       where tc.status = 'scheduled' and tc.day2_date is not null
+    ) blocks
+    where ends_at > ${from.toISOString()}::timestamptz
+      and starts_at < ${to.toISOString()}::timestamptz
+  `)) as unknown as {
+    rows: Array<{ course_id: string; day_number: number; starts_at: string; ends_at: string }>
+  }
+
+  const training: CalendarTraining[] = (courseRows.rows ?? []).map((r) => {
+    const startTime = new Date(r.starts_at)
+    return {
+      courseId: r.course_id,
+      // The Denver calendar day, not the UTC one — a 10:00 start is the 15th in Boise whatever
+      // UTC calls it.
+      day: new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(startTime),
+      startTime,
+      endTime: new Date(r.ends_at),
+      dayNumber: r.day_number === 2 ? 2 : 1,
+    }
+  })
+
   const dayEnd = 24 * 60
   const entries: CalendarBooking[] = rows.map((r) => {
     const start = denverPlacement(r.startTime)
@@ -303,6 +352,7 @@ export async function getCalendarWeek(weekStart: string): Promise<CalendarWeek> 
     hours,
     bookings: entries,
     roomRentals,
+    training,
     stats: {
       booked: occupying.length,
       cancelled: entries.length - occupying.length,

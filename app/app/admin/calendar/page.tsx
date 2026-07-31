@@ -194,6 +194,7 @@ export default async function AdminCalendarPage({
         days={week.days}
         bookings={week.bookings}
         roomRentals={week.roomRentals}
+        training={week.training}
         openTime={week.hours.openTime}
         closeTime={week.hours.closeTime}
       />

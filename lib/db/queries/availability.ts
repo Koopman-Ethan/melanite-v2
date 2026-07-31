@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { and, eq, gt, inArray, lt } from 'drizzle-orm'
+import { and, eq, gt, inArray, lt, sql } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
 import { bookings, platformSettings, providerServices, services } from '@/lib/db/schema'
@@ -22,8 +22,12 @@ export interface Slot {
   endTime: Date
   available: boolean
   /** Why not, when unavailable — v1 returned a bare boolean, so the UI could not explain
-   *  itself and every greyed-out slot looked like the same problem. */
-  reason?: 'taken' | 'past' | 'after-hours'
+   *  itself and every greyed-out slot looked like the same problem.
+   *
+   *  `training` is distinct from `taken` on purpose: "somebody has the laser" and "Melanite is
+   *  teaching that day" are different facts, and a provider who reads the first will go looking
+   *  for whose appointment it is. */
+  reason?: 'taken' | 'past' | 'after-hours' | 'training'
 }
 
 export interface LaserHours {
@@ -64,6 +68,61 @@ export function denverInstant(date: string, time: string): Date {
   return new Date(asUtc + (utc.getTime() - local.getTime()))
 }
 
+/**
+ * Does this range run into a scheduled training course?
+ *
+ * ONE definition, used by the availability grid and by every path that inserts a booking. Four
+ * copies of a rule about when the laser is free is how a slot ends up bookable on one screen
+ * and refused on the next.
+ *
+ * A course has up to two days with their own hours, stored as a date plus wall-clock text. They
+ * are combined in Denver — the business timezone — because a course running 10:00–16:00 means
+ * those hours in Boise, not wherever the server happens to be. Doing this in UTC would move the
+ * block by an hour twice a year.
+ *
+ * Only `scheduled` courses block. A cancelled one is not happening and a completed one is in
+ * the past; either still blocking would quietly shrink the calendar forever.
+ */
+export function overlapsTrainingCourse(startIso: string, endIso: string) {
+  const denver = (date: string, time: string) =>
+    sql`((${sql.raw(date)} + ${sql.raw(time)}::time) AT TIME ZONE 'America/Denver')`
+
+  return sql`exists (
+    select 1 from training_courses tc
+     where tc.status = 'scheduled'
+       and (
+         (${denver('tc.day1_date', 'tc.day1_start')} < ${endIso}::timestamptz
+          and ${denver('tc.day1_date', 'tc.day1_end')} > ${startIso}::timestamptz)
+         or (tc.day2_date is not null
+          and ${denver('tc.day2_date', 'tc.day2_start')} < ${endIso}::timestamptz
+          and ${denver('tc.day2_date', 'tc.day2_end')} > ${startIso}::timestamptz)
+       )
+  )`
+}
+
+/** Course blocks overlapping a window, as ranges, for the availability grid. */
+async function courseBlocksBetween(from: Date, to: Date): Promise<Occupied[]> {
+  const rows = (await db.execute(sql`
+    select starts_at as "startTime", ends_at as "endTime" from (
+      select (tc.day1_date + tc.day1_start::time) AT TIME ZONE 'America/Denver' as starts_at,
+             (tc.day1_date + tc.day1_end::time)   AT TIME ZONE 'America/Denver' as ends_at
+        from training_courses tc where tc.status = 'scheduled'
+      union all
+      select (tc.day2_date + tc.day2_start::time) AT TIME ZONE 'America/Denver',
+             (tc.day2_date + tc.day2_end::time)   AT TIME ZONE 'America/Denver'
+        from training_courses tc
+       where tc.status = 'scheduled' and tc.day2_date is not null
+    ) blocks
+    where ends_at > ${from.toISOString()}::timestamptz
+      and starts_at < ${to.toISOString()}::timestamptz
+  `)) as unknown as { rows: Array<{ startTime: string; endTime: string }> }
+
+  return (rows.rows ?? []).map((r) => ({
+    startTime: new Date(r.startTime),
+    endTime: new Date(r.endTime),
+  }))
+}
+
 interface Occupied {
   startTime: Date
   endTime: Date
@@ -79,6 +138,7 @@ function buildSlots(
   durationMins: number,
   occupied: Occupied[],
   now: Date,
+  courses: Occupied[] = [],
 ): Slot[] {
   const strideMs = strideMins * 60_000
   const durationMs = durationMins * 60_000
@@ -91,7 +151,11 @@ function buildSlots(
     let reason: Slot['reason']
     if (endTime > close) reason = 'after-hours'
     else if (startTime <= now) reason = 'past'
-    else if (occupied.some((b) => b.startTime < endTime && b.endTime > startTime)) {
+    // Checked BEFORE `taken`, so a slot inside a course says so rather than reporting a
+    // booking that may not even exist.
+    else if (courses.some((c) => c.startTime < endTime && c.endTime > startTime)) {
+      reason = 'training'
+    } else if (occupied.some((b) => b.startTime < endTime && b.endTime > startTime)) {
       reason = 'taken'
     }
 
@@ -127,11 +191,15 @@ export async function getAvailability(
   const open = denverInstant(date, hours.openTime)
   const close = denverInstant(date, hours.closeTime)
 
-  // Every booking overlapping the day's window, across ALL providers.
-  const dayBookings = await occupyingBetween(open, close)
+  // Every booking overlapping the day's window, across ALL providers — and any training
+  // course, which takes the laser out of service for everybody.
+  const [dayBookings, dayCourses] = await Promise.all([
+    occupyingBetween(open, close),
+    courseBlocksBetween(open, close),
+  ])
 
   return {
-    slots: buildSlots(open, close, hours.strideMins, durationMins, dayBookings, now),
+    slots: buildSlots(open, close, hours.strideMins, durationMins, dayBookings, now, dayCourses),
     hours,
   }
 }
@@ -173,11 +241,13 @@ export async function getMonthAvailability(
     (_, i) => `${month}-${String(i + 1).padStart(2, '0')}`,
   )
 
-  // One query for the whole month rather than one per day.
-  const monthBookings = await occupyingBetween(
-    denverInstant(dates[0], hours.openTime),
-    denverInstant(dates[dayCount - 1], hours.closeTime),
-  )
+  // One query for the whole month rather than one per day, for both.
+  const monthStart = denverInstant(dates[0], hours.openTime)
+  const monthEnd = denverInstant(dates[dayCount - 1], hours.closeTime)
+  const [monthBookings, monthCourses] = await Promise.all([
+    occupyingBetween(monthStart, monthEnd),
+    courseBlocksBetween(monthStart, monthEnd),
+  ])
 
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(now)
 
@@ -185,7 +255,7 @@ export async function getMonthAvailability(
     const open = denverInstant(date, hours.openTime)
     const close = denverInstant(date, hours.closeTime)
     const dayBookings = monthBookings.filter((b) => b.startTime < close && b.endTime > open)
-    const slots = buildSlots(open, close, hours.strideMins, durationMins, dayBookings, now)
+    const slots = buildSlots(open, close, hours.strideMins, durationMins, dayBookings, now, monthCourses)
 
     return {
       date,

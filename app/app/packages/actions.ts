@@ -13,7 +13,7 @@ import {
 import { canBook, bookingBlockedReasons, requireProvider } from '@/lib/auth/dal'
 import { db } from '@/lib/db'
 import { isExclusionViolation } from '@/lib/db/errors'
-import { denverInstant, getAvailability, getLaserHours } from '@/lib/db/queries/availability'
+import { denverInstant, getAvailability, getLaserHours, overlapsTrainingCourse } from '@/lib/db/queries/availability'
 import {
   clientPackageItems,
   clientPackages,
@@ -419,6 +419,9 @@ export async function bookFromPackage(input: {
         AND b.start_time < ${endTime.toISOString()}::timestamptz
         AND b.end_time   > ${startTime.toISOString()}::timestamptz
     )
+    -- ...and not inside a training course. Same statement as the booking check on
+    -- purpose: two separate reads could each pass against a different snapshot.
+    AND NOT ${overlapsTrainingCourse(startTime.toISOString(), endTime.toISOString())}
     RETURNING id
   `)
   } catch (err) {

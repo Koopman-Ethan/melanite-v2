@@ -1,9 +1,10 @@
 import 'server-only'
 
-import { and, asc, desc, eq, gte, isNotNull, lt, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, lt, sql } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
-import { trainingCourses, trainingEnrollments } from '@/lib/db/schema'
+import { denverInstant } from '@/lib/db/queries/availability'
+import { bookings, providers, trainingCourses, trainingEnrollments } from '@/lib/db/schema'
 
 // Training courses and enrolments.
 //
@@ -404,4 +405,88 @@ export async function releaseSeat(courseId: string): Promise<void> {
     .update(trainingCourses)
     .set({ seatsTaken: sql`greatest(${trainingCourses.seatsTaken} - 1, 0)` })
     .where(eq(trainingCourses.id, courseId))
+}
+
+/** Appointments that would sit inside a course's hours.
+ *
+ *  The other half of blocking the calendar. Stopping new bookings during a course is easy; the
+ *  harder question is what happens when a course is scheduled over appointments that already
+ *  exist — and the honest answer is that only Keoni can decide, because the alternatives are
+ *  cancelling somebody's treatment or double-booking the laser.
+ *
+ *  So it refuses and names them. Not destructive, and not a silent overlap: she moves or
+ *  cancels the appointments, then schedules the course. Cancelled and no-show bookings are
+ *  ignored — they do not occupy the laser, which is the same rule the overlap constraint uses.
+ */
+export async function bookingsDuringCourse(input: {
+  day1Date: string
+  day1Start: string
+  day1End: string
+  day2Date: string | null
+  day2Start: string
+  day2End: string
+}): Promise<Array<{ clientName: string; startTime: Date; providerName: string }>> {
+  const windows: Array<[Date, Date]> = [
+    [denverInstant(input.day1Date, input.day1Start), denverInstant(input.day1Date, input.day1End)],
+  ]
+  if (input.day2Date) {
+    windows.push([
+      denverInstant(input.day2Date, input.day2Start),
+      denverInstant(input.day2Date, input.day2End),
+    ])
+  }
+
+  const found: Array<{ clientName: string; startTime: Date; providerName: string }> = []
+
+  for (const [from, to] of windows) {
+    const rows = await db
+      .select({
+        clientName: bookings.clientName,
+        startTime: bookings.startTime,
+        providerName: sql<string>`${providers.firstName} || ' ' || ${providers.lastName}`,
+      })
+      .from(bookings)
+      .innerJoin(providers, eq(bookings.providerId, providers.id))
+      .where(
+        and(
+          inArray(bookings.status, ['upcoming', 'completed']),
+          gt(bookings.endTime, from),
+          lt(bookings.startTime, to),
+        ),
+      )
+      .orderBy(asc(bookings.startTime))
+
+    found.push(...rows)
+  }
+
+  return found
+}
+
+/** The refusal message, naming what is in the way. "Something conflicts" sends somebody hunting
+ *  through a calendar; this tells them which appointments to deal with. */
+export function courseConflictMessage(
+  conflicts: Array<{ clientName: string; startTime: Date; providerName: string }>,
+): string {
+  const when = (d: Date) =>
+    d.toLocaleString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZone: 'America/Denver',
+    })
+
+  const listed = conflicts
+    .slice(0, 4)
+    .map((c) => `${c.clientName} with ${c.providerName}, ${when(c.startTime)}`)
+    .join('; ')
+
+  const more = conflicts.length > 4 ? ` and ${conflicts.length - 4} more` : ''
+
+  return (
+    `${conflicts.length} appointment${conflicts.length === 1 ? '' : 's'} ` +
+    `already booked during those hours: ${listed}${more}. ` +
+    `Move or cancel them first — scheduling over them would double-book the laser.`
+  )
 }

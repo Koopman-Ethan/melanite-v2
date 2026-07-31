@@ -3,7 +3,11 @@
 import { useEffect, useState } from 'react'
 
 import { cn } from '@/lib/cn'
-import type { CalendarBooking, CalendarRoomRental } from '@/lib/db/queries/admin-calendar'
+import type {
+  CalendarBooking,
+  CalendarRoomRental,
+  CalendarTraining,
+} from '@/lib/db/queries/admin-calendar'
 
 // Layout only. Every position on this grid was computed on the server in Denver wall-clock —
 // this component never touches a timestamp, which is what keeps an admin in another timezone
@@ -129,16 +133,32 @@ const SLOT_LABEL: Record<string, string> = {
   pm: 'Afternoon',
 }
 
+/** Minutes since midnight in Denver. The grid is laid out in business-local minutes, so a
+ *  block positioned from UTC would slide by an hour half the year. */
+function minutesInDenver(at: Date): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Denver',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(at)
+  const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? 0)
+  const minute = Number(parts.find((p) => p.type === 'minute')?.value ?? 0)
+  return hour * 60 + minute
+}
+
 export function WeekGrid({
   days,
   bookings,
   roomRentals,
+  training,
   openTime,
   closeTime,
 }: {
   days: string[]
   bookings: CalendarBooking[]
   roomRentals: CalendarRoomRental[]
+  training: CalendarTraining[]
   openTime: string
   closeTime: string
 }) {
@@ -320,6 +340,27 @@ export function WeekGrid({
                       className="absolute inset-x-0 border-t border-line/40"
                     />
                   ))}
+
+                  {training
+                    .filter((t) => t.day === day)
+                    .map((t) => {
+                      const startMins = minutesInDenver(t.startTime)
+                      const endMins = minutesInDenver(t.endTime)
+                      return (
+                        <div
+                          key={`${t.courseId}-${t.dayNumber}`}
+                          style={{
+                            top: (startMins - openMinutes) * PX_PER_MIN,
+                            height: Math.max((endMins - startMins) * PX_PER_MIN, 18),
+                          }}
+                          className="pointer-events-none absolute inset-x-0 z-0 border-y border-info/40 bg-info/10 px-1 py-0.5"
+                        >
+                          <span className="text-[10px] font-medium uppercase tracking-wide text-info">
+                            Training · day {t.dayNumber}
+                          </span>
+                        </div>
+                      )
+                    })}
 
                   {dayBookings.map((b) => (
                     <BookingBlock

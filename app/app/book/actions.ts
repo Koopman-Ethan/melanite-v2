@@ -6,7 +6,7 @@ import { and, eq, sql } from 'drizzle-orm'
 import { redirect } from 'next/navigation'
 
 import { canBook, bookingBlockedReasons, requireProvider } from '@/lib/auth/dal'
-import { denverInstant, getLaserHours } from '@/lib/db/queries/availability'
+import { denverInstant, getLaserHours, overlapsTrainingCourse } from '@/lib/db/queries/availability'
 import { db } from '@/lib/db'
 import { isExclusionViolation } from '@/lib/db/errors'
 import { providerServices, services } from '@/lib/db/schema'
@@ -201,6 +201,9 @@ export async function createBooking(_prev: BookState, formData: FormData): Promi
               AND b.start_time < ${endTime.toISOString()}::timestamptz
               AND b.end_time   > ${startTime.toISOString()}::timestamptz
           )
+          -- ...and not inside a training course. Same statement as the booking check on
+          -- purpose: two separate reads could each pass against a different snapshot.
+          AND NOT ${overlapsTrainingCourse(startTime.toISOString(), endTime.toISOString())}
           RETURNING id AS booking_id
         `)
       : await db.execute(sql`
@@ -222,6 +225,9 @@ export async function createBooking(_prev: BookState, formData: FormData): Promi
           AND b.start_time < ${endTime.toISOString()}::timestamptz
           AND b.end_time   > ${startTime.toISOString()}::timestamptz
       )
+      -- ...and not inside a training course. Same statement as the booking check on
+      -- purpose: two separate reads could each pass against a different snapshot.
+      AND NOT ${overlapsTrainingCourse(startTime.toISOString(), endTime.toISOString())}
       RETURNING id
     )
     INSERT INTO checkout_links (booking_id, token, status, expires_at)

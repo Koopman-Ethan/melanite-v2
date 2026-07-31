@@ -11,7 +11,7 @@ import { bookingHasPayment, getProviderSharePct } from '@/lib/db/queries/admin-t
 import { INVITE_TTL_DAYS, providerExists } from '@/lib/db/queries/invites'
 import { splitClientPayment, toCents, toMoney } from '@/lib/money'
 import { PROVIDER_ALREADY_HOLDS } from '@/lib/payments/direction'
-import { denverInstant, getLaserHours } from '@/lib/db/queries/availability'
+import { denverInstant, getLaserHours, overlapsTrainingCourse } from '@/lib/db/queries/availability'
 import {
   bookings,
   clients,
@@ -344,6 +344,9 @@ export async function createManualBooking(input: {
         AND b.start_time < ${endTime.toISOString()}::timestamptz
         AND b.end_time   > ${startTime.toISOString()}::timestamptz
     )
+    -- ...and not inside a training course. Same statement as the booking check on
+    -- purpose: two separate reads could each pass against a different snapshot.
+    AND NOT ${overlapsTrainingCourse(startTime.toISOString(), endTime.toISOString())}
     RETURNING id
   `)
 

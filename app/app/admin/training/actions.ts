@@ -1,14 +1,19 @@
 'use server'
 
-import { eq } from 'drizzle-orm'
+import { and, asc, eq, gt, inArray, lt, sql } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 
 import { DATE, validateCourse } from '@/lib/validate/training-course'
 
 import { requireAdmin } from '@/lib/auth/dal'
 import { db } from '@/lib/db'
-import { getEnrollmentDetail, refreshPaymentStatus } from '@/lib/db/queries/training'
-import { ledgerEntries, trainingCourses, trainingEnrollments } from '@/lib/db/schema'
+import {
+  bookingsDuringCourse,
+  courseConflictMessage,
+  getEnrollmentDetail,
+  refreshPaymentStatus,
+} from '@/lib/db/queries/training'
+import { bookings, ledgerEntries, providers, trainingCourses, trainingEnrollments } from '@/lib/db/schema'
 import { sendEmail, trainingBalanceEmail } from '@/lib/email'
 import { toCents, toMoney } from '@/lib/money'
 import { appOrigin } from '@/lib/stripe/config'
@@ -35,6 +40,9 @@ export async function createCourse(input: {
 
   const invalid = validateCourse(input)
   if (invalid) return { error: invalid }
+
+  const conflicts = await bookingsDuringCourse(input)
+  if (conflicts.length > 0) return { error: courseConflictMessage(conflicts) }
 
   await db.insert(trainingCourses).values({
     day1Date: input.day1Date,
@@ -84,6 +92,11 @@ export async function updateCourse(
     // retroactively, against money already collected.
     return { error: 'Only a scheduled course can be edited.' }
   }
+
+  // Moving a course into occupied hours is the same problem as scheduling one there. Checked on
+  // edit as well, or the guard would be one "change the date" away from being bypassed.
+  const conflicts = await bookingsDuringCourse(input)
+  if (conflicts.length > 0) return { error: courseConflictMessage(conflicts) }
 
   await db
     .update(trainingCourses)
