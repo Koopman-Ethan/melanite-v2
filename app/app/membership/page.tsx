@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 
 import { requireProvider } from '@/lib/auth/dal'
 import { cn } from '@/lib/cn'
-import { GROWTH_HUB, MEDICAL_DIRECTOR } from '@/lib/product-names'
+import { GROWTH_HUB, MEDICAL_DIRECTOR, MEMBERSHIP_STATUS } from '@/lib/product-names'
 import { getEpicutis, getMembership, getMembershipCharges } from '@/lib/db/queries/membership'
 
 import { Epicutis } from './epicutis'
@@ -24,8 +24,9 @@ const date = (d: Date | string | null) =>
     : null
 
 const STATUS = {
-  active: { label: 'Active', className: 'border-success/40 bg-success/10 text-success' },
-  past_due: { label: 'Past due', className: 'border-warning/40 bg-warning/10 text-warning' },
+  ...MEMBERSHIP_STATUS,
+  // Wording this card owns. Both mean somebody cannot book, which is not a state the optional
+  // membership has an equivalent of.
   inactive: { label: 'Inactive', className: 'border-danger/40 bg-danger/10 text-danger' },
   none: { label: 'Not set up', className: 'border-line-strong bg-overlay text-ink-faint' },
 } as const

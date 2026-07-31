@@ -18,3 +18,17 @@ export const GROWTH_HUB = 'Melanite Growth Hub'
 
 /** The physician oversight subscription, which is also the laser booking gate. */
 export const MEDICAL_DIRECTOR = 'Medical director'
+
+/** How a membership's state is shown, in one vocabulary.
+ *
+ *  The two memberships are billed the same way and sit on the same page, so "this one is
+ *  running and paid for" must not read as `Active` on one card and `Subscribed` on the other —
+ *  two words for one state invites the question of what the difference is.
+ *
+ *  Only the states that genuinely mean the same thing live here. Each card words its own ABSENT
+ *  state, because those differ: no medical director is a problem that stops somebody working,
+ *  and no growth hub is simply a thing they have not bought. */
+export const MEMBERSHIP_STATUS = {
+  active: { label: 'Active', className: 'border-success/40 bg-success/10 text-success' },
+  past_due: { label: 'Past due', className: 'border-warning/40 bg-warning/10 text-warning' },
+} as const

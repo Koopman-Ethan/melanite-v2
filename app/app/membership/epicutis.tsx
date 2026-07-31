@@ -5,7 +5,7 @@ import { useState, useTransition } from 'react'
 import { Button } from '@/components/ui/button'
 import { Notice } from '@/components/ui/field'
 
-import { GROWTH_HUB } from '@/lib/product-names'
+import { GROWTH_HUB, MEMBERSHIP_STATUS } from '@/lib/product-names'
 
 import { startEpicutisSubscription } from './actions'
 
@@ -36,6 +36,15 @@ export function Epicutis({ epicutis }: { epicutis: EpicutisView }) {
 
   const subscribed = epicutis.status === 'active' || epicutis.status === 'past_due'
 
+  const badge =
+    epicutis.status === 'past_due'
+      ? MEMBERSHIP_STATUS.past_due
+      : epicutis.status === 'active'
+        ? MEMBERSHIP_STATUS.active
+        // This card's own absent state. "Not set up" would imply something is wrong; this
+        // membership is optional and not having it is a perfectly good place to be.
+        : { label: 'Not subscribed', className: 'border-line-strong bg-overlay text-ink-faint' }
+
   return (
     <section className="rounded-card border border-line bg-surface p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -45,17 +54,11 @@ export function Epicutis({ epicutis }: { epicutis: EpicutisView }) {
             Optional. $95 / month, cancel anytime.
           </p>
         </div>
-        {subscribed && (
-          <span
-            className={
-              epicutis.status === 'past_due'
-                ? 'rounded-field border border-warning/40 bg-warning/10 px-2.5 py-1 text-xs text-warning'
-                : 'rounded-field border border-success/30 bg-success/10 px-2.5 py-1 text-xs text-success'
-            }
-          >
-            {epicutis.status === 'past_due' ? 'Payment failed' : 'Subscribed'}
-          </span>
-        )}
+        {/* Always rendered, including when they have not subscribed — a card with no badge
+            beside one that has always has a badge reads as something missing. */}
+        <span className={`rounded-field border px-2.5 py-1 text-xs ${badge.className}`}>
+          {badge.label}
+        </span>
       </div>
 
       <ul className="mt-4 space-y-1.5">
