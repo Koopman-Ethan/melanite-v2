@@ -54,6 +54,18 @@ export const providerRole = pgEnum('provider_role', [
 
 export const providerStatus = pgEnum('provider_status', ['pending', 'active', 'inactive'])
 
+/** What a provider actually does here, and therefore which of the setup steps apply.
+ *
+ *  `laser` — books the shared laser and bills clients through Melanite. Needs a Connect account
+ *  to be paid, and a medical director to be allowed to treat.
+ *
+ *  `room_only` — rents the treatment room by the day and brings their own clients. Melanite
+ *  never handles their client money, so there is nothing to pay them and no Connect account to
+ *  create; they pay for the room out of pocket at checkout. Whether they need a medical
+ *  director depends on what they do in there, which is a declaration rather than something the
+ *  app can know — those appointments never touch this system. */
+export const practiceType = pgEnum('practice_type', ['laser', 'room_only'])
+
 export const medicalDirectorType = pgEnum('medical_director_type', ['melanite', 'own'])
 
 /** The booking gate. `melanite` path mirrors the Stripe subscription; `own` path is set
@@ -290,6 +302,9 @@ export const providers = pgTable('providers', {
 
   role: providerRole().notNull().default('provider'),
   status: providerStatus().notNull().default('pending'),
+  /** Chosen during setup and changeable afterwards by an admin — a room renter who later wants
+   *  laser time should not need a database edit. */
+  practiceType: practiceType().notNull().default('laser'),
 
   // Stripe Connect (money out, to the provider).
   stripeAccountId: text(),

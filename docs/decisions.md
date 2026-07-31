@@ -669,6 +669,57 @@ Scope when unblocked — this is a model change, not a UI change:
 - Earnings attribution per service has to split across the line items.
 - Package redemption has to decide whether one booking can consume sessions from several lines.
 
+### Room-only providers — BLOCKED on a list from Keoni — 2026-07-30
+
+Some providers only rent the treatment room by the day. They bring their own clients, bill them
+directly, and pay for the room out of their own pocket. Melanite never touches their client
+money.
+
+**Decided, and half built.** `providers.practiceType` is `laser` or `room_only`, defaults to
+`laser`, and is meant to be changeable by an admin afterwards — a room renter who later wants
+laser time must not need a database edit. The onboarding flow knows which steps apply:
+
+- **Connect (step 4) does not apply.** It is the rail that pays a provider their share of what a
+  client paid Melanite. There is no share, so the account would sit empty forever. The room
+  itself is a one-off Stripe Checkout with a typed card, which needs nothing set up in advance.
+- **The service menu (step 6) does not apply.** It is the Melanite laser catalogue, priced for
+  the booking flow. What happens in that room never touches this system.
+- **`bookingEnabled` already defaults false**, so "cannot use the laser" needs no new flag, and
+  `roomRentalEnabled` already defaults true.
+
+Numbering stays canonical for everybody and only the PATH differs, which is what lets
+`onboardingStep` keep one meaning across both kinds of provider — including the nine imported
+ones who all sit at 5.
+
+`lib/onboarding.ts` and the migration are done and tested. Nothing reads `practiceType` yet, so
+the behaviour is unchanged for everybody; it is inert until the piece below lands.
+
+**BLOCKED: which procedures require medical direction.**
+
+The remaining question is whether a room renter needs a medical director, and the app cannot
+observe the answer — their appointments never touch this system. Two ways to ask:
+
+- A bare yes/no. Fast, and it asks the PROVIDER to know Idaho's supervision rules. Most will
+  guess. "No" is unfalsifiable, so nothing can be gated on it.
+- **Chosen:** they tick what they intend to perform, from a short list where each category
+  carries a `requiresMedicalDirection` flag, and the app derives the answer.
+
+The second is better for three reasons. The rule lives in one place, so a change in the law is
+one edit rather than re-asking everybody. It is enforceable — declared a supervised procedure
+with no director on file, and room rental is blocked until there is one. And it is a real
+record: "she told us on 14 September she would be doing fillers" is defensible in a way that a
+ticked box is not.
+
+It is the same pattern as `services.advancedTierRequired`, which already stores a clinical rule
+as data rather than leaving it to memory.
+
+**Waiting on:** the category list from Keoni, with which require supervision. Inventing it would
+be inventing medical policy, which is the same reason multi-service bookings are blocked.
+
+**Honest limit, worth saying to Keoni:** this records INTENT. Nothing stops somebody declaring
+facials and doing fillers behind a closed door. The enforcement is her plus documents, exactly
+as `bookingEnabled` is today, and no amount of software changes that.
+
 ### Training: balance reminders — 2026-07-30
 
 A student who pays a deposit gets an enrolment email with a link to pay the balance, and Keoni
