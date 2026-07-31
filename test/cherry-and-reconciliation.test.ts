@@ -224,7 +224,9 @@ describe('who can see it', () => {
 
     expect(row, 'a Cherry hand-off must reach the admin tools page').toBeDefined()
     expect(row!.price).toBe('600.00')
-    expect(row!.packageName).toBe('ZZ Cherry Template')
+    expect(row!.what).toBe('ZZ Cherry Template')
+    // Packages and appointments share this list now, and they settle differently.
+    expect(row!.kind).toBe('package')
     // She has to chase this with a person, so the provider's name is not decoration.
     expect(row!.providerName.trim().length).toBeGreaterThan(0)
     expect(row!.waitingDays).toBe(3)

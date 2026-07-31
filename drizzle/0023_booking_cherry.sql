@@ -1,0 +1,1 @@
+ALTER TABLE "checkout_links" ADD COLUMN "cherry_started_at" timestamp with time zone;

@@ -405,6 +405,34 @@ export async function noteCherryHandoff(token: string): Promise<void> {
         ),
       )
   } catch (err) {
-    console.error('[cherry] could not record hand-off for', token, err)
+    console.error('[cherry] could not record package hand-off for', token, err)
+  }
+}
+
+/**
+ * The same, for an appointment.
+ *
+ * A separate function rather than a `table` parameter, because the two token spaces are
+ * separate and the tables have near-identical column lists. Passing the wrong one would compile
+ * cleanly, match nothing, and silently record nothing — which is exactly how `cherry_started_at`
+ * ended up on the wrong table the first time round.
+ *
+ * `isNull` keeps the FIRST hand-off. Somebody who clicks through to Cherry, comes back, and
+ * clicks again has been waiting since the first click, and that is the number Keoni chases on.
+ */
+export async function noteBookingCherryHandoff(token: string): Promise<void> {
+  try {
+    await db
+      .update(checkoutLinks)
+      .set({ cherryStartedAt: new Date() })
+      .where(
+        and(
+          eq(checkoutLinks.token, token),
+          eq(checkoutLinks.status, 'pending'),
+          isNull(checkoutLinks.cherryStartedAt),
+        ),
+      )
+  } catch (err) {
+    console.error('[cherry] could not record booking hand-off for', token, err)
   }
 }

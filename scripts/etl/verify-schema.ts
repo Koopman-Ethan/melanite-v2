@@ -91,22 +91,28 @@ const CHECKS: Check[] = [
       ).length >= 1,
   },
   {
-    label: 'cherry_started_at is not on checkout_links',
+    label: 'cherry_started_at is on all three financeable things',
     because:
-      'it was first added to checkout_links, which is 1:1 with a BOOKING — the two tables have ' +
-      'near-identical column lists, so nothing complained and the value was written nowhere useful',
-    // Asserts the absence, not an exact set of tables. It legitimately lives on
-    // package_checkout_links and training_enrollments now, and will spread further as more
-    // things can be financed; a check that has to be edited every time is one that gets its
-    // number bumped without being read.
+      'a hand-off written to a column that is missing on this environment throws, and the catch ' +
+      'around it swallows the error — the client reaches Cherry and nobody ever hears about it',
+    // This check used to assert the column's ABSENCE from checkout_links, because that is where
+    // it was first added by mistake while building PACKAGE financing: the two tables have
+    // near-identical column lists, so the write compiled, matched nothing, and recorded nowhere.
+    //
+    // Appointments can be financed now, so the column belongs there and that check would be a
+    // permanent false alarm. The original mistake — writing to the wrong table — is not
+    // something a schema check can see, so it is covered by test/cherry-handoff.test.ts, which
+    // runs both actions and reads back the row each one was supposed to touch.
     run: async (q) =>
       (
         await rows(
           q,
           `SELECT 1 FROM information_schema.columns
-            WHERE column_name = 'cherry_started_at' AND table_name = 'checkout_links'`,
+            WHERE column_name = 'cherry_started_at'
+              AND table_name IN ('checkout_links', 'package_checkout_links',
+                                 'training_enrollments')`,
         )
-      ).length === 0,
+      ).length === 3,
   },
   {
     label: 'every migration on disk has been applied',

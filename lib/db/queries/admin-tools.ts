@@ -5,6 +5,7 @@ import { and, asc, desc, eq, isNotNull, isNull, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import {
   bookings,
+  checkoutLinks,
   ledgerEntries,
   packageCheckoutLinks,
   packageTemplates,
@@ -85,16 +86,20 @@ export async function getUnpaidBookings(limit = 50): Promise<UnpaidBooking[]> {
 
 export interface CherryHandoff {
   id: string
+  /** Which financing route this is, because the two are settled differently: a package is
+   *  recorded as a package payment, an appointment against the appointment itself. */
+  kind: 'package' | 'booking'
   clientName: string | null
   clientEmail: string | null
   providerName: string
-  packageName: string
+  /** The package name, or the service and when the appointment is. */
+  what: string
   price: string
   startedAt: Date
   waitingDays: number
 }
 
-/** Clients who left for Cherry on a package and have not been settled since.
+/** Everybody who left for Cherry and has not been settled since.
  *
  *  This is the one payment route with no webhook and no callback. The client finishes on
  *  Cherry's site, Cherry pays Keoni in full, and Keoni owes the provider their half — a chain
@@ -103,32 +108,82 @@ export interface CherryHandoff {
  *
  *  Recorded intent, not payment. A row here means "somebody went to apply", which is a reason
  *  to go and look at Cherry, not a figure to put in the ledger. It leaves the list the moment
- *  the package is paid for by any route — including Keoni recording it by hand below — so it
- *  cannot linger after it has been dealt with.
+ *  the thing is paid for by any route — including Keoni recording it by hand — so it cannot
+ *  linger after it has been dealt with.
+ *
+ *  Packages and appointments in ONE list, oldest first. Two lists would mean two places to
+ *  remember to look, and the newer one is the one that gets forgotten — the entire failure this
+ *  screen exists to prevent. Merged in JS rather than a SQL union because the two sides join
+ *  through completely different tables; a union would need matching column lists across both,
+ *  which is how `cherry_started_at` got added to the wrong table in the first place.
  */
 export async function getCherryHandoffs(limit = 25): Promise<CherryHandoff[]> {
-  return db
-    .select({
-      id: packageCheckoutLinks.id,
-      clientName: packageCheckoutLinks.clientName,
-      clientEmail: packageCheckoutLinks.clientEmail,
-      providerName: sql<string>`${providers.firstName} || ' ' || ${providers.lastName}`,
-      packageName: packageTemplates.name,
-      price: packageCheckoutLinks.price,
-      startedAt: sql<Date>`${packageCheckoutLinks.cherryStartedAt}`,
-      waitingDays: sql<number>`floor(extract(epoch from now() - ${packageCheckoutLinks.cherryStartedAt}) / 86400)::int`,
-    })
-    .from(packageCheckoutLinks)
-    .innerJoin(providers, eq(packageCheckoutLinks.providerId, providers.id))
-    .innerJoin(packageTemplates, eq(packageCheckoutLinks.packageTemplateId, packageTemplates.id))
-    .where(
-      and(
-        isNotNull(packageCheckoutLinks.cherryStartedAt),
-        eq(packageCheckoutLinks.status, 'pending'),
-      ),
-    )
-    .orderBy(asc(packageCheckoutLinks.cherryStartedAt))
-    .limit(limit)
+  const [packages, appointments] = await Promise.all([
+    db
+      .select({
+        id: packageCheckoutLinks.id,
+        clientName: packageCheckoutLinks.clientName,
+        clientEmail: packageCheckoutLinks.clientEmail,
+        providerName: sql<string>`${providers.firstName} || ' ' || ${providers.lastName}`,
+        what: packageTemplates.name,
+        price: packageCheckoutLinks.price,
+        startedAt: sql<Date>`${packageCheckoutLinks.cherryStartedAt}`,
+        waitingDays: sql<number>`floor(extract(epoch from now() - ${packageCheckoutLinks.cherryStartedAt}) / 86400)::int`,
+      })
+      .from(packageCheckoutLinks)
+      .innerJoin(providers, eq(packageCheckoutLinks.providerId, providers.id))
+      .innerJoin(packageTemplates, eq(packageCheckoutLinks.packageTemplateId, packageTemplates.id))
+      .where(
+        and(
+          isNotNull(packageCheckoutLinks.cherryStartedAt),
+          eq(packageCheckoutLinks.status, 'pending'),
+        ),
+      )
+      .orderBy(asc(packageCheckoutLinks.cherryStartedAt))
+      .limit(limit),
+
+    db
+      .select({
+        id: checkoutLinks.id,
+        clientName: bookings.clientName,
+        clientEmail: bookings.clientEmail,
+        providerName: sql<string>`${providers.firstName} || ' ' || ${providers.lastName}`,
+        what: sql<string>`${services.name} || ', ' || to_char(${bookings.startTime} at time zone 'America/Denver', 'FMMon FMDD')`,
+        price: bookings.price,
+        startedAt: sql<Date>`${checkoutLinks.cherryStartedAt}`,
+        waitingDays: sql<number>`floor(extract(epoch from now() - ${checkoutLinks.cherryStartedAt}) / 86400)::int`,
+      })
+      .from(checkoutLinks)
+      .innerJoin(bookings, eq(checkoutLinks.bookingId, bookings.id))
+      .innerJoin(providers, eq(bookings.providerId, providers.id))
+      .innerJoin(providerServices, eq(bookings.providerServiceId, providerServices.id))
+      .innerJoin(services, eq(providerServices.serviceId, services.id))
+      .where(
+        and(
+          isNotNull(checkoutLinks.cherryStartedAt),
+          eq(checkoutLinks.status, 'pending'),
+          // A cancelled appointment is not something to chase somebody about, whatever they
+          // started on Cherry.
+          sql`${bookings.status} <> 'cancelled'`,
+          // Paid by some other route in the meantime — it is settled, whoever settled it.
+          sql`not exists (
+            select 1 from ${ledgerEntries}
+            where ${ledgerEntries.subjectType} = 'booking'
+              and ${ledgerEntries.subjectId} = ${bookings.id}
+          )`,
+        ),
+      )
+      .orderBy(asc(checkoutLinks.cherryStartedAt))
+      .limit(limit),
+  ])
+
+  return [
+    ...packages.map((p) => ({ ...p, kind: 'package' as const })),
+    ...appointments.map((b) => ({ ...b, kind: 'booking' as const })),
+  ]
+    // Oldest first: the one waiting longest is the one to chase.
+    .sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime())
+    .slice(0, limit)
 }
 
 export interface ManualEntry {

@@ -94,10 +94,13 @@ export default async function AdminToolsPage() {
                 <div className="min-w-0">
                   <p className="font-medium">
                     {c.clientName ?? c.clientEmail ?? 'Client'}{' '}
-                    <span className="font-normal text-ink-muted">· {c.packageName}</span>
+                    <span className="font-normal text-ink-muted">· {c.what}</span>
                   </p>
                   <p className="mt-0.5 text-xs text-ink-faint">
-                    {c.providerName} · started{' '}
+                    {/* Which one it is decides how it gets settled, so it is stated rather
+                        than left to be inferred from the name beside it. */}
+                    {c.kind === 'package' ? 'Package' : 'Appointment'} · {c.providerName} ·
+                    started{' '}
                     {c.waitingDays === 0
                       ? 'today'
                       : `${c.waitingDays} day${c.waitingDays === 1 ? '' : 's'} ago`}
@@ -115,8 +118,8 @@ export default async function AdminToolsPage() {
             be worse than no signal at all. */}
         <p className="text-xs text-ink-faint">
           These clients opened Cherry to apply. It is not proof they were approved or that they
-          paid — check Cherry, then record it as a package payment so the provider gets their
-          half. Each one disappears from this list once the package is paid for.
+          paid — check Cherry, then record it here as a payment so the provider gets their half.
+          Each one disappears from this list once it has been paid for by any route.
         </p>
       </section>
 

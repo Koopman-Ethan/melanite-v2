@@ -51,10 +51,24 @@ async function main() {
     )
   `)
 
-  const applied = await db.execute<{ hash: string }>(
-    sql`select hash from drizzle.__drizzle_migrations`,
+  const applied = await db.execute<{ hash: string; created_at: string }>(
+    sql`select hash, created_at from drizzle.__drizzle_migrations`,
   )
-  const done = new Set(applied.rows.map((r) => r.hash))
+
+  // Keyed on hash AND the journal timestamp, not the hash alone.
+  //
+  // The hash is of the file's CONTENTS, and two migrations can legitimately have identical
+  // contents: 0018 added `cherry_started_at` to `checkout_links`, 0019 dropped it again, and
+  // 0023 added it back for a different reason. Byte-for-byte the same statement, so the same
+  // hash — and keying on the hash alone made this runner skip 0023 and print "Nothing to
+  // apply." It reported success while changing nothing, which is precisely what the header
+  // above criticises drizzle-kit for doing.
+  //
+  // `created_at` is the journal's `when`, unique per entry, so the pair identifies a migration
+  // rather than a piece of SQL. Rows written are unchanged, so drizzle-kit can still read this
+  // table — it compares timestamps rather than hashes, and would have applied 0023 correctly.
+  const done = new Set(applied.rows.map((r) => `${r.hash}:${r.created_at}`))
+  const hashesSeen = new Set(applied.rows.map((r) => r.hash))
 
   let ran = 0
 
@@ -67,7 +81,16 @@ async function main() {
     // Drizzle keys the journal on the file's hash, so an edited migration is a different
     // migration. Matching that exactly keeps `drizzle-kit` able to read this table.
     const hash = createHash('sha256').update(body).digest('hex')
-    if (done.has(hash)) continue
+    if (done.has(`${hash}:${entry.when}`)) continue
+
+    // Worth saying out loud rather than applying silently: the reason this file looks applied
+    // when it is not is that an earlier migration contains exactly the same SQL.
+    if (hashesSeen.has(hash)) {
+      console.log(
+        `
+${entry.tag} — identical SQL to an earlier migration; applying it as its own`,
+      )
+    }
 
     const statements = body
       .split('--> statement-breakpoint')

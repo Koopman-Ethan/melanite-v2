@@ -821,3 +821,50 @@ Bikini, full arms and half arms were not in her reply and still need timings. Un
 her answer but not in the original list of areas, so it is included.
 
 Providers set their own duration per service, so these are the defaults offered, not a cap.
+
+### Cherry on appointments — BUILT — 2026-07-31
+
+Keoni asked for Cherry on all services, not only packages. Built as the client-facing option:
+"Pay over time with Cherry" sits beside the card button on the appointment payment page, above
+$200.
+
+**Gated on the SERVICE price, not the total.** A tip is discretionary and 100% of it goes to the
+provider, so financing one makes no sense — and letting a generous tip push a $180 service over
+Cherry's floor would offer a plan Cherry then declines. The copy says the tip is not included so
+nobody expects otherwise.
+
+$200 is Cherry's own floor for writing a plan. Below it they decline, so the button would send a
+client to a page that turns them down — worse than no button, because it reads as a promise the
+practice could not keep. The rule is `lib/payments/cherry.ts`, shared with packages, and it
+compares numerically: `money()` columns are strings, and `'90.00' >= '200'` is TRUE as a string.
+
+**This is NOT the same as `payment_source = 'cherry'` on a booking**, which is a provider
+recording money that already arrived. Keoni's earlier note — "Cherry shouldn't actually be an
+option with normal bookings" — was about that dropdown, and still stands.
+
+**No webhook exists for any of this.** The client finishes on Cherry's site, Cherry pays
+Melanite, and Melanite owes the provider their half. The only signal is `cherry_started_at`,
+written as they leave, and it records INTENT rather than payment. Packages and appointments now
+share ONE chase list on the admin tools page — two lists would mean two places to remember to
+look, and the newer one is the one that gets forgotten.
+
+### The migration runner skipped a migration and reported success — 2026-07-31
+
+`scripts/migrate.ts` keyed applied migrations on the SHA-256 of the file's CONTENTS. Migration
+0023 adds `cherry_started_at` to `checkout_links` — byte-for-byte identical to 0018, which added
+the same column before 0019 dropped it again. Same bytes, same hash, so the runner treated 0023
+as already applied and printed "Nothing to apply." with exit 0.
+
+Reporting success while changing nothing is exactly what that script's own header criticises
+`drizzle-kit` for, and it would have been silent: the column would have been missing in
+production, every Cherry hand-off would have thrown, and the `catch` around it swallows errors
+by design so the client still reaches Cherry.
+
+Caught by `db:verify` immediately afterwards. Fixed by keying on `hash:created_at` — the journal
+timestamp is unique per entry, so the pair identifies a MIGRATION rather than a piece of SQL.
+The rows written are unchanged, so `drizzle-kit` can still read the table; it compares
+timestamps rather than hashes and would have applied 0023 correctly. The runner now says out
+loud when it applies a file whose SQL matches an earlier one.
+
+Worth knowing generally: any two migrations with identical SQL would have hit this. Reverting a
+migration and later reinstating it is the ordinary way to produce that.

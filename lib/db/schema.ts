@@ -591,6 +591,18 @@ export const checkoutLinks = pgTable('checkout_links', {
     .references(() => bookings.id, { onDelete: 'cascade' }),
   token: text().notNull(),
   status: checkoutLinkStatus().notNull().default('pending'),
+  /** When the client left for Cherry to finance this appointment.
+   *
+   *  Same meaning as on `packageCheckoutLinks` — an INTENT, not a payment. The client finishes
+   *  on Cherry's site and Cherry pays Melanite directly, so no webhook ever arrives here and
+   *  the link would otherwise sit at `pending` looking exactly like one nobody opened.
+   *
+   *  This column was ONCE here by mistake, added while building package financing when only
+   *  packages could be financed — the two tables have near-identical column lists, so nothing
+   *  complained and the value was written where nothing read it. `db:verify` grew a check
+   *  asserting its absence. It is here deliberately now: appointments can be financed too, and
+   *  that check has been replaced with one that tests the thing that actually went wrong. */
+  cherryStartedAt: timestamp({ withTimezone: true }),
   tipAmount: money().notNull().default('0.00'),
   stripeCustomerId: text(),
   stripePaymentIntentId: text(),

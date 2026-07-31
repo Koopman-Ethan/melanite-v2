@@ -106,6 +106,7 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
         cancellationFeeAmount: settings.cancellationFeeAmount,
         noShowFeePct: settings.noShowFeePctOfPrice,
       }}
+      cherryUrl={settings.cherryApplyUrl}
     />
   )
 }

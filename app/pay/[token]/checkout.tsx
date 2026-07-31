@@ -5,8 +5,9 @@ import { useState, useTransition } from 'react'
 import { Button } from '@/components/ui/button'
 import { Field, Notice } from '@/components/ui/field'
 import { cn } from '@/lib/cn'
+import { cherryAvailable } from '@/lib/payments/cherry'
 
-import { createBookingIntent } from '../actions'
+import { createBookingIntent, noteBookingCherryHandoff } from '../actions'
 import { CardForm } from '../card-form'
 
 export interface BookingSummary {
@@ -39,10 +40,12 @@ export function BookingCheckout({
   token,
   booking,
   policy,
+  cherryUrl,
 }: {
   token: string
   booking: BookingSummary
   policy: PolicyTerms
+  cherryUrl: string | null
 }) {
   const [tipPreset, setTipPreset] = useState<number | 'custom'>(0)
   const [customTip, setCustomTip] = useState('')
@@ -60,6 +63,11 @@ export function BookingCheckout({
       ? Math.round((Number(customTip) || 0) * 100)
       : Math.round(priceCents * tipPreset)
   const totalCents = priceCents + tipCents
+
+  // Gated on the SERVICE price, not the total. A tip is discretionary and 100% of it goes to
+  // the provider, so financing one makes no sense — and letting a generous tip push a $180
+  // service over Cherry's floor would offer a plan Cherry then declines.
+  const showCherry = cherryAvailable(cherryUrl, booking.price)
 
   const discounted = booking.discountType !== 'none' && Number(booking.discountValue) > 0
   const noShowFee = (Number(booking.price) * Number(policy.noShowFeePct)).toFixed(2)
@@ -239,6 +247,41 @@ export function BookingCheckout({
           <Button block onClick={beginPayment} disabled={pending}>
             {pending ? 'Preparing…' : `Continue to payment · ${usd(totalCents / 100)}`}
           </Button>
+
+          {/* Beside the card option, not behind it. Somebody looking at a four-figure treatment
+              is exactly who wants to finance it, and an option discovered only after committing
+              to a card form is one that goes unnoticed. */}
+          {showCherry && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-3">
+                <span className="h-px flex-1 bg-line" />
+                <span className="text-xs uppercase tracking-wide text-ink-faint">or</span>
+                <span className="h-px flex-1 bg-line" />
+              </div>
+
+              {/* Recorded before they leave, so the link stops looking like one nobody opened.
+                  Fire-and-forget on purpose: a failed tracking write must never stand between a
+                  client and Cherry. The navigation is a real link rather than JS, so it works
+                  even if the action never resolves. */}
+              <a
+                href={cherryUrl!}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => {
+                  void noteBookingCherryHandoff(token)
+                }}
+                className="block rounded-control border border-line-strong px-[18px] py-3 text-center text-[13px] font-bold tracking-[0.3px] text-ink-secondary transition-colors hover:border-ink-faint hover:bg-overlay"
+              >
+                Pay over time with Cherry →
+              </a>
+              <p className="text-center text-xs text-ink-faint">
+                Cherry offers monthly payment plans, and checking your options doesn&rsquo;t
+                affect your credit score. You&rsquo;d finance the{' '}
+                {usd(booking.price)} treatment — a tip isn&rsquo;t included. You&rsquo;ll finish
+                on Cherry&rsquo;s site, then tell your provider.
+              </p>
+            </div>
+          )}
         </>
       )}
 
