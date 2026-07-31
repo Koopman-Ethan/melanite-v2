@@ -17,6 +17,15 @@ import './envConfig'
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
+  // Capped, because these specs share ONE database and ONE dev server. At full parallelism the
+  // journey specs contend over the same rows — a redemption spec found "the session was not
+  // consumed" because something else was consuming it — and pages time out waiting on a server
+  // serving eight tabs at once. Both look like product bugs and are not.
+  //
+  // vitest already sets `fileParallelism: false` for the same reason and says so; this is the
+  // browser half of that decision, which had been left at the default. Two workers runs the
+  // suite in about a minute, which is not the constraint worth optimising.
+  workers: 2,
   forbidOnly: Boolean(process.env.CI),
   retries: 0,
   reporter: [['list']],

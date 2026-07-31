@@ -847,6 +847,17 @@ export const trainingEnrollments = pgTable('training_enrollments', {
    *  abandoned checkout takes a seat off the market permanently. Cleared once payment lands,
    *  at which point the seat is held by the payment rather than by the clock. */
   seatHeldUntil: timestamp({ withTimezone: true }),
+  /** When the student left to apply through Cherry.
+   *
+   *  An INTENT, not a payment — the same distinction `packageCheckoutLinks.cherryStartedAt`
+   *  draws, and for the same reason: the client finishes on Cherry's site, Cherry pays Melanite
+   *  by ACH days later, and no webhook ever arrives here. Without this the enrolment sits at
+   *  `unpaid` looking exactly like an abandoned form.
+   *
+   *  It also justifies a much longer seat hold. Twenty minutes is right for somebody typing a
+   *  card number; a financing decision takes days, and letting the seat evaporate meanwhile
+   *  means an approved student finds the course full. */
+  cherryStartedAt: timestamp({ withTimezone: true }),
   balanceDueDate: date(),
   courseCompletedAt: timestamp({ withTimezone: true }),
 }, (t) => [

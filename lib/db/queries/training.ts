@@ -100,6 +100,10 @@ export interface EnrollmentRow {
   paid: string
   owed: string
   providerId: string | null
+  /** Set when the student left to apply through Cherry. An intent, not a payment — Cherry pays
+   *  Melanite by ACH days later and no webhook arrives, so this is the only thing that tells
+   *  Keoni the difference between "financing in progress" and "abandoned form". */
+  cherryStartedAt: Date | null
 }
 
 export async function getEnrollments(courseId: string): Promise<EnrollmentRow[]> {
@@ -122,6 +126,7 @@ export async function getEnrollments(courseId: string): Promise<EnrollmentRow[]>
       courseCompletedAt: trainingEnrollments.courseCompletedAt,
       createdAt: trainingEnrollments.createdAt,
       providerId: trainingEnrollments.providerId,
+      cherryStartedAt: trainingEnrollments.cherryStartedAt,
       paid: paidExpr,
     })
     .from(trainingEnrollments)
@@ -321,6 +326,23 @@ export async function reconcileSeats(courseId: string): Promise<void> {
  *  checkout does not keep a seat off the market for the rest of the day. The room rental uses
  *  the same idea for the same reason. */
 export const SEAT_HOLD_MINUTES = 20
+
+/** How long a seat is held while a Cherry application is in flight.
+ *
+ *  Three days, against twenty minutes for a card, and the difference is the point. A financing
+ *  decision is not a checkout: the student applies, Cherry decides, and Cherry pays Melanite by
+ *  ACH afterwards. Releasing the seat on the card timer would mean an approved student comes
+ *  back to a full course — worse than holding one that might not convert, because it wastes
+ *  their money as well as the place.
+ *
+ *  Not indefinite either. An abandoned application would otherwise hold one of five seats
+ *  forever, so it expires like any other; Keoni can see it in the meantime and resolve it.
+ *
+ *  Lives here rather than beside the action that uses it because that file is `use server`,
+ *  which may export only async functions. Exporting this number from there compiled, linted,
+ *  and broke every page in the app at runtime — for the second time.
+ */
+export const CHERRY_SEAT_HOLD_MINUTES = 72 * 60
 
 /** Releases seats whose hold has lapsed.
  *

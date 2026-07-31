@@ -141,6 +141,13 @@
       "when": 1785274849263,
       "tag": "0019_graceful_pepper_potts",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1785449476797,
+      "tag": "0020_training_cherry",
+      "breakpoints": true
     }
   ]
 }

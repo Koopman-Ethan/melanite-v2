@@ -7,7 +7,7 @@ import { Field, Notice } from '@/components/ui/field'
 import { cn } from '@/lib/cn'
 
 import { CardForm } from '../pay/card-form'
-import { enrollAndPayDeposit } from './actions'
+import { enrollAndPayDeposit, enrollWithCherry } from './actions'
 
 export interface CourseView {
   id: string
@@ -33,7 +33,18 @@ const dayLabel = (date: string) =>
     timeZone: 'UTC',
   })
 
-export function Enroll({ courses }: { courses: CourseView[] }) {
+/** Cherry's own floor for a plan. Same constant the package checkout uses — a training course
+ *  is far above it, but stating the rule keeps the two pages honest with each other. */
+const CHERRY_MINIMUM = 200
+
+export function Enroll({
+  courses,
+  cherryEnabled,
+}: {
+  courses: CourseView[]
+  /** False when Melanite has no Cherry link configured, which hides the option entirely. */
+  cherryEnabled: boolean
+}) {
   const [courseId, setCourseId] = useState(courses[0]?.id ?? '')
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
@@ -51,6 +62,27 @@ export function Enroll({ courses }: { courses: CourseView[] }) {
   const balance = course
     ? (Number(course.totalPrice) - Number(course.depositAmount)).toFixed(2)
     : '0.00'
+
+  /** Hands off to Cherry, having first reserved the seat. Full page navigation on purpose —
+   *  the student is leaving, and a new tab that they close by habit loses the thread. */
+  function beginCherry() {
+    setError(null)
+    start(async () => {
+      const result = await enrollWithCherry({
+        courseId,
+        firstName,
+        lastName,
+        email,
+        phone,
+        licenseNumber,
+      })
+      if (result.error || !result.cherryUrl) {
+        setError(result.error ?? 'Cherry is unavailable right now.')
+        return
+      }
+      window.location.href = result.cherryUrl
+    })
+  }
 
   function begin() {
     setError(null)
@@ -249,6 +281,35 @@ export function Enroll({ courses }: { courses: CourseView[] }) {
               ? 'Preparing…'
               : `Continue · ${usd(payInFull ? (course?.totalPrice ?? 0) : (course?.depositAmount ?? 0))}`}
           </Button>
+
+          {/* Beside the card option, not behind it — the same placement as the package
+              checkout. Hidden entirely when Melanite has no Cherry link configured: an offer
+              that leads nowhere is worse than no offer. */}
+          {cherryEnabled && course && Number(course.totalPrice) >= CHERRY_MINIMUM && (
+            <>
+              <div className="flex items-center gap-3 text-[11px] uppercase tracking-widest text-ink-faint">
+                <span className="h-px flex-1 bg-line" />
+                or
+                <span className="h-px flex-1 bg-line" />
+              </div>
+
+              <Button
+                block
+                variant="outline"
+                onClick={beginCherry}
+                disabled={pending || !firstName || !lastName || !email || !phone}
+              >
+                {pending ? 'Preparing…' : 'Pay over time with Cherry →'}
+              </Button>
+
+              <p className="text-xs text-ink-faint">
+                Cherry offers monthly payment plans for the full {usd(course.totalPrice)}, with no
+                impact on your credit score to check your options. Your seat is held for three
+                days while you apply — finish on Cherry&rsquo;s site, and Melanite will confirm
+                your place once it comes through.
+              </p>
+            </>
+          )}
         </>
       )}
 

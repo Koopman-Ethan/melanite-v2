@@ -43,7 +43,11 @@ const PUBLIC_PAGES = [
 for (const { path, name } of PUBLIC_PAGES) {
   test(`${name} has no axe violations`, async ({ page }) => {
     await page.goto(path)
-    await page.waitForLoadState('networkidle')
+    // `load`, not `networkidle`. The training page mounts Stripe.js, which holds connections
+    // open, so the network never goes idle and the wait times out — on the phone project first,
+    // because it is slower. Playwright discourages networkidle for exactly this reason. `load`
+    // is deterministic and is all axe needs: the DOM is rendered and styles are applied.
+    await page.waitForLoadState('load')
 
     const results = await scan(page)
     expect(results.violations, `\n${report(results)}\n`).toEqual([])
@@ -85,7 +89,7 @@ test('the focused control is visibly marked', async ({ page }, testInfo) => {
 
 test('nothing overflows the viewport horizontally', async ({ page }) => {
   await page.goto('/training')
-  await page.waitForLoadState('networkidle')
+  await page.waitForLoadState('load')
 
   // Horizontal scrolling on a phone is the most common responsive failure and the most
   // annoying: it makes the whole page drift sideways under your thumb.

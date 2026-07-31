@@ -1,0 +1,1 @@
+ALTER TABLE "training_enrollments" ADD COLUMN "cherry_started_at" timestamp with time zone;

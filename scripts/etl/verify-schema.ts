@@ -1,3 +1,6 @@
+import { readdirSync } from 'node:fs'
+import { join } from 'node:path'
+
 import { neon, type NeonQueryFunction } from '@neondatabase/serverless'
 
 import '../../envConfig'
@@ -88,26 +91,37 @@ const CHECKS: Check[] = [
       ).length >= 1,
   },
   {
-    label: 'cherry_started_at on package_checkout_links, and only there',
+    label: 'cherry_started_at is not on checkout_links',
     because:
-      'it was first added to the wrong table — the two have near-identical column lists, so nothing complained',
-    run: async (q) => {
-      const found = (await rows(
-        q,
-        `SELECT table_name FROM information_schema.columns
-          WHERE column_name = 'cherry_started_at' AND table_schema = 'public'`,
-      )) as { table_name: string }[]
-      return found.length === 1 && found[0].table_name === 'package_checkout_links'
-    },
+      'it was first added to checkout_links, which is 1:1 with a BOOKING — the two tables have ' +
+      'near-identical column lists, so nothing complained and the value was written nowhere useful',
+    // Asserts the absence, not an exact set of tables. It legitimately lives on
+    // package_checkout_links and training_enrollments now, and will spread further as more
+    // things can be financed; a check that has to be edited every time is one that gets its
+    // number bumped without being read.
+    run: async (q) =>
+      (
+        await rows(
+          q,
+          `SELECT 1 FROM information_schema.columns
+            WHERE column_name = 'cherry_started_at' AND table_name = 'checkout_links'`,
+        )
+      ).length === 0,
   },
   {
-    label: 'every migration recorded',
+    label: 'every migration on disk has been applied',
     because: 'a short journal means the run stopped partway through',
+    // Counted from the migration files rather than hardcoded. The number was literal, so the
+    // first new migration after it was written turned a real check into a false alarm — and a
+    // check that cries wolf gets its constant bumped without anybody reading what it verifies.
     run: async (q) => {
+      const onDisk = readdirSync(join(process.cwd(), 'drizzle')).filter((f) =>
+        f.endsWith('.sql'),
+      ).length
       const [row] = (await rows(q, `SELECT count(*)::int AS n FROM drizzle.__drizzle_migrations`)) as {
         n: number
       }[]
-      return row.n === 20
+      return row.n === onDisk
     },
   },
 ]

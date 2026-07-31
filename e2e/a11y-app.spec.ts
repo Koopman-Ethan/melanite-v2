@@ -50,7 +50,11 @@ test.describe('provider pages', () => {
   for (const { path, name } of PROVIDER_PAGES) {
     test(`${name} has no axe violations`, async ({ page }) => {
       await page.goto(path)
-      await page.waitForLoadState('networkidle')
+      // `load`, not `networkidle`. The training page mounts Stripe.js, which holds connections
+    // open, so the network never goes idle and the wait times out — on the phone project first,
+    // because it is slower. Playwright discourages networkidle for exactly this reason. `load`
+    // is deterministic and is all axe needs: the DOM is rendered and styles are applied.
+    await page.waitForLoadState('load')
 
       const results = await scan(page)
       expect(results.violations, `\n${report(results)}\n`).toEqual([])
@@ -62,7 +66,7 @@ test.describe('provider pages', () => {
 
     for (const { path, name } of PROVIDER_PAGES) {
       await page.goto(path)
-      await page.waitForLoadState('networkidle')
+      await page.waitForLoadState('load')
 
       const overflow = await page.evaluate(
         () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -78,7 +82,7 @@ test.describe('admin pages', () => {
   for (const { path, name } of ADMIN_PAGES) {
     test(`${name} has no axe violations`, async ({ page }) => {
       await page.goto(path)
-      await page.waitForLoadState('networkidle')
+      await page.waitForLoadState('load')
 
       const results = await scan(page)
       expect(results.violations, `\n${report(results)}\n`).toEqual([])
@@ -90,7 +94,7 @@ test.describe('admin pages', () => {
 
     for (const { path, name } of ADMIN_PAGES) {
       await page.goto(path)
-      await page.waitForLoadState('networkidle')
+      await page.waitForLoadState('load')
 
       // Wide tables are allowed to scroll inside their own container; the PAGE must not.
       const overflow = await page.evaluate(

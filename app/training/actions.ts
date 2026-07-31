@@ -1,16 +1,17 @@
 'use server'
 
-import { and, eq } from 'drizzle-orm'
+import { and, eq, isNull } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
 import {
+  CHERRY_SEAT_HOLD_MINUTES,
   SEAT_HOLD_MINUTES,
   claimSeat,
   getEnrollmentDetail,
   releaseExpiredSeats,
   releaseSeat,
 } from '@/lib/db/queries/training'
-import { trainingCourses, trainingEnrollments } from '@/lib/db/schema'
+import { platformSettings, trainingCourses, trainingEnrollments } from '@/lib/db/schema'
 import { friendlyStripeError, stripePost } from '@/lib/stripe/client'
 
 // PUBLIC — no session. Anyone can enrol; that is the point of a training course.
@@ -43,15 +44,38 @@ const PAYMENT_METHODS = ['card', 'link'] as const
 
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
 
-export async function enrollAndPayDeposit(input: {
+export interface EnrolInput {
   courseId: string
   firstName: string
   lastName: string
   email: string
   phone: string
   licenseNumber: string
-  payInFull: boolean
-}): Promise<EnrollState> {
+}
+
+interface Reserved {
+  course: { id: string; depositAmount: string; totalPrice: string }
+  enrollmentId: string
+  /** True when the caller found an existing hold rather than taking one. Only the caller that
+   *  CLAIMED a seat may release it on failure, or a retry hands back somebody else's. */
+  alreadyHolding: boolean
+}
+
+/** Validates, claims a seat, and creates or updates the enrolment row.
+ *
+ *  Shared by both routes deliberately. The card path and the Cherry path must agree about who
+ *  is allowed to enrol and what a seat means — two copies of "the licence number is required"
+ *  is how one of them quietly stops requiring it.
+ *
+ *  `holdMinutes` is the one thing they differ on, and it is not a detail. Twenty minutes suits
+ *  somebody typing a card number. A financing decision takes days, so a Cherry hand-off holds
+ *  the seat far longer — otherwise an approved student comes back to a full course, which is a
+ *  worse outcome than holding a seat that might not convert.
+ */
+async function reserveSeat(
+  input: EnrolInput,
+  holdMinutes: number,
+): Promise<{ error: string } | Reserved> {
   const firstName = input.firstName.trim()
   const lastName = input.lastName.trim()
   const email = input.email.trim().toLowerCase()
@@ -68,25 +92,25 @@ export async function enrollAndPayDeposit(input: {
   const [course] = await db
     .select({
       id: trainingCourses.id,
-      status: trainingCourses.status,
-      maxStudents: trainingCourses.maxStudents,
       depositAmount: trainingCourses.depositAmount,
       totalPrice: trainingCourses.totalPrice,
-      day1Date: trainingCourses.day1Date,
+      status: trainingCourses.status,
     })
     .from(trainingCourses)
     .where(eq(trainingCourses.id, input.courseId))
     .limit(1)
 
+  // Two messages, not one. A bad id means a broken or stale link; a course that is no longer
+  // scheduled is a real course that closed. Collapsing them tells a student with a dead link to
+  // look for another date, and a student whose course was cancelled that they mistyped
+  // something.
   if (!course) return { error: 'That course does not exist.' }
   if (course.status !== 'scheduled') return { error: 'That course is no longer open.' }
 
-  // Abandoned checkouts give their seats back before anyone else is told the course is full.
+  // Lazy sweep, so an abandoned checkout does not keep a seat off the market until someone
+  // remembers to run something.
   await releaseExpiredSeats(course.id)
 
-  // Re-enrolling with the same email reuses the row rather than creating a second seat for the
-  // same person — v1 refused with ALREADY_ENROLLED, which strands anyone whose first payment
-  // attempt failed.
   const [existing] = await db
     .select({
       id: trainingEnrollments.id,
@@ -114,7 +138,7 @@ export async function enrollAndPayDeposit(input: {
     return { error: 'This course is now full. Contact Melanite about the next date.' }
   }
 
-  const heldUntil = new Date(Date.now() + SEAT_HOLD_MINUTES * 60_000)
+  const heldUntil = new Date(Date.now() + holdMinutes * 60_000)
 
   let enrollmentId = existing?.id
   if (enrollmentId) {
@@ -144,6 +168,18 @@ export async function enrollAndPayDeposit(input: {
       .returning({ id: trainingEnrollments.id })
     enrollmentId = created.id
   }
+
+  return { course, enrollmentId, alreadyHolding }
+}
+
+export async function enrollAndPayDeposit(
+  input: EnrolInput & { payInFull: boolean },
+): Promise<EnrollState> {
+  const reserved = await reserveSeat(input, SEAT_HOLD_MINUTES)
+  if ('error' in reserved) return reserved
+
+  const { course, enrollmentId, alreadyHolding } = reserved
+  const email = input.email.trim().toLowerCase()
 
   const amountCents = Math.round(
     Number(input.payInFull ? course.totalPrice : course.depositAmount) * 100,
@@ -206,4 +242,54 @@ export async function payTrainingBalance(enrollmentId: string): Promise<EnrollSt
   } catch (err) {
     return { error: friendlyStripeError(err, 'Could not start the payment. Try again shortly.') }
   }
+}
+
+export interface CherryEnrolState {
+  error?: string
+  /** Where to send them. Null is not an error state the student should ever see — the button
+   *  is not rendered when Melanite has no Cherry link configured. */
+  cherryUrl?: string
+  enrollmentId?: string
+}
+
+/**
+ * Reserves a seat and hands the student to Cherry.
+ *
+ * The mirror of the package hand-off, and the same rule governs it: this records an INTENT, not
+ * a payment. Nothing is marked paid, no ledger entry is written, and the enrolment stays
+ * `unpaid` — because they have applied for financing, not been approved for it, and marking it
+ * paid because a button was clicked would be worse than no signal at all.
+ *
+ * Cherry pays Melanite directly and training is entirely Melanite's revenue, so unlike a
+ * booking there is no split to reason about and nobody is owed a share. Keoni records the money
+ * when Cherry's ACH lands.
+ */
+export async function enrollWithCherry(input: EnrolInput): Promise<CherryEnrolState> {
+  const [settings] = await db
+    .select({ cherryApplyUrl: platformSettings.cherryApplyUrl })
+    .from(platformSettings)
+    .where(eq(platformSettings.id, 1))
+    .limit(1)
+
+  if (!settings?.cherryApplyUrl) {
+    return { error: 'Cherry financing is not available right now. Contact Melanite.' }
+  }
+
+  const reserved = await reserveSeat(input, CHERRY_SEAT_HOLD_MINUTES)
+  if ('error' in reserved) return reserved
+
+  // Written after the seat is held, and guarded so a student who comes back and clicks again
+  // does not reset when they first went — the age of the application is what tells Keoni
+  // whether to chase it.
+  await db
+    .update(trainingEnrollments)
+    .set({ cherryStartedAt: new Date() })
+    .where(
+      and(
+        eq(trainingEnrollments.id, reserved.enrollmentId),
+        isNull(trainingEnrollments.cherryStartedAt),
+      ),
+    )
+
+  return { cherryUrl: settings.cherryApplyUrl, enrollmentId: reserved.enrollmentId }
 }

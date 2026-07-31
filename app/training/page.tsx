@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 
 import { Brand } from '@/components/app-shell/brand'
+import { getCheckoutSettings } from '@/lib/db/queries/checkout'
 import { getUpcomingCourses } from '@/lib/db/queries/training'
 
 import { Enroll } from './enroll'
@@ -17,7 +18,10 @@ const todayInDenver = () =>
 /** Public enrolment. Deliberately outside `/app/*` — a prospective student has no account, and
  *  training is how someone becomes a provider in the first place. */
 export default async function TrainingPage() {
-  const courses = await getUpcomingCourses(todayInDenver())
+  const [courses, settings] = await Promise.all([
+    getUpcomingCourses(todayInDenver()),
+    getCheckoutSettings(),
+  ])
 
   return (
     <div className="flex min-h-full flex-col">
@@ -27,7 +31,7 @@ export default async function TrainingPage() {
         </div>
       </header>
       <main className="flex-1 px-6 py-8">
-        <Enroll courses={courses} />
+        <Enroll courses={courses} cherryEnabled={Boolean(settings.cherryApplyUrl)} />
       </main>
       <footer className="px-6 py-6 text-center text-xs text-ink-faint">
         Questions about training? Contact Melanite Laser Suite.

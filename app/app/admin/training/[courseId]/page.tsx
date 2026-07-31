@@ -35,6 +35,13 @@ const PAYMENT_LABELS: Record<string, string> = {
   paid_in_full: 'Paid in full',
 }
 
+/** "today" / "3d ago" — age is what makes a pending Cherry application worth chasing, and an
+ *  absolute date makes the reader do that arithmetic themselves. */
+function daysAgo(at: Date): string {
+  const days = Math.floor((Date.now() - new Date(at).getTime()) / 86_400_000)
+  return days <= 0 ? 'today' : `${days}d ago`
+}
+
 export default async function CoursePage({
   params,
 }: {
@@ -117,6 +124,13 @@ export default async function CoursePage({
                       >
                         {PAYMENT_LABELS[e.paymentStatus] ?? e.paymentStatus}
                       </span>
+                      {/* Only while still unpaid. Once the money is in, how they financed it
+                          is history — the badge would just be noise beside "paid in full". */}
+                      {e.cherryStartedAt && e.paymentStatus !== 'paid_in_full' && (
+                        <span className="rounded border border-gold/40 bg-gold/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-gold">
+                          Cherry · applied {daysAgo(e.cherryStartedAt)}
+                        </span>
+                      )}
                       {e.courseCompletedAt && (
                         <span className="rounded border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-ink-faint">
                           Completed
