@@ -8,6 +8,7 @@ import { Notice } from '@/components/ui/field'
 import {
   cancelCourse,
   markCourseComplete,
+  recordTrainingPayment,
   sendBalanceLink,
   setBalanceDueDate,
   type TrainingState,
@@ -115,6 +116,10 @@ export function EnrollmentControls({
 }) {
   const [state, setState] = useState<TrainingState>({})
   const [dueDate, setDueDate] = useState(balanceDueDate ?? '')
+  const [recording, setRecording] = useState(false)
+  const [method, setMethod] = useState<'cherry' | 'cash' | 'check' | 'other'>('cherry')
+  const [amount, setAmount] = useState(owed)
+  const [reference, setReference] = useState('')
   const [pending, start] = useTransition()
 
   const owesMoney = Number(owed) > 0
@@ -133,6 +138,20 @@ export function EnrollmentControls({
           </Button>
         )}
 
+        {/* The settlement path for money that never touches Stripe — Cherry above all, since
+            Cherry pays Melanite by ACH and no webhook ever arrives. Recording it is also what
+            makes the seat permanent: a hold only applies while the enrolment is unpaid. */}
+        {owesMoney && (
+          <Button
+            size="sm"
+            variant={recording ? 'ghost' : 'outline'}
+            disabled={pending}
+            onClick={() => setRecording(!recording)}
+          >
+            {recording ? 'Cancel' : 'Record a payment'}
+          </Button>
+        )}
+
         <label className="text-xs">
           <span className="block text-ink-faint">Balance due by</span>
           <input
@@ -146,6 +165,75 @@ export function EnrollmentControls({
           />
         </label>
       </div>
+
+      {recording && (
+        <div className="space-y-2 rounded-field border border-line bg-overlay p-3">
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="text-xs">
+              <span className="block text-ink-faint">How it arrived</span>
+              <select
+                value={method}
+                onChange={(e) => setMethod(e.target.value as typeof method)}
+                className="mt-1 rounded-field border border-line-control bg-surface px-2 py-1.5 text-xs text-ink"
+              >
+                <option value="cherry">Cherry</option>
+                <option value="cash">Cash</option>
+                <option value="check">Check</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
+
+            <label className="text-xs">
+              {/* Defaults to the full balance, which is the common case, but stays editable —
+                  Cherry deducts its merchant fee, so what lands is rarely the sticker price. */}
+              <span className="block text-ink-faint">Amount received</span>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                className="mt-1 w-28 rounded-field border border-line-control bg-surface px-2 py-1.5 text-xs text-ink tabular-nums"
+              />
+            </label>
+
+            <label className="text-xs">
+              <span className="block text-ink-faint">Reference</span>
+              <input
+                value={reference}
+                onChange={(e) => setReference(e.target.value)}
+                placeholder="Optional"
+                className="mt-1 rounded-field border border-line-control bg-surface px-2 py-1.5 text-xs text-ink"
+              />
+            </label>
+
+            <Button
+              size="sm"
+              disabled={pending || !amount || Number(amount) <= 0}
+              onClick={() =>
+                start(async () => {
+                  const result = await recordTrainingPayment({
+                    enrollmentId,
+                    method,
+                    amount: Number(amount),
+                    externalReference: reference || null,
+                    note: null,
+                  })
+                  setState(result)
+                  if (!result.error) setRecording(false)
+                })
+              }
+            >
+              {pending ? 'Recording…' : 'Record'}
+            </Button>
+          </div>
+
+          <p className="text-xs text-ink-faint">
+            Records money that never went through Stripe. Their seat stops depending on the hold
+            timer as soon as anything is recorded.
+          </p>
+        </div>
+      )}
 
       {state.error && <p className="text-xs text-danger">{state.error}</p>}
       {state.success && <p className="text-xs text-success">{state.success}</p>}

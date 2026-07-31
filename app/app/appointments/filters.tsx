@@ -75,8 +75,12 @@ export function Filters({
             )}
           >
             {s.label}
+            {/* No opacity. The count inherits the button's own colour, which is already the
+                de-emphasised end of the ink ramp on an unselected filter — dimming it further
+                put it under AA at 12px, the exact failure the ramp was raised to fix. Weight
+                and spacing separate it from the label instead. */}
             {s.value !== '' && (
-              <span className="ml-1.5 tabular-nums opacity-60">{counts[s.value]}</span>
+              <span className="ml-1.5 font-medium tabular-nums">{counts[s.value]}</span>
             )}
           </button>
         ))}

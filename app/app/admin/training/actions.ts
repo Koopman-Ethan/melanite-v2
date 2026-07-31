@@ -7,9 +7,10 @@ import { DATE, validateCourse } from '@/lib/validate/training-course'
 
 import { requireAdmin } from '@/lib/auth/dal'
 import { db } from '@/lib/db'
-import { getEnrollmentDetail } from '@/lib/db/queries/training'
-import { trainingCourses, trainingEnrollments } from '@/lib/db/schema'
+import { getEnrollmentDetail, refreshPaymentStatus } from '@/lib/db/queries/training'
+import { ledgerEntries, trainingCourses, trainingEnrollments } from '@/lib/db/schema'
 import { sendEmail, trainingBalanceEmail } from '@/lib/email'
+import { toCents, toMoney } from '@/lib/money'
 import { appOrigin } from '@/lib/stripe/config'
 
 export interface TrainingState {
@@ -218,3 +219,82 @@ export async function setBalanceDueDate(
   return { success: dueDate ? 'Due date set.' : 'Due date cleared.' }
 }
 
+
+/**
+ * Records training money that did not arrive through Stripe.
+ *
+ * Cherry above all — the student finances, Cherry pays Melanite by ACH days later, and no
+ * webhook ever arrives. Also cash and cheques, which have always been possible and until now
+ * had nowhere to go: `recordBookingPayment` and `recordMembershipPayment` existed, and training
+ * simply had no equivalent, so a Cherry-funded course could never be marked paid at all.
+ *
+ * RECORDING IS WHAT SECURES THE SEAT. A seat hold is only consulted while the enrolment is
+ * `unpaid` — `releaseExpiredSeats` filters on exactly that — so the moment money is recorded
+ * the seat stops depending on a clock and belongs to the student outright. That is the answer
+ * to "they were approved, hold their place": record what Cherry is paying.
+ *
+ * Training is entirely Melanite's revenue: no split, no provider payout, nothing forwarded.
+ */
+export async function recordTrainingPayment(input: {
+  enrollmentId: string
+  method: 'cherry' | 'cash' | 'check' | 'other'
+  amount: number
+  externalReference: string | null
+  note: string | null
+}): Promise<TrainingState> {
+  const admin = await requireAdmin()
+
+  if (!['cherry', 'cash', 'check', 'other'].includes(input.method)) {
+    return { error: 'Choose how the payment was made.' }
+  }
+  if (!Number.isFinite(input.amount) || input.amount <= 0) {
+    return { error: 'Enter an amount greater than zero.' }
+  }
+
+  const enrollment = await getEnrollmentDetail(input.enrollmentId)
+  if (!enrollment) return { error: 'That enrolment does not exist.' }
+
+  // Overpaying is almost always a typo — a repeated entry, or the total typed where the balance
+  // belonged. Refusing costs a retype; accepting silently overstates revenue and the ledger is
+  // append-only, so it cannot be tidied away afterwards.
+  const owed = Number(enrollment.owed)
+  if (input.amount > owed) {
+    return {
+      error: `That is more than the ${`$${owed}`} still owed. Enter the amount actually received.`,
+    }
+  }
+
+  await db.insert(ledgerEntries).values({
+    source: 'training',
+    payer: 'student',
+    entryType: 'purchase',
+    subjectType: 'training_enrollment',
+    subjectId: enrollment.id,
+    providerId: null,
+    grossAmount: toMoney(toCents(input.amount)),
+    tipAmount: '0.00',
+    providerPayout: '0.00',
+    melaniteCut: toMoney(toCents(input.amount)),
+    paymentMethod: input.method,
+    externalReference: input.externalReference?.trim() || null,
+    // Melanite received it and keeps all of it, so there is nothing outstanding to anybody.
+    payoutStatus: 'paid',
+    note: input.note?.trim() || null,
+    recordedBy: admin.id,
+  })
+
+  // Recomputed from the ledger, never incremented — and this is also what takes the enrolment
+  // out of `unpaid`, so the seat is no longer held by a timer.
+  await refreshPaymentStatus(enrollment.id)
+
+  revalidatePath(`/app/admin/training/${enrollment.courseId}`)
+  revalidatePath('/app/admin/revenue')
+
+  const remaining = Math.max(owed - input.amount, 0)
+  return {
+    success:
+      remaining > 0
+        ? `Recorded. $${remaining.toFixed(2)} still owed, and the seat is theirs.`
+        : 'Recorded — paid in full, and the seat is theirs.',
+  }
+}

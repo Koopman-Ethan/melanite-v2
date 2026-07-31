@@ -57,6 +57,15 @@
    * dim — but it is a named token so "disabled" is a decision rather than an opacity guess. */
   --color-ink-disabled: #5a5a5a;
 
+  /* DO NOT DIM TEXT WITH `opacity-*`. Use a token from the ramp above.
+   *
+   * The ramp was measured against canvas, surface AND overlay; an opacity modifier multiplies
+   * through whatever happens to be behind it and lands somewhere nobody checked. It has now
+   * failed axe twice, both times on 10–12px text, which is where the margin is thinnest — and
+   * both times only once the page had real data to render, so the accessibility suite had been
+   * passing on an empty screen. `opacity` on a whole inactive card is fine; on a line of text
+   * it is a contrast bug waiting for content. */
+
   /* Severity palette, carried from v1. */
   --color-success: #4c9a5e;
   --color-info: #64b5f6;

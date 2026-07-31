@@ -36,7 +36,10 @@ beforeAll(async () => {
   const rows = (await sql.query(
     `INSERT INTO training_courses
        (day1_date, day1_start, day1_end, max_students, deposit_amount, total_price, status)
-     VALUES ('2095-06-01', '10:00', '16:00', 5, '500.00', '1400.00', 'scheduled')
+     -- Twenty seats, not five. These cases are about holds and settlement, not capacity, and a
+     -- five-seat fixture made the sixth enrolment trip the capacity CHECK — a real constraint
+     -- failing for a reason that had nothing to do with what was under test.
+     VALUES ('2095-06-01', '10:00', '16:00', 20, '500.00', '1400.00', 'scheduled')
      RETURNING id`,
   )) as { id: string }[]
   courseId = rows[0].id
@@ -109,5 +112,79 @@ describe('a student financing through Cherry', () => {
     const id = await enrol('zz.cherry.plain@example.com', false, 20)
     const row = (await getEnrollments(courseId)).find((e) => e.id === id)
     expect(row!.cherryStartedAt).toBeNull()
+  })
+})
+
+describe('recording what Cherry paid', () => {
+  // The answer to "they were approved — hold their place". There is no separate hold-extending
+  // switch, because recording the payment already does it: a seat hold is only consulted while
+  // the enrolment is `unpaid`, so the moment money lands the seat stops depending on a clock.
+  //
+  // Before this existed there was no way to record a training payment at all — bookings and
+  // memberships had one, training did not — so a Cherry-funded course could never be marked
+  // paid, and the seat would lapse three days after an approved student applied.
+
+  async function record(id: string, amount: string) {
+    await sql.query(
+      `INSERT INTO ledger_entries
+         (source, payer, entry_type, subject_type, subject_id, gross_amount, tip_amount,
+          provider_payout, melanite_cut, payment_method, payout_status, external_reference)
+       VALUES ('training','student','purchase','training_enrollment',$1,$2,'0.00','0.00',$2,
+               'cherry','paid','CH-TEST')`,
+      [id, amount],
+    )
+    const { refreshPaymentStatus } = await import('@/lib/db/queries/training')
+    await refreshPaymentStatus(id)
+  }
+
+  it('takes the seat out of the hold system entirely', async () => {
+    const id = await enrol('zz.cherry.paid@example.com', true, 72 * 60)
+
+    // Expire the hold outright — as it would three days after they applied.
+    await sql.query(
+      `UPDATE training_enrollments SET seat_held_until = now() - interval '1 hour' WHERE id = $1`,
+      [id],
+    )
+
+    await record(id, '1400.00')
+
+    const { releaseExpiredSeats } = await import('@/lib/db/queries/training')
+    await releaseExpiredSeats(courseId)
+
+    const [row] = (await sql.query(
+      `SELECT payment_status FROM training_enrollments WHERE id = $1`,
+      [id],
+    )) as { payment_status: string }[]
+
+    // Paid, and therefore untouched by the sweep — `releaseExpiredSeats` only looks at unpaid
+    // rows, so an expired timer on a paid enrolment means nothing.
+    expect(row.payment_status).toBe('paid_in_full')
+
+    const [course] = (await sql.query(
+      `SELECT seats_taken FROM training_courses WHERE id = $1`,
+      [courseId],
+    )) as { seats_taken: number }[]
+    expect(course.seats_taken, 'a paid student must still hold a seat').toBeGreaterThan(0)
+  })
+
+  it('a partial payment still secures it', async () => {
+    // Cherry deducts a merchant fee, so what lands is rarely the sticker price — and a deposit
+    // is a partial payment by design. Neither should leave the seat on a timer.
+    const id = await enrol('zz.cherry.partial@example.com', true, 72 * 60)
+    await sql.query(
+      `UPDATE training_enrollments SET seat_held_until = now() - interval '1 hour' WHERE id = $1`,
+      [id],
+    )
+
+    await record(id, '500.00')
+
+    const { releaseExpiredSeats } = await import('@/lib/db/queries/training')
+    await releaseExpiredSeats(courseId)
+
+    const [row] = (await sql.query(
+      `SELECT payment_status FROM training_enrollments WHERE id = $1`,
+      [id],
+    )) as { payment_status: string }[]
+    expect(row.payment_status).toBe('partial')
   })
 })
