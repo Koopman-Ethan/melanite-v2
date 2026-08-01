@@ -32,11 +32,51 @@ const VALID: CourseInput = {
   totalPrice: 1400,
 }
 
-const withOverride = (o: Partial<CourseInput>) => validateCourse({ ...VALID, ...o })
+// The clock is PINNED. `validateCourse` refuses a course scheduled into the past, so a test
+// written against the real date is one that passes today and starts failing on its own — this
+// suite's fixture date would have begun failing in November 2026 with no code change at all.
+const TODAY = '2026-07-31'
+
+const withOverride = (o: Partial<CourseInput>) => validateCourse({ ...VALID, ...o }, TODAY)
+
+describe('a course cannot be scheduled into the past', () => {
+  // It would take the laser out of service for days that have already happened, and it can
+  // never be taught. The admin form greys those days out; this is the half that cannot be
+  // bypassed by posting the form directly.
+  it('refuses a date that has already passed', () => {
+    expect(withOverride({ day1Date: '2026-07-30', day2Date: null })).toMatch(/already passed/)
+  })
+
+  it('allows a course starting today', () => {
+    // Today is not the past. A course being scheduled the morning it runs is unusual, not
+    // invalid, and refusing it would be the app inventing a rule nobody asked for.
+    expect(withOverride({ day1Date: TODAY, day2Date: null })).toBeNull()
+  })
+
+  it('still refuses day two before day one', () => {
+    // The pre-existing ordering rule has to survive the new one, not be replaced by it.
+    expect(withOverride({ day1Date: '2026-11-14', day2Date: '2026-11-13' })).toMatch(
+      /before day one/i,
+    )
+  })
+})
+
+describe('money on a course', () => {
+  it('rejects fractional cents rather than rounding them', () => {
+    // Money is integer cents everywhere here, so 1400.005 would become 1400.01 silently — the
+    // course would be priced at something nobody typed.
+    expect(withOverride({ totalPrice: 1400.005 })).toMatch(/two decimal places/)
+    expect(withOverride({ depositAmount: 500.001 })).toMatch(/two decimal places/)
+  })
+
+  it('rejects a price that is obviously a typo', () => {
+    expect(withOverride({ totalPrice: 1_400_000 })).toMatch(/looks wrong/)
+  })
+})
 
 describe('validateCourse', () => {
   it('accepts a normal two-day course', () => {
-    expect(validateCourse(VALID)).toBeNull()
+    expect(validateCourse(VALID, TODAY)).toBeNull()
   })
 
   it('accepts a single-day course', () => {

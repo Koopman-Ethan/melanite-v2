@@ -6,6 +6,7 @@ import { useFormStatus } from 'react-dom'
 import { Button } from '@/components/ui/button'
 import { Field, Notice } from '@/components/ui/field'
 import { PhoneField } from '@/components/ui/validated-field'
+import { todayInDenver } from '@/lib/validation'
 
 import {
   changePassword,
@@ -86,6 +87,7 @@ export function ProfileForm({
           name="licenseExpiry"
           label="License expires"
           type="date"
+          min={todayInDenver()}
           defaultValue={values.licenseExpiry ?? ''}
           required={licenseRequired}
           hint="Booking stops automatically once this date passes."

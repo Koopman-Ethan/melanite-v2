@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Field, Notice } from '@/components/ui/field'
+import { AmountField, FutureDateField, IntegerField } from '@/components/ui/validated-field'
 
 import { createCourse, updateCourse, type TrainingState } from './actions'
 
@@ -78,15 +79,14 @@ export function CourseForm({
       <h2 className="text-sm font-medium">{draft.id ? 'Edit course' : 'Schedule a course'}</h2>
 
       <div className="grid gap-3 sm:grid-cols-3">
-        <label className="block space-y-1.5">
-          <span className="block text-sm font-medium text-ink-secondary">Day one</span>
-          <input
-            type="date"
-            value={draft.day1Date}
-            onChange={(e) => set('day1Date')(e.target.value)}
-            className="w-full rounded-field border border-line bg-surface px-3 py-2 text-sm text-ink"
-          />
-        </label>
+        {/* A course cannot be scheduled into the past. `min` greys the days out in the
+            browser's own picker, which prevents the mistake rather than reporting it. */}
+        <FutureDateField
+          id="day1Date"
+          label="Day one"
+          value={draft.day1Date}
+          onChange={set('day1Date')}
+        />
         <Field
           id="day1Start"
           label="Starts"
@@ -104,16 +104,14 @@ export function CourseForm({
       </div>
 
       <div className="grid gap-3 sm:grid-cols-3">
-        <label className="block space-y-1.5">
-          <span className="block text-sm font-medium text-ink-secondary">Day two</span>
-          <input
-            type="date"
-            value={draft.day2Date}
-            onChange={(e) => set('day2Date')(e.target.value)}
-            className="w-full rounded-field border border-line bg-surface px-3 py-2 text-sm text-ink"
-          />
-          <span className="block text-xs text-ink-faint">Leave blank for a one-day course</span>
-        </label>
+        <FutureDateField
+          id="day2Date"
+          label="Day two"
+          value={draft.day2Date}
+          onChange={set('day2Date')}
+          optional
+          hint="Leave blank for a one-day course"
+        />
         <Field
           id="day2Start"
           label="Starts"
@@ -133,31 +131,25 @@ export function CourseForm({
       </div>
 
       <div className="grid gap-3 sm:grid-cols-3">
-        <Field
+        <IntegerField
           id="maxStudents"
           label="Seats"
-          type="number"
           min={1}
+          max={50}
           value={draft.maxStudents}
-          onChange={(e) => set('maxStudents')(e.target.value)}
+          onChange={set('maxStudents')}
         />
-        <Field
+        <AmountField
           id="depositAmount"
           label="Deposit"
-          type="number"
-          min={0}
-          step={0.01}
           value={draft.depositAmount}
-          onChange={(e) => set('depositAmount')(e.target.value)}
+          onChange={set('depositAmount')}
         />
-        <Field
+        <AmountField
           id="totalPrice"
           label="Total price"
-          type="number"
-          min={0}
-          step={0.01}
           value={draft.totalPrice}
-          onChange={(e) => set('totalPrice')(e.target.value)}
+          onChange={set('totalPrice')}
         />
       </div>
 

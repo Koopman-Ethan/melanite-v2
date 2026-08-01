@@ -2,7 +2,15 @@
 
 import { useState, type ComponentProps } from 'react'
 
-import { emailError, formatPhone, phoneError } from '@/lib/validation'
+import {
+  amountError,
+  countError,
+  emailError,
+  formatPhone,
+  futureDateError,
+  phoneError,
+  todayInDenver,
+} from '@/lib/validation'
 
 import { Field } from './field'
 
@@ -136,6 +144,146 @@ export function EmailField({
         setTouched(true)
         commit(e.target.value.trim())
       }}
+      error={error ?? local ?? undefined}
+    />
+  )
+}
+
+interface NumericProps extends Base {
+  value?: string | number
+  onChange?: (value: string) => void
+  error?: string
+  optional?: boolean
+  min?: number
+  max?: number
+}
+
+/**
+ * Money.
+ *
+ * `type="number"` on its own accepts `-50`, `1e9` and `0.001` — all of which reach a server
+ * action as a perfectly valid Number, and none of which is a price. The third is the quiet one:
+ * money is integer cents everywhere in this codebase, so `0.001` is not rejected, it is
+ * ROUNDED, and somebody's price silently becomes something they did not type.
+ *
+ * `step` stays at 0.01 so the browser's own spinner agrees with the rule, rather than offering
+ * increments the field will then refuse.
+ */
+export function AmountField({
+  value,
+  onChange,
+  error,
+  optional,
+  min = 0,
+  max = 100_000,
+  defaultValue,
+  label,
+  ...props
+}: NumericProps & { label: string }) {
+  const [touched, setTouched] = useState(false)
+  const { current, set } = useFieldValue(
+    value === undefined ? undefined : String(value),
+    defaultValue,
+  )
+  const local = touched
+    ? amountError(current, { required: !optional, min, max, label: label.toLowerCase() })
+    : null
+
+  return (
+    <Field
+      {...props}
+      label={label}
+      type="number"
+      inputMode="decimal"
+      step={0.01}
+      min={min}
+      max={max}
+      value={current}
+      onChange={(e) => {
+        set(e.target.value)
+        onChange?.(e.target.value)
+      }}
+      onBlur={() => setTouched(true)}
+      error={error ?? local ?? undefined}
+    />
+  )
+}
+
+/** A whole number of things — seats, sessions, quantities. 2.5 seats is nonsense where $2.50 is
+ *  ordinary, so this is a separate component rather than an option on the one above. */
+export function IntegerField({
+  value,
+  onChange,
+  error,
+  optional,
+  min = 1,
+  max = 999,
+  defaultValue,
+  label,
+  ...props
+}: NumericProps & { label: string }) {
+  const [touched, setTouched] = useState(false)
+  const { current, set } = useFieldValue(
+    value === undefined ? undefined : String(value),
+    defaultValue,
+  )
+  const local = touched
+    ? countError(current, { required: !optional, min, max, label: label.toLowerCase() })
+    : null
+
+  return (
+    <Field
+      {...props}
+      label={label}
+      type="number"
+      inputMode="numeric"
+      step={1}
+      min={min}
+      max={max}
+      value={current}
+      onChange={(e) => {
+        set(e.target.value)
+        onChange?.(e.target.value)
+      }}
+      onBlur={() => setTouched(true)}
+      error={error ?? local ?? undefined}
+    />
+  )
+}
+
+/** A date being SCHEDULED, which cannot be in the past.
+ *
+ *  `min` is set as well as validated: the browser then greys out past days in its own picker,
+ *  which stops the mistake rather than reporting it. Not for dates that RECORD something that
+ *  already happened — those are supposed to be in the past. */
+export function FutureDateField({
+  value,
+  onChange,
+  error,
+  optional,
+  defaultValue,
+  label,
+  ...props
+}: Omit<NumericProps, 'min' | 'max'> & { label: string }) {
+  const [touched, setTouched] = useState(false)
+  const { current, set } = useFieldValue(
+    value === undefined ? undefined : String(value),
+    defaultValue,
+  )
+  const local = touched ? futureDateError(current, { required: !optional, label }) : null
+
+  return (
+    <Field
+      {...props}
+      label={label}
+      type="date"
+      min={todayInDenver()}
+      value={current}
+      onChange={(e) => {
+        set(e.target.value)
+        onChange?.(e.target.value)
+      }}
+      onBlur={() => setTouched(true)}
       error={error ?? local ?? undefined}
     />
   )

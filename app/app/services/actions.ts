@@ -25,6 +25,10 @@ function validate(
 ): string | null {
   if (!Number.isFinite(price) || price <= 0) return 'Price must be greater than zero.'
   if (price > 100_000) return 'That price looks wrong — check the amount.'
+  // Fractional cents round SILENTLY on the way into the ledger — money is integer cents
+  // everywhere here — so a price typed as 200.005 becomes 200.01 without anybody being told.
+  // Rejecting is the honest answer; rounding somebody's price for them is not.
+  if (Math.round(price * 100) !== price * 100) return 'Use at most two decimal places.'
   if (!Number.isInteger(durationMins)) return 'Duration must be a whole number of minutes.'
   if (durationMins < bounds.minDurationMins) {
     return `Duration must be at least ${bounds.minDurationMins} minutes for this service.`

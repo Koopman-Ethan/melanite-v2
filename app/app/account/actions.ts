@@ -9,7 +9,7 @@ import { validatePassword } from '@/lib/auth/reset'
 import { destroyOtherSessions } from '@/lib/auth/session'
 import { db } from '@/lib/db'
 import { providers } from '@/lib/db/schema'
-import { isValidPhone } from '@/lib/validation'
+import { futureDateError, isValidPhone } from '@/lib/validation'
 
 export interface AccountState {
   error?: string
@@ -62,6 +62,21 @@ export async function updateProfile(
 
   if (licenseExpiryRaw && !DATE.test(licenseExpiryRaw)) {
     return { error: 'License expiry must be a valid date.' }
+  }
+
+  // Onboarding refuses an already-expired licence; this screen did not, so the one route a
+  // provider uses AFTER setup was the one with no check. An expired date here is either a typo
+  // or a licence that has genuinely lapsed, and both need saying out loud rather than saving.
+  const expiryProblem = licenseExpiryRaw
+    ? futureDateError(licenseExpiryRaw, { label: 'a license expiry date' })
+    : null
+  if (expiryProblem) {
+    return {
+      error:
+        expiryProblem === 'That date has already passed.'
+          ? 'That license has already expired. Renew it, then update the date here.'
+          : expiryProblem,
+    }
   }
 
   await db

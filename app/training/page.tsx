@@ -3,6 +3,7 @@ import type { Metadata } from 'next'
 import { Brand } from '@/components/app-shell/brand'
 import { getCheckoutSettings } from '@/lib/db/queries/checkout'
 import { getUpcomingCourses } from '@/lib/db/queries/training'
+import { todayInDenver } from '@/lib/validation'
 
 import { Enroll } from './enroll'
 
@@ -12,8 +13,6 @@ export const metadata: Metadata = {
 }
 export const dynamic = 'force-dynamic'
 
-const todayInDenver = () =>
-  new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(new Date())
 
 /** Public enrolment. Deliberately outside `/app/*` — a prospective student has no account, and
  *  training is how someone becomes a provider in the first place. */

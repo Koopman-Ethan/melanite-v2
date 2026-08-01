@@ -147,3 +147,67 @@ export function amountError(
 
   return null
 }
+
+// ---------------------------------------------------------------------------
+// Counts
+// ---------------------------------------------------------------------------
+
+/** A whole number of things — seats, sessions, quantities.
+ *
+ *  Separate from `amountError` because the failures differ: 2.5 seats is nonsense where $2.50
+ *  is ordinary, and `type="number"` accepts both. */
+export function countError(
+  value: string | number,
+  { required = true, min = 1, max = 999, label = 'a number' } = {},
+): string | null {
+  const raw = String(value).trim()
+  if (!raw) return required ? `Enter ${label}.` : null
+
+  const count = Number(raw)
+  if (!Number.isFinite(count)) return `Enter ${label} as a number.`
+  if (!Number.isInteger(count)) return 'That has to be a whole number.'
+  if (count < min) return `That must be at least ${min}.`
+  if (count > max) return `That looks too large — the limit is ${max}.`
+
+  return null
+}
+
+// ---------------------------------------------------------------------------
+// Dates
+// ---------------------------------------------------------------------------
+
+export const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/
+
+/** Today, in the timezone Melanite actually operates in.
+ *
+ *  `new Date().toISOString().slice(0, 10)` is UTC, which is a different day from about 5pm
+ *  Denver onwards — so for the last seven hours of every working day it would call today
+ *  "yesterday" and reject an appointment being booked for this afternoon.
+ *
+ *  `en-CA` because it formats as YYYY-MM-DD, which is what `<input type="date">` wants. */
+export function todayInDenver(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(new Date())
+}
+
+/**
+ * A date that must not be in the past.
+ *
+ * For the things that are being SCHEDULED — a course, an appointment, a licence that has to
+ * still be valid. Deliberately not applied to dates that RECORD something that already
+ * happened: the manual booking entry and the "payment received on" field exist precisely to
+ * enter past dates, and blocking them there would break the feature.
+ *
+ * Compared as strings. Both sides are YYYY-MM-DD in the same timezone, which sorts correctly
+ * and avoids parsing a date-only string into a Date — where it is read as UTC midnight and
+ * lands on the previous day for anybody west of Greenwich.
+ */
+export function futureDateError(
+  value: string,
+  { required = true, label = 'a date', today = todayInDenver() } = {},
+): string | null {
+  const trimmed = value.trim()
+  if (!trimmed) return required ? `Pick ${label}.` : null
+  if (!DATE_ONLY.test(trimmed)) return 'That is not a valid date.'
+  if (trimmed < today) return 'That date has already passed.'
+  return null
+}

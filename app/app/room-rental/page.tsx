@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 
 import { requireProvider } from '@/lib/auth/dal'
 import { Notice } from '@/components/ui/field'
+import { todayInDenver } from '@/lib/validation'
 import {
   getMonthOccupancy,
   getMyRentals,
@@ -14,8 +15,6 @@ import { RentalShell } from './rental-shell'
 export const metadata: Metadata = { title: 'Daily room rental · Melanite' }
 export const dynamic = 'force-dynamic'
 
-const todayInDenver = () =>
-  new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(new Date())
 
 export default async function RoomRentalPage({
   searchParams,

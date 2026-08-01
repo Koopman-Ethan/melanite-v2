@@ -3,6 +3,7 @@ import Link from 'next/link'
 
 import { BookingGates } from '@/components/booking-gates'
 import { bookingBlockedReasons, canBook, requireProvider } from '@/lib/auth/dal'
+import { todayInDenver } from '@/lib/validation'
 import {
   getAvailability,
   getBookableServices,
@@ -14,8 +15,6 @@ import { BookPanel } from './book-panel'
 export const metadata: Metadata = { title: 'Book laser time · Melanite' }
 export const dynamic = 'force-dynamic'
 
-const todayInDenver = () =>
-  new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(new Date())
 
 export default async function BookPage({
   searchParams,

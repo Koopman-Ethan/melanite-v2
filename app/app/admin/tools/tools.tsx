@@ -4,7 +4,12 @@ import { useState, useTransition, type ReactNode } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Field, Notice } from '@/components/ui/field'
-import { EmailField, PhoneField } from '@/components/ui/validated-field'
+import {
+  AmountField,
+  EmailField,
+  IntegerField,
+  PhoneField,
+} from '@/components/ui/validated-field'
 import { cn } from '@/lib/cn'
 import type { ServiceOption } from '@/lib/db/queries/admin-tools'
 
@@ -206,24 +211,19 @@ function PaymentTool({ unpaid, sharePct }: { unpaid: UnpaidBookingView[]; shareP
           <MethodPicker value={method} onChange={setMethod} />
 
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field
+            <AmountField
               id="pay-amount"
               label="Amount collected"
-              type="number"
-              min={0}
-              step={0.01}
               value={amount}
-              onChange={(e) => setAmount(e.target.value)}
+              onChange={setAmount}
               hint={`Charged ${usd(booking.price)}`}
             />
-            <Field
+            <AmountField
               id="pay-tip"
               label="Tip"
-              type="number"
-              min={0}
-              step={0.01}
               value={tip}
-              onChange={(e) => setTip(e.target.value)}
+              onChange={setTip}
+              optional
               hint="Goes entirely to the provider"
             />
           </div>
@@ -356,23 +356,19 @@ function MembershipTool({ providers }: { providers: ProviderView[] }) {
           )}
 
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field
+            <AmountField
               id="md-amount"
               label="Total paid"
-              type="number"
-              min={0}
-              step={0.01}
               value={amount}
-              onChange={(e) => setAmount(e.target.value)}
+              onChange={setAmount}
             />
-            <Field
+            <IntegerField
               id="md-months"
               label="Months covered"
-              type="number"
               min={1}
-              step={1}
+              max={60}
               value={months}
-              onChange={(e) => setMonths(e.target.value)}
+              onChange={setMonths}
             />
           </div>
 
@@ -570,15 +566,12 @@ function BookingTool({
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field
+            <AmountField
               id="mb-price"
               label="Price"
-              type="number"
-              min={0}
-              step={0.01}
               value={comped ? '0.00' : price}
               disabled={comped}
-              onChange={(e) => setPrice(e.target.value)}
+              onChange={setPrice}
             />
             <label className="flex items-center gap-3 self-end rounded-field border border-line px-3 py-2.5">
               <input

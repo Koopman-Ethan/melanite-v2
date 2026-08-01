@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 
 import {
   amountError,
+  countError,
   emailError,
   formatPhone,
+  futureDateError,
   isValidEmail,
   isValidPhone,
   nameError,
@@ -163,5 +165,50 @@ describe('amounts', () => {
 
   it('rejects text', () => {
     expect(amountError('free')).toMatch(/as a number/)
+  })
+})
+
+describe('counts', () => {
+  it('rejects a fraction of a thing', () => {
+    // 2.5 seats is nonsense where $2.50 is ordinary, which is why this is separate from money.
+    expect(countError('2.5')).toMatch(/whole number/)
+    expect(countError('1e3')).toMatch(/too large/)
+  })
+
+  it('accepts whole numbers inside the range', () => {
+    expect(countError('1')).toBeNull()
+    expect(countError('12', { max: 50 })).toBeNull()
+    expect(countError('0', { min: 1 })).toMatch(/at least 1/)
+  })
+})
+
+describe('dates that must not be in the past', () => {
+  const today = '2026-07-31'
+
+  it('refuses yesterday', () => {
+    expect(futureDateError('2026-07-30', { today })).toMatch(/already passed/)
+  })
+
+  it('accepts today and later', () => {
+    // Today must pass: an appointment this afternoon is not in the past.
+    expect(futureDateError(today, { today })).toBeNull()
+    expect(futureDateError('2026-08-01', { today })).toBeNull()
+  })
+
+  it('compares as strings, not as parsed dates', () => {
+    // `new Date('2026-07-31')` is UTC midnight, which is 6pm on the 30th in Denver — so a
+    // parsed comparison rejects today's date for anybody west of Greenwich. Both sides are
+    // YYYY-MM-DD in the same zone, and that sorts correctly.
+    expect(futureDateError('2026-12-01', { today: '2026-09-30' })).toBeNull()
+    expect(futureDateError('2026-09-30', { today: '2026-12-01' })).toMatch(/already passed/)
+  })
+
+  it('rejects a malformed date before deciding whether it has passed', () => {
+    expect(futureDateError('31/07/2026', { today })).toMatch(/not a valid date/)
+  })
+
+  it('treats blank as missing when required', () => {
+    expect(futureDateError('', { today })).toMatch(/Pick/)
+    expect(futureDateError('', { required: false, today })).toBeNull()
   })
 })

@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 
 import { requireAdmin } from '@/lib/auth/dal'
 import { getReviewQueue, getTransferTargets } from '@/lib/db/queries/review-queue'
+import { todayInDenver } from '@/lib/validation'
 
 import { QueueRow } from './queue-item'
 
@@ -10,8 +11,6 @@ export const dynamic = 'force-dynamic'
 
 const usd = (v: number) => v.toLocaleString('en-US', { style: 'currency', currency: 'USD' })
 
-const todayInDenver = () =>
-  new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(new Date())
 
 export default async function AdminQueuePage() {
   await requireAdmin()

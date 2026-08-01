@@ -975,3 +975,40 @@ value before the formatter runs, so a pasted `+1 208 555 0134` (15 characters) w
 `+1 208 555 013` and formatted to `(120) 855-5013`. A plausible-looking wrong number, which is
 far worse than a rejected one. The unit test passed throughout, because it called `formatPhone`
 directly and never went through the field.
+
+### Amounts and future dates — 2026-07-31
+
+Follows the phone/email work. `type="number"` accepts `-50`, `1e9` and `0.001`, all of which
+reach a server action as perfectly valid Numbers and none of which is a price.
+
+**Server-side was in better shape than expected.** `Number.isFinite` and `<= 0` checks already
+existed on services, packages, training, admin tools and the tip. The consistent gap was
+**fractional cents**: money is integer cents everywhere here, so `200.005` was not rejected, it
+was ROUNDED, and somebody's price silently became something they had not typed. Now refused on
+service prices and course prices. What was missing on the client was any feedback at all.
+
+`AmountField` and `IntegerField` are separate components rather than one with an option, because
+the failures differ: 2.5 seats is nonsense where $2.50 is ordinary.
+
+**Dates: only where something is being SCHEDULED.** Course dates and licence expiry cannot be in
+the past. The manual booking entry and "payment received on" are deliberately left alone — they
+exist to record things that already happened, and blocking past dates there would break the
+feature. Licence numbers are untouched; there is no format to enforce without a rule from Keoni.
+
+Two gaps this closed on the way past:
+
+- **Account could set an expired licence.** Onboarding refuses one; the Account page did not —
+  so the one route a provider uses AFTER setup was the one with no check.
+- **`todayInDenver` existed in five copies.** Now one, in `lib/validation.ts`. It matters more
+  than it looks: `new Date().toISOString().slice(0,10)` is UTC, which is a different day from
+  about 5pm Denver onwards, so for the last seven hours of every working day it calls today
+  "yesterday" and refuses an appointment being booked for this afternoon.
+
+**A time bomb removed.** `test/training-courses.test.ts` used a fixture date of 2026-11-14 and
+now runs against a rule that refuses past dates — so it would have passed until November 2026
+and then failed every day after, with no code change. `validateCourse` takes `today` as a
+parameter and the suite pins it.
+
+**Still not validated, deliberately:** the compact inline number inputs on packages, My Services
+and the enrolment payment row. Those are raw `<input type="number">` with their own layout, and
+their server actions already range-check them. Converting is presentation churn, not a gap.

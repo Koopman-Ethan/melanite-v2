@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Notice } from '@/components/ui/field'
+import { todayInDenver } from '@/lib/validation'
 
 import { bookFromPackage, redemptionSlots, type PackageState } from './actions'
 
@@ -28,8 +29,6 @@ export interface RedeemLine {
   providerServiceId: string | null
 }
 
-const todayInDenver = () =>
-  new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(new Date())
 
 export function RedeemForm({
   clientPackageId,
