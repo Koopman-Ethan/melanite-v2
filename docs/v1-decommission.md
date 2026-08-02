@@ -132,3 +132,39 @@ v1 and v2 share **one Stripe account**. Deleting any of these breaks production 
 
 The only Stripe objects that genuinely retire are the **old webhook destinations** and the
 **old API keys**.
+
+---
+
+## Verified live — 2026-08-01
+
+Webflow app pages unpublished (`App` ×15, `Pay` ×6, `auth` ×2, `Onboard`), redirects published,
+and every rule checked against the live site:
+
+| Request | Result |
+| --- | --- |
+| `/pay/{token}` | 301 → `app.melanitesuite.com/pay/{token}` → 200, **token preserved** |
+| `/pay/package/{token}` | 301, token preserved — ordering held, `/pay/(.*)` did not swallow it |
+| `/app/medical-director` | 301 → `/app/membership` — specific rule beat the catch-all |
+| `/app/stripe-return` | 301 → `/onboarding/stripe` |
+| `/app/dashboard`, `/app/book` | 301 via the `/app/(.*)` catch-all |
+| `/` `/about` `/contact` `/laser-training` `/laser-rental` `/refund-policy` `/payment-plans` | 200, untouched |
+
+The wildcard syntax `(.*)` / `%1` is confirmed correct.
+
+**`/app/onboard` needs no rule of its own.** v2's middleware preserves the intended destination,
+so the catch-all produces:
+
+```
+melanitesuite.com/app/dashboard
+  → 301 → app.melanitesuite.com/app/dashboard
+  → 307 → /login?next=%2Fapp%2Fdashboard
+```
+
+A provider clicking a year-old bookmark signs in and lands on the page they originally wanted.
+That is better than any redirect written by hand, so the stage-2 rules for `/app/book` and
+`/app/onboard` were dropped as redundant.
+
+**Outstanding:** `/training-balance` was unpublished with the rest and now 404s. Either republish
+it with content saying the balance link is emailed and can be resent — the better answer, since
+students may have bookmarked it — or import the single row left in
+`webflow-redirects-stage2.csv`.
