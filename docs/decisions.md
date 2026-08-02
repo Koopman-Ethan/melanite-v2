@@ -1051,3 +1051,30 @@ Two things must exist first, neither of which needs her details: an LHR package 
 Nichole's account, and the admin entry tool — pick template, client, price paid, method, sessions
 already used, writing the package, its items with `qty_used` preset, and a ledger entry with
 `payment_method = 'groupon'` so `PROVIDER_ALREADY_HOLDS` treats it correctly.
+
+### The migration runner tried to replay 0000 against production — 2026-08-01
+
+Caught during the real cutover, on the first command aimed at production.
+
+Two days earlier the runner was keyed on a migration file's SHA-256, and that skipped 0023
+because its SQL is byte-identical to 0018. The fix was to key on `hash:created_at`. That fix was
+wrong in a worse way, and only production could reveal it.
+
+**Content is not a stable key.** Fourteen of the twenty-five migration files hash differently
+now than when production applied them — line endings, mostly. Keying on hash-plus-timestamp
+therefore treated all fourteen as never-applied and began replaying
+`0000_normal_tarantula` against a live 24-table schema. It failed on the first statement
+(`CREATE TYPE … already exists`) and migrations are only recorded once every statement succeeds,
+so nothing was applied and nothing was damaged — but that was luck about statement order, not
+design.
+
+Dev could never have caught it. Dev's rows were written by this same script from these same
+files, so its hashes agreed. Production's were written earlier, from a checkout whose line
+endings differed. **A migration runner is only really tested against the database it has been
+migrating the longest.**
+
+Now keyed on the journal's `when`: unique per entry, never changes once written, immune to edits
+and line endings, and exactly what drizzle-kit's own migrator compares on — so the table stays
+readable by both. An edited migration is deliberately not re-applied; you add a new one rather
+than rewriting one that has run. The runner reports which applied files no longer match what was
+recorded, because that means reading the file no longer tells you what the database contains.

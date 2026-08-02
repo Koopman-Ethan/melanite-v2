@@ -55,20 +55,33 @@ async function main() {
     sql`select hash, created_at from drizzle.__drizzle_migrations`,
   )
 
-  // Keyed on hash AND the journal timestamp, not the hash alone.
+  // Keyed on the journal's `when`, NOT on the file's hash.
   //
-  // The hash is of the file's CONTENTS, and two migrations can legitimately have identical
-  // contents: 0018 added `cherry_started_at` to `checkout_links`, 0019 dropped it again, and
-  // 0023 added it back for a different reason. Byte-for-byte the same statement, so the same
-  // hash — and keying on the hash alone made this runner skip 0023 and print "Nothing to
-  // apply." It reported success while changing nothing, which is precisely what the header
-  // above criticises drizzle-kit for doing.
+  // The hash is of the file's CONTENTS, and content is not stable. Two things break it:
   //
-  // `created_at` is the journal's `when`, unique per entry, so the pair identifies a migration
-  // rather than a piece of SQL. Rows written are unchanged, so drizzle-kit can still read this
-  // table — it compares timestamps rather than hashes, and would have applied 0023 correctly.
-  const done = new Set(applied.rows.map((r) => `${r.hash}:${r.created_at}`))
-  const hashesSeen = new Set(applied.rows.map((r) => r.hash))
+  //   1. Identical SQL. 0018 added `cherry_started_at` to `checkout_links`, 0019 dropped it,
+  //      and 0023 added it back for a different reason — byte-for-byte the same statement, so
+  //      the same hash. Keying on the hash alone made this runner SKIP 0023 and print "Nothing
+  //      to apply", reporting success while changing nothing.
+  //
+  //   2. Line endings and later edits. Fourteen of the twenty-five migration files hash
+  //      differently now than when production applied them. Keying on hash-plus-timestamp —
+  //      the first attempt at fixing (1) — therefore treated all fourteen as NEVER APPLIED and
+  //      tried to replay `0000_normal_tarantula` against a live 24-table schema. It failed
+  //      safely on `CREATE TYPE … already exists`, but only by luck of which statement came
+  //      first.
+  //
+  // `when` comes from the journal, is unique per entry, and never changes once written. It is
+  // also exactly what drizzle-kit's own migrator compares on, so this table stays readable by
+  // both. An edited migration is deliberately NOT re-applied: you add a new migration, you
+  // never rewrite one that has run.
+  const done = new Set(applied.rows.map((r) => String(r.created_at)))
+
+  // A changed hash is not a reason to re-run, but it IS worth saying: it means the file on disk
+  // is no longer what was applied, so reading it tells you what the database contains only if
+  // nobody has edited it.
+  const appliedHash = new Map(applied.rows.map((r) => [String(r.created_at), r.hash]))
+  const edited: string[] = []
 
   let ran = 0
 
@@ -81,15 +94,10 @@ async function main() {
     // Drizzle keys the journal on the file's hash, so an edited migration is a different
     // migration. Matching that exactly keeps `drizzle-kit` able to read this table.
     const hash = createHash('sha256').update(body).digest('hex')
-    if (done.has(`${hash}:${entry.when}`)) continue
 
-    // Worth saying out loud rather than applying silently: the reason this file looks applied
-    // when it is not is that an earlier migration contains exactly the same SQL.
-    if (hashesSeen.has(hash)) {
-      console.log(
-        `
-${entry.tag} — identical SQL to an earlier migration; applying it as its own`,
-      )
+    if (done.has(String(entry.when))) {
+      if (appliedHash.get(String(entry.when)) !== hash) edited.push(entry.tag)
+      continue
     }
 
     const statements = body
