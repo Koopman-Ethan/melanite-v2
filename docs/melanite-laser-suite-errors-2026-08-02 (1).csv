@@ -1,0 +1,11 @@
+source,target,error
+/app/onboard,https://app.melanitesuite.com/onboarding,/app/onboard is already a page for this project
+/app/book,https://app.melanitesuite.com/app/book,/app/book is already a page for this project
+/training-balance,https://app.melanitesuite.com/training,/training-balance is already a page for this project
+/pay/package/(.*),https://app.melanitesuite.com/pay/package/%1,
+/pay/(.*),https://app.melanitesuite.com/pay/%1,
+/app/medical-director,https://app.melanitesuite.com/app/membership,
+/app/stripe-return,https://app.melanitesuite.com/onboarding/stripe,
+/app/stripe-refresh,https://app.melanitesuite.com/onboarding/stripe,
+/app/membership,https://app.melanitesuite.com/app/membership,
+/app/(.*),https://app.melanitesuite.com/app/%1,

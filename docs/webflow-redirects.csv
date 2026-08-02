@@ -1,11 +1,8 @@
-Old Path,New Path
+source,target
 /pay/package/(.*),https://app.melanitesuite.com/pay/package/%1
 /pay/(.*),https://app.melanitesuite.com/pay/%1
 /app/medical-director,https://app.melanitesuite.com/app/membership
 /app/stripe-return,https://app.melanitesuite.com/onboarding/stripe
 /app/stripe-refresh,https://app.melanitesuite.com/onboarding/stripe
-/app/onboard,https://app.melanitesuite.com/onboarding
-/app/book,https://app.melanitesuite.com/app/book
 /app/membership,https://app.melanitesuite.com/app/membership
 /app/(.*),https://app.melanitesuite.com/app/%1
-/training-balance,https://app.melanitesuite.com/training

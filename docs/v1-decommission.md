@@ -28,7 +28,10 @@ all three go at the end of the same window, not one at a time.
 
 ## The redirects
 
-`docs/webflow-redirects.csv`, for Site settings → Publishing → 301 redirects.
+Two files, for Site settings → Publishing → 301 redirects:
+
+- **`docs/webflow-redirects.csv`** — imports cleanly today
+- **`docs/webflow-redirects-stage2.csv`** — the three that need their Webflow page deleted first
 
 ### Old payment links still work
 
@@ -54,16 +57,35 @@ Not in the CSV, and must not be redirected:
 `/laser-training` stays as a marketing page by decision — it carries SEO and ad traffic. Point
 its signup button at `https://app.melanitesuite.com/training`; do not redirect the page itself.
 
-### Two things to check before importing
+### The format, confirmed 2026-08-01
 
-**The wildcard syntax.** The CSV uses `(.*)` in the old path and `%1` in the target. Confirm
-against Webflow's current behaviour by importing, then visiting one real payment link and
-checking it lands on the right token. If Webflow wants a bare `*` instead, it is a
-find-and-replace on two lines. Getting this wrong is silent — the redirect simply does not fire.
+Headers are **`source,target`**. Webflow's own error export uses those names.
 
-**The header row.** `Old Path,New Path` is the common format. If the import is rejected, open
-Webflow's own export or its import dialog to see the header names it expects and rename the two
-columns; the data underneath does not change.
+Wildcards are `(.*)` in the source and `%1` in the target. Webflow ACCEPTED those on import — but
+acceptance is not proof they fire, so test with a real payment link after publishing.
+
+**Redirects only take effect when the site is PUBLISHED.** Importing them changes nothing on the
+live site until you hit Publish, and the failure mode looks identical to a wrong wildcard: the
+old URL simply 404s. Publish first, then test, then suspect the syntax.
+
+### Webflow will not redirect a path that is still a page
+
+Three rows were rejected on import with *"is already a page for this project"*:
+`/app/onboard`, `/app/book`, `/training-balance`.
+
+That is Webflow being right. A real page always wins over a redirect, so the rule could never
+have fired. It does mean the order has to invert from the obvious one:
+
+**delete the page first, then add the redirect** — not the other way round.
+
+Those three live in `docs/webflow-redirects-stage2.csv`, to import after the pages are gone.
+There is a brief window where the path 404s; do them one at a time and publish straight after.
+
+**`/training-balance` is better repurposed than redirected.** It is a real page that students may
+have bookmarked, and the redirect target — the course signup page — is not what they came for.
+Rather than deleting it, edit the page to say the balance link is emailed and that Melanite can
+resend it. That is a truthful answer where the redirect is a misleading one, and it needs no
+redirect at all.
 
 ### The one imperfect redirect
 
