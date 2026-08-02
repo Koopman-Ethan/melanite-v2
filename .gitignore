@@ -57,3 +57,6 @@ demo/
 
 # Role-view screenshots — generated.
 demo-roles/
+
+# Webflow redirect error exports — diagnostics for one import run, not a record of the site.
+docs/melanite-laser-suite-errors-*.csv
