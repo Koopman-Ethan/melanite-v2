@@ -1012,3 +1012,42 @@ parameter and the suite pins it.
 **Still not validated, deliberately:** the compact inline number inputs on packages, My Services
 and the enrolment payment row. Those are raw `<input type="number">` with their own layout, and
 their server actions already range-check them. Converting is presentation churn, not a gap.
+
+### BACKLOG: the nightly prod → dev copy-down — 2026-08-01
+
+Not built. Deferred at go-live deliberately: dev drifting from production is an inconvenience,
+and nothing about the cutover depends on it.
+
+Dev and prod are separate Neon PROJECTS, so this cannot be a Neon branch — branches live inside
+a project, and making dev a branch of prod would put dev's compute inside prod's 100 CU-hour
+Free-plan quota, where a day of e2e runs could starve the live site. So it is an explicit
+copy: export prod, load into dev.
+
+**The job must end with these three steps or it manufactures a bug every night:**
+
+1. `npm run db:scrub` — dev is publicly reachable at appdev.melanitesuite.com, the e2e suite
+   runs against it, `EMAIL_REDIRECT_TO` points at a real inbox, and agents have full access. A
+   copy brings real client names, emails, phones and treatment notes straight back. It leaves
+   ids and money alone on purpose, so foreign keys resolve and the ledger still reconciles.
+2. `scripts/dev-connect-accounts.ts` — the copy brings production's LIVE Connect account ids,
+   which a test key cannot see at all. Every payment in dev fails with "Could not start the
+   payment" until they are replaced. This already cost most of a morning once.
+3. `npm run etl:catalogue` — only if the copy replaces `services`.
+
+Have it fail loudly rather than leave dev half-scrubbed. All three are `--check`-able.
+
+### BACKLOG: Nichole's Groupon package — 2026-08-01
+
+A client bought a package of 6 laser hair removal sessions through Groupon and has already had
+one. Nothing today can create a `client_packages` row except the Stripe webhook, which is the
+whole problem.
+
+Blocked on client details from Keoni. Needed: name, email, phone; what she paid Groupon and what
+Nichole received (those differ, and the split depends on the second); purchase date, for expiry;
+**which body area** the six sessions are for — "LHR package of 6" no longer identifies a service
+now that sizes are retired; and how many she has already had.
+
+Two things must exist first, neither of which needs her details: an LHR package template of 6 on
+Nichole's account, and the admin entry tool — pick template, client, price paid, method, sessions
+already used, writing the package, its items with `qty_used` preset, and a ledger entry with
+`payment_method = 'groupon'` so `PROVIDER_ALREADY_HOLDS` treats it correctly.

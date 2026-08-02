@@ -23,11 +23,23 @@ test('a provider can sell a package, and the client can pay for it', async ({ pa
   if ((await existing.count()) === 0) {
     await page.getByRole('button', { name: 'Build a package' }).click()
     await page.getByLabel('Name').fill(PACKAGE_NAME)
-    await page.getByLabel('Total price').fill('600')
 
-    // Three sessions at $200 — the sum has to match the total to the cent or the form refuses.
+    // Pick a service, then DERIVE the total from what it actually costs.
+    //
+    // This used to hardcode $600 for three sessions at $200 and select the service by
+    // position. Both assumptions were about the seed data rather than about the feature: a
+    // fresh import changes the prices, and grouping the dropdown into <optgroup>s changed what
+    // sits at index 1. Neither is a product change, and neither should fail this test.
+    //
+    // The invariant being tested is the real one — the line total must match the package price
+    // to the cent or the form refuses — so read the price and build a total that satisfies it.
     await page.getByRole('combobox').first().selectOption({ index: 1 })
     await page.getByLabel('Qty').fill('3')
+
+    const perSession = Number(await page.getByLabel('Per session').inputValue())
+    expect(perSession, 'the line did not inherit the provider’s price').toBeGreaterThan(0)
+    await page.getByLabel('Total price').fill((perSession * 3).toFixed(2))
+
     await expect(page.getByText(/matches/)).toBeVisible()
 
     await page.getByRole('button', { name: 'Create package' }).click()
@@ -35,6 +47,14 @@ test('a provider can sell a package, and the client can pay for it', async ({ pa
   }
 
   const card = page.locator('li').filter({ has: existing })
+
+  // Read the price off the card rather than assuming it. The template may have been built by an
+  // earlier run against different seed data, and the client-facing assertions below have to
+  // match what this package actually costs — not what it cost the day the test was written.
+  const priceText = await card.getByText(/^\$[\d,]+\.\d{2}$/).first().innerText()
+  const packagePrice = Number(priceText.replace(/[$,]/g, ''))
+  expect(packagePrice, 'the package card showed no price').toBeGreaterThan(0)
+
   await card.getByRole('button', { name: 'Send link' }).click()
 
   // No email on purpose: the link is handed back so it can be sent by text, which is how most
@@ -60,11 +80,19 @@ test('a provider can sell a package, and the client can pay for it', async ({ pa
   await clientPage.goto(url)
 
   await expect(clientPage.getByText(PACKAGE_NAME)).toBeVisible()
-  await expect(clientPage.getByText('$600.00').first()).toBeVisible()
+  await expect(clientPage.getByText(priceText).first()).toBeVisible()
 
-  // $600 is over Cherry's $200 floor, so financing is offered beside the card option rather
-  // than behind it.
-  await expect(clientPage.getByRole('link', { name: /Cherry/ })).toBeVisible()
+  // Cherry appears beside the card option, not behind it — but only above its $200 floor, so
+  // the assertion follows the actual price rather than assuming this package clears it.
+  const cherry = clientPage.getByRole('link', { name: /Cherry/ })
+  if (packagePrice >= 200) {
+    await expect(cherry, `financing was hidden on a $${packagePrice} package`).toBeVisible()
+  } else {
+    await expect(
+      cherry,
+      `financing was offered on a $${packagePrice} package, below Cherry's floor`,
+    ).toHaveCount(0)
+  }
 
   await client.close()
 })
