@@ -312,3 +312,48 @@ test.describe('provider onboarding', () => {
     await expect(page.getByRole('button', { name: 'Activate account' })).toHaveCount(0)
   })
 })
+
+test.describe('signing in from an old link', () => {
+  test.skip(({ browserName }) => browserName !== 'chromium', 'workflow, covered once')
+
+  // Leyla, 3 August 2026: an old bookmark to v1's `/app/login`. Webflow's `/app/(.*)` catch-all
+  // forwards it to v2, where that path does not exist — login lives at `/login`. The proxy
+  // protects everything under `/app/`, so she was sent to `/login?next=%2Fapp%2Flogin`, signed
+  // in correctly, and was then redirected to a page that does not exist. She saw a bare 404 and
+  // reported that she could not log in. She was already logged in.
+  //
+  // The unit tests cover `safeNextPath` directly. This covers the thing they cannot: that the
+  // login action actually calls it.
+  test('a dead `next` lands on the dashboard, not a 404', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name === 'phone', 'covered once, on desktop')
+
+    const email = process.env.E2E_PROVIDER_EMAIL!
+    const password = process.env.E2E_PROVIDER_PASSWORD!
+
+    await page.goto('/login?next=%2Fapp%2Flogin')
+    await page.getByLabel('Email').fill(email)
+    await page.getByLabel('Password').fill(password)
+    await page.getByRole('button', { name: /sign in/i }).click()
+
+    await expect(page, 'a signed-in provider was sent to a page that does not exist').toHaveURL(
+      /\/app(\/dashboard)?$/,
+    )
+    await expect(page.getByText('This page could not be found')).toHaveCount(0)
+  })
+
+  test('a real `next` still returns them to where they were going', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name === 'phone', 'covered once, on desktop')
+
+    // The feature must survive the fix. Sending everybody to the dashboard would be a cheaper
+    // repair and would quietly remove the reason `next` exists.
+    const email = process.env.E2E_PROVIDER_EMAIL!
+    const password = process.env.E2E_PROVIDER_PASSWORD!
+
+    await page.goto('/login?next=%2Fapp%2Fappointments')
+    await page.getByLabel('Email').fill(email)
+    await page.getByLabel('Password').fill(password)
+    await page.getByRole('button', { name: /sign in/i }).click()
+
+    await expect(page).toHaveURL(/\/app\/appointments/)
+  })
+})

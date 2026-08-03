@@ -1078,3 +1078,51 @@ and line endings, and exactly what drizzle-kit's own migrator compares on — so
 readable by both. An edited migration is deliberately not re-applied; you add a new one rather
 than rewriting one that has run. The runner reports which applied files no longer match what was
 recorded, because that means reading the file no longer tells you what the database contains.
+
+### A provider could not sign in, and was already signed in — 2026-08-03
+
+Leyla reported that she had reset her password and "it just won't let me get in", with a
+screenshot of a bare white 404. She was signed in. She was being bounced straight off the page.
+
+The chain: an old bookmark to v1's `/app/login`. Webflow's `/app/(.*)` catch-all forwards every
+old app URL to v2, where that path does not exist — login lives at `/login`. `proxy.ts` protects
+everything under `/app/`, so she was redirected to `/login?next=%2Fapp%2Flogin`, signed in
+successfully, and the login action then obediently sent her to `/app/login`.
+
+The login action checked only that `next` was RELATIVE:
+
+    redirect(next.startsWith('/') && !next.startsWith('//') ? next : '/app')
+
+That stops an open redirect and nothing else. A relative path to a page that does not exist
+passes happily. `lib/auth/next-path.ts` now checks against real destinations and falls back to
+`/app`, which is always safe — the worst outcome is landing on the dashboard instead of the page
+you wanted, which is what happened before `next` existed at all.
+
+**The Webflow redirect exposed this; it did not cause it.** Anyone reaching `/app/login` by any
+route would have hit the same wall.
+
+**Two things made it worse than it needed to be.** There was no custom `not-found.tsx`, so the
+app served Next's unstyled white default — on a phone, with no branding and no way back, that
+does not read as a mistyped URL, it reads as the business being offline. And the destination
+list initially covered `/app` only, while `proxy.ts` also protects `/onboarding` — so the first
+version of the fix would have sent anyone signing in mid-setup to a dashboard they are not
+allowed to open. The staleness test now walks every protected root rather than a hardcoded one,
+because scoping it to `/app` is exactly how that gap got through.
+
+### A four-day-old dev server looked like a regression — 2026-08-03
+
+While fixing the above, the e2e suite fell from 73 passing to 53 and ran for eight minutes
+instead of one. It looked like the change had broken sign-in across the app.
+
+It had not. `playwright.config.ts` runs against an already-running dev server rather than
+starting its own, and that server had been up since 30 July. Server actions were hanging — the
+sign-in button sat on "Signing in…" indefinitely — while the database answered in 40ms.
+
+Confirmed by attribution rather than reasoning: stashing the change and re-running reproduced
+the failure on the previous code. Killing the stale process and starting a fresh server restored
+72 passing in 58 seconds.
+
+Worth remembering because the symptom is so misleading: a long-lived Next dev server degrades
+into hung server actions, which present as product bugs in exactly the areas being worked on.
+When a suite degrades broadly and slows down at the same time, suspect the server before the
+diff.

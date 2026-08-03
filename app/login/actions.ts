@@ -8,6 +8,7 @@ import { hashPassword, needsRehash, verifyPassword } from '@/lib/auth/password'
 import { createSession, destroySession } from '@/lib/auth/session'
 import { db } from '@/lib/db'
 import { providers } from '@/lib/db/schema'
+import { safeNextPath } from '@/lib/auth/next-path'
 
 export interface LoginState {
   error?: string
@@ -60,8 +61,10 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
 
   await db.update(providers).set({ lastLoginAt: new Date() }).where(eq(providers.id, provider.id))
 
-  // Only relative paths, or this becomes an open redirect.
-  redirect(next.startsWith('/') && !next.startsWith('//') ? next : '/app')
+  // Relative AND real. Checking only that it is relative stops an open redirect and nothing
+  // else — a relative path to a page that does not exist passes, and lands the person on a 404
+  // immediately after a successful sign-in, which reads as "it won't let me in".
+  redirect(safeNextPath(next))
 }
 
 export async function logout() {
