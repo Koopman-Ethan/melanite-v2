@@ -105,7 +105,7 @@ export default async function EarningsPage() {
         <section className="space-y-3">
           <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">By month</h2>
           <div className="rounded-card border border-line bg-surface p-5">
-            <div className="flex h-40 items-end gap-2">
+            <div className="flex h-40 gap-2">
               {series.map((m) => {
                 const earned = Number(m.earned)
                 const prepaid = Number(m.prepaid)
