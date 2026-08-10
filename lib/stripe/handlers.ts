@@ -27,6 +27,7 @@ import { getEnrollmentDetail, refreshPaymentStatus } from '@/lib/db/queries/trai
 import {
   appointmentWhen,
   bookingConfirmedEmail,
+  providerPaidEmail,
   sendEmail,
   trainingEnrolledEmail,
 } from '@/lib/email'
@@ -244,13 +245,39 @@ async function bookingPaid(pi: StripePaymentIntentObject): Promise<HandlerResult
   // nothing had been paid. Sent after the ledger entry, and deliberately not awaited into the
   // handler's result: the money is recorded either way, and a webhook that reports failure
   // because an email bounced would be replayed and double-count.
-  await confirmBooking(bookingId)
+  const detail = await confirmBooking(bookingId)
+
+  // The provider is told separately, and only if they asked to be. Same reasoning as above: a
+  // notification that fails must not undo a payment that succeeded.
+  if (detail) {
+    await notifyProviderPaid({
+      providerId: booking.providerId,
+      clientName: detail.clientName,
+      what: detail.serviceName,
+      when: appointmentWhen(detail.startTime),
+      grossCents,
+      tipCents,
+      payoutCents: providerPayoutCents,
+    })
+  }
 
   return { handled: true, detail: `booking ${bookingId} paid` }
 }
 
-/** Tells the client their appointment is on. Never throws — see the call site. */
-async function confirmBooking(bookingId: string): Promise<void> {
+interface BookingEmailDetail {
+  clientName: string
+  startTime: Date
+  serviceName: string
+}
+
+/** Tells the client their appointment is on.
+ *
+ *  Returns what it looked up so the provider notification does not repeat a four-table join.
+ *  Returns the detail even when there is no client to email — a booking with no address on it
+ *  still earned the provider money, and they should hear about it either way.
+ *
+ *  Never throws — see the call site. */
+async function confirmBooking(bookingId: string): Promise<BookingEmailDetail | null> {
   try {
     const [row] = await db
       .select({
@@ -269,7 +296,15 @@ async function confirmBooking(bookingId: string): Promise<void> {
       .where(eq(bookings.id, bookingId))
       .limit(1)
 
-    if (!row?.clientEmail) return
+    if (!row) return null
+
+    const detail: BookingEmailDetail = {
+      clientName: row.clientName,
+      startTime: row.startTime,
+      serviceName: row.serviceName,
+    }
+
+    if (!row.clientEmail) return detail
 
     await sendEmail({
       to: row.clientEmail,
@@ -281,8 +316,64 @@ async function confirmBooking(bookingId: string): Promise<void> {
         amount: `$${Number(row.price).toFixed(2)}`,
       }),
     })
+
+    return detail
   } catch (err) {
     console.error('[email] booking confirmation failed', err)
+    return null
+  }
+}
+
+/** Tells the PROVIDER that a client paid one of their links. Never throws — see the call sites.
+ *
+ *  Gated on `providers.notifyBookingConfirmed`. That column arrived with the v1 migration and
+ *  has been rendered ever since as a live switch in account settings — "Payment received", on by
+ *  default — with nothing anywhere reading it. Every provider has therefore had this turned on
+ *  and never received one. Honouring the toggle is the point: it is already a promise the
+ *  settings page makes on our behalf.
+ */
+async function notifyProviderPaid(input: {
+  providerId: string
+  clientName: string | null
+  what: string
+  when: string | null
+  /** Excludes the tip, matching how the ledger stores it. */
+  grossCents: number
+  tipCents: number
+  payoutCents: number
+}): Promise<void> {
+  try {
+    const [provider] = await db
+      .select({
+        email: providers.email,
+        firstName: providers.firstName,
+        wants: providers.notifyBookingConfirmed,
+      })
+      .from(providers)
+      .where(eq(providers.id, input.providerId))
+      .limit(1)
+
+    if (!provider?.email || !provider.wants) return
+
+    await sendEmail({
+      to: provider.email,
+      ...providerPaidEmail({
+        firstName: provider.firstName,
+        // Anonymous checkout leaves no name on the row. "A client" is honest; an empty gap in
+        // the sentence reads as a bug.
+        clientName: input.clientName?.trim() || 'A client',
+        what: input.what,
+        when: input.when,
+        // What actually left the card: the ledger's gross excludes the tip, the client's
+        // statement does not.
+        charged: `$${toMoney(input.grossCents + input.tipCents)}`,
+        tip: input.tipCents > 0 ? `$${toMoney(input.tipCents)}` : null,
+        payout: `$${toMoney(input.payoutCents)}`,
+        url: `${await appOrigin()}/app/earnings`,
+      }),
+    })
+  } catch (err) {
+    console.error('[email] provider payment notification failed', err)
   }
 }
 
@@ -377,6 +468,7 @@ async function packagePurchased(pi: StripePaymentIntentObject): Promise<HandlerR
   const [template] = await db
     .select({
       id: packageTemplates.id,
+      name: packageTemplates.name,
       totalPrice: packageTemplates.totalPrice,
       expiresAfterDays: packageTemplates.expiresAfterDays,
     })
@@ -466,7 +558,37 @@ async function packagePurchased(pi: StripePaymentIntentObject): Promise<HandlerR
       .where(eq(packageCheckoutLinks.id, linkId))
   }
 
+  // A package has no single appointment date, so `when` is null — the provider is being told
+  // money arrived, not that anything is scheduled.
+  await notifyProviderPaid({
+    providerId,
+    clientName: await clientNameFor(clientId),
+    what: template.name,
+    when: null,
+    grossCents,
+    tipCents,
+    payoutCents: providerPayoutCents,
+  })
+
   return { handled: true, detail: `package instance ${instance.id} created` }
+}
+
+/** Best-effort name for the notification. Null rather than throwing: failing to name the buyer
+ *  is not a reason to withhold the fact that they paid. */
+async function clientNameFor(clientId: string | undefined): Promise<string | null> {
+  if (!clientId) return null
+
+  try {
+    const [row] = await db
+      .select({ name: clients.name })
+      .from(clients)
+      .where(eq(clients.id, clientId))
+      .limit(1)
+
+    return row?.name ?? null
+  } catch {
+    return null
+  }
 }
 
 /** Training: the student pays Melanite. 100% platform, no split. */

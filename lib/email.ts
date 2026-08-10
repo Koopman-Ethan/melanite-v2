@@ -524,6 +524,71 @@ export function trainingEnrolledEmail(input: {
   }
 }
 
+/** Tells a PROVIDER that a client paid one of their checkout links.
+ *
+ *  The first message here addressed to staff rather than a client, and the only one that asks
+ *  permission first: it honours `providers.notifyBookingConfirmed`, shown in account settings as
+ *  "Payment received — when a client pays through your checkout link". A client's receipt is not
+ *  optional; this is.
+ *
+ *  Leads with the provider's SHARE rather than the gross. The gross is the larger number and the
+ *  one on the client's receipt, so quoting it alone would be the friendlier-looking choice and
+ *  the wrong one — the share is what reaches their bank. Both appear, because a provider
+ *  reconciling against what a client tells them they paid needs to see the same figure the
+ *  client saw.
+ */
+export function providerPaidEmail(input: {
+  firstName: string
+  clientName: string
+  /** What was bought, already phrased for a human: a service name or a package name. */
+  what: string
+  /** The appointment time for a booking. Null for a package, which buys no single date. */
+  when: string | null
+  /** What actually left the client's card — the service plus any tip. */
+  charged: string
+  /** Null when no tip was left. An explicit "$0.00 tip" line reads as a complaint. */
+  tip: string | null
+  payout: string
+  url: string
+}): Omit<EmailMessage, 'to'> {
+  const tipLine = input.tip
+    ? `Includes a ${input.tip} tip, which is yours in full.`
+    : null
+
+  return {
+    subject: `Payment received — ${input.clientName} paid ${input.charged}`,
+    text: [
+      `Hi ${input.firstName},`,
+      '',
+      `${input.clientName} has paid for ${input.what}.`,
+      input.when ?? '',
+      '',
+      `They paid: ${input.charged}`,
+      tipLine ?? '',
+      `Your share: ${input.payout}`,
+      '',
+      'See it against everything else here:',
+      input.url,
+    ]
+      .filter((line, i, all) => line !== '' || all[i - 1] !== '')
+      .join('\n'),
+    html: wrap(
+      'Payment received',
+      p(`Hi ${input.firstName},`) +
+        p(
+          `<strong>${input.clientName}</strong> has paid for ${input.what}.` +
+            (input.when ? `<br>${input.when}` : ''),
+        ) +
+        p(
+          `They paid: <strong>${input.charged}</strong><br>` +
+            `Your share: <strong>${input.payout}</strong>`,
+        ) +
+        (tipLine ? p(tipLine) : ''),
+      { label: 'View your earnings', url: input.url },
+    ),
+  }
+}
+
 export function providerInviteEmail(input: {
   invitedBy: string
   url: string
