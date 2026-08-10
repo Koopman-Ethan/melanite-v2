@@ -1,0 +1,84 @@
+name: Nightly dev refresh
+
+# Replaces appdev's database with a scrubbed copy of production, every night.
+#
+# WHY THIS RUNS AT ALL
+#
+# appdev is where the platform owner reviews work, and it is only useful if it looks like the
+# real thing. Left alone it drifts: yesterday's test bookings, a package half-redeemed by a
+# browser test, providers whose services no longer match. A nightly copy makes "it works on
+# appdev" mean something.
+#
+# WHY IT IS SAFE
+#
+# `refresh-dev.ts` loads and scrubs inside ONE transaction, so appdev never serves real client
+# details at any instant — not even briefly, and not if this job dies halfway. See that file.
+#
+# The production credential here is READ-ONLY BY INTENTION but not by enforcement — give it a
+# role that cannot write, and this workflow becomes incapable of touching production even if
+# something in it is wrong.
+
+on:
+  schedule:
+    # 09:40 UTC — 03:40 Denver in summer, 02:40 in winter. Deliberately not on the hour:
+    # GitHub's scheduler queues everything set to :00 and can delay it by many minutes.
+    - cron: '40 9 * * *'
+  # So a failed night can be retried without waiting for the next one.
+  workflow_dispatch:
+
+# One at a time. Two of these overlapping would have the second truncating the table the first
+# is restoring into.
+concurrency:
+  group: nightly-dev-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      MELANITE_ENV: dev
+      DATABASE_URL: ${{ secrets.DEV_DATABASE_URL }}
+      SOURCE_DATABASE_URL: ${{ secrets.PROD_DATABASE_URL_READONLY }}
+      STRIPE_SECRET_KEY_WRITE: ${{ secrets.DEV_STRIPE_SECRET_KEY_WRITE }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # ubuntu-latest ships an older client than Neon's Postgres 18. A pg_dump older than the
+      # server refuses outright ("server version mismatch"), so the version is pinned rather
+      # than left to whatever the runner image happens to carry this month.
+      - name: Install PostgreSQL 18 client
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            --fail https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+            https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-18
+          pg_dump --version
+
+      - name: Copy production into dev, scrubbed
+        run: npm run db:refresh-dev
+
+      # Outside the transaction on purpose: this talks to the Stripe API, which cannot be rolled
+      # back. Production's LIVE Connect ids are invisible to a test-mode key, so until this runs
+      # appdev can take no payments. That is broken, not unsafe.
+      - name: Give providers test-mode Stripe accounts
+        run: npx tsx --tsconfig scripts/tsconfig.json scripts/dev-connect-accounts.ts
+
+      # Independent of the run that just happened. The refresh asserts its own scrub; this asks
+      # the question again from outside, so a bug that made the assertion vacuous still gets
+      # caught before anybody looks at appdev.
+      - name: Confirm nothing identifying survived
+        run: npm run db:scrub -- --check
