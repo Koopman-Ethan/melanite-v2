@@ -28,6 +28,7 @@
     "test:watch": "vitest",
     "etl:verify:providers": "tsx --tsconfig scripts/tsconfig.json scripts/etl/verify-providers.ts",
     "db:scrub": "tsx --tsconfig scripts/tsconfig.json scripts/scrub-dev.ts",
+    "db:refresh-dev": "tsx --tsconfig scripts/tsconfig.json scripts/refresh-dev.ts",
     "etl:manifest": "tsx --tsconfig scripts/tsconfig.json scripts/etl/manifest.ts",
     "etl:catalogue": "tsx --tsconfig scripts/tsconfig.json scripts/etl/catalogue.ts"
   },
