@@ -44,11 +44,12 @@ wrong, which is worth more than any check in the script.
 ## The order, and why the last step is outside the transaction
 
 1. **Preflight** — both databases on the same migration, source and target genuinely different,
-   and the target's role able to set `session_replication_role`. All three fail fast, before
-   anything is dumped.
+   and the target's role owning every public table. All three fail fast, before anything is
+   dumped.
 2. **`pg_dump --data-only`** from production. Data only: the schema belongs to the migrations,
    and restoring production's would make dev's migration history a fiction.
-3. **One transaction** — truncate every public table, restore, scrub, commit.
+3. **One transaction** — drop the foreign keys, truncate every public table, restore, scrub,
+   put the foreign keys back, commit.
 4. **`dev-connect-accounts.ts`** — outside the transaction, because it calls the Stripe API and
    that cannot be rolled back. Production's Connect ids are *live* ones, invisible to a test-mode
    key, so until this runs appdev can take no payments. That is broken, not unsafe, which is why
@@ -56,17 +57,32 @@ wrong, which is worth more than any check in the script.
 5. **`db:scrub --check`** — asks the question again from outside the run that just happened, so a
    bug that made step 3's own assertion vacuous still gets caught.
 
-## Two things to confirm on the first real run
+## Why the foreign keys come off and go back on
 
-Neither could be verified when this was written, and both fail loudly and immediately rather
-than halfway through:
+`pg_dump --data-only` emits tables in an order that does not necessarily satisfy foreign keys,
+so a straight restore can insert a child before its parent.
 
-- **`session_replication_role`.** The restore needs foreign keys deferred for the session,
-  because `pg_dump` does not guarantee that its table order satisfies them and Drizzle does not
-  declare constraints `DEFERRABLE`. Neon should permit this for the database owner. If it does
-  not, the preflight says so in one line and nothing has been touched.
-- **`pg_dump` version.** A client older than the server refuses outright. The workflow pins
-  `postgresql-client-18` to match Neon; if production moves to a newer major, that pin moves too.
+The usual fix is `SET session_replication_role = replica`. **Neon refuses it** — permission
+denied even for the database owner, because it is a superuser-only parameter. Deferring is not
+available either: Drizzle does not declare its constraints `DEFERRABLE`.
+
+So the constraints are dropped and re-added inside the same transaction. DDL is transactional in
+Postgres, so they are never absent to any other session, and a failure anywhere puts every one
+of them back.
+
+This is better than the thing it replaces rather than a workaround for it. Disabling triggers
+*suppresses* the foreign key check; re-adding a constraint *validates* it. A referentially
+broken copy would have loaded silently under `session_replication_role`, and here it refuses to
+commit. The constraints are read from the catalogue, so one added by a future migration is
+carried automatically.
+
+There are no user triggers in this schema, so foreign keys are the whole of the problem. If one
+is ever added, it will fire during the restore and this needs revisiting.
+
+## One thing still to confirm
+
+**`pg_dump` version.** A client older than the server refuses outright. The workflow pins
+`postgresql-client-18` to match Neon; if production moves to a newer major, that pin moves too.
 
 ## When it fails
 

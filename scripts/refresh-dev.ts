@@ -35,6 +35,9 @@ import { TABLES, scrubSql } from './scrub-sql'
 // no Vercel environment variable to swap, no redeploy. Postgres already provides the guarantee
 // those mechanisms were going to approximate.
 //
+// The foreign keys are dropped and re-added inside that same transaction, because Neon refuses
+// `session_replication_role` to every role including the database owner. See DROP_FOREIGN_KEYS.
+//
 // WHAT IT DOES NOT DO
 //
 // Provider Connect ids are left as production wrote them, which means LIVE ids that appdev's
@@ -132,33 +135,81 @@ async function assertSameSchema(sourceUrl: string, targetUrl: string): Promise<v
 }
 
 /**
- * Confirms the target will let us turn foreign keys off for the session.
+ * Confirms this role can alter every public table, which is what dropping and re-adding the
+ * foreign keys requires.
  *
- * `session_replication_role = replica` is what makes the restore order-independent — pg_dump
- * emits table data in an order that does not necessarily satisfy foreign keys, and there is no
- * deferring them because Drizzle does not declare them DEFERRABLE.
- *
- * Checked HERE, on an empty round trip, rather than discovered part-way through a restore. If
- * the role is not permitted to set it, that is a one-line answer at the start instead of a
- * half-applied transaction and a confusing error.
+ * Checked HERE, on one round trip, rather than discovered part-way through. A refusal at the
+ * start is a one-line answer; the same refusal mid-transaction is a rollback and a confusing
+ * error about a constraint nobody was thinking about.
  */
-async function assertCanDisableTriggers(targetUrl: string): Promise<void> {
-  try {
-    await neon(targetUrl)`SET session_replication_role = replica`
-  } catch (err) {
+async function assertOwnsTables(targetUrl: string): Promise<void> {
+  const rows = (await neon(targetUrl)`
+    SELECT count(*)::int AS n
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = 'public'
+       AND c.relkind = 'r'
+       AND NOT pg_has_role(current_user, c.relowner, 'USAGE')
+  `) as { n: number }[]
+
+  if (rows[0]?.n > 0) {
     throw new Error(
       [
-        `Refusing to refresh: this role cannot set session_replication_role on`,
+        `Refusing to refresh: this role does not own ${rows[0].n} of the tables on`,
         `  ${describe(targetUrl)}.`,
         ``,
-        `  ${err instanceof Error ? err.message : String(err)}`,
-        ``,
-        `  Without it the restore has to satisfy foreign keys in pg_dump's output order, which`,
-        `  it does not guarantee. Connect as the database owner.`,
+        `  The restore drops every foreign key and puts it back, which the table's owner`,
+        `  must do. Connect as the owning role.`,
       ].join('\n'),
     )
   }
 }
+
+// MAKING THE RESTORE ORDER-INDEPENDENT, WITHOUT SUPERUSER.
+//
+// `pg_dump --data-only` emits tables in an order that does not necessarily satisfy foreign
+// keys, so a straight restore can insert a child before its parent. The usual answer is
+// `SET session_replication_role = replica`, and NEON REFUSES IT — permission denied even for
+// the database owner, because it is a superuser-only parameter. Deferring is not available
+// either: Drizzle does not declare its constraints DEFERRABLE.
+//
+// So the constraints come off and go back on, inside the same transaction. DDL is transactional
+// in Postgres, so a failure anywhere leaves every one of them in place.
+//
+// This is better than what it replaces, not merely a workaround for it. Disabling triggers
+// suppresses the CHECK; re-adding a constraint VALIDATES it. If the copy were referentially
+// broken, `session_replication_role` would have loaded it silently and this refuses to commit.
+//
+// Read from the catalogue rather than a hand-written list, so a foreign key added by a future
+// migration is carried automatically. There are no user triggers in this schema — verified —
+// so foreign keys are the whole of the problem.
+const DROP_FOREIGN_KEYS = `
+CREATE TEMP TABLE _melanite_fks ON COMMIT DROP AS
+  SELECT c.conrelid::regclass        AS tbl,
+         c.conname                   AS name,
+         pg_get_constraintdef(c.oid) AS def
+    FROM pg_constraint c
+    JOIN pg_namespace n ON n.oid = c.connamespace
+   WHERE c.contype = 'f' AND n.nspname = 'public';
+
+DO $$
+DECLARE r record;
+BEGIN
+  FOR r IN SELECT * FROM _melanite_fks LOOP
+    EXECUTE format('ALTER TABLE %s DROP CONSTRAINT %I', r.tbl, r.name);
+  END LOOP;
+END $$;
+`
+
+const RESTORE_FOREIGN_KEYS = `
+DO $$
+DECLARE r record;
+BEGIN
+  FOR r IN SELECT * FROM _melanite_fks LOOP
+    EXECUTE format('ALTER TABLE %s ADD CONSTRAINT %I %s', r.tbl, r.name, r.def);
+  END LOOP;
+END $$;
+`
 
 /** Every public table, emptied. Written as a DO block so it does not need a hand-maintained
  *  list that would silently miss whatever the next migration adds. `drizzle.__drizzle_migrations`
@@ -201,8 +252,8 @@ async function main() {
   console.log(`  into  ${describe(targetUrl)}  (replaced)\n`)
 
   await assertSameSchema(sourceUrl, targetUrl)
-  await assertCanDisableTriggers(targetUrl)
-  console.log('Preflight passed — same migration, foreign keys can be deferred.\n')
+  await assertOwnsTables(targetUrl)
+  console.log('Preflight passed — same migration, and this role owns every table.\n')
 
   // --data-only: the schema is owned by the migrations, not by production. Restoring
   // production's schema would make dev's migration history a fiction.
@@ -220,13 +271,19 @@ async function main() {
   // One file, one transaction. psql --single-transaction wraps the whole thing, so the scrub
   // is not a separate step that could fail to happen — it is part of what "loaded" means.
   const script = [
-    'SET session_replication_role = replica;',
+    '-- Foreign keys come off so the restore does not depend on pg_dump ordering them, and go',
+    '-- back on below. Both inside this transaction, so they are never absent to anybody else.',
+    DROP_FOREIGN_KEYS,
     TRUNCATE_ALL,
     dump,
     '',
     '-- Scrubbed inside the same transaction as the load, so the real details are never',
     '-- visible to a reader of this database.',
     scrubSql(),
+    '',
+    '-- Re-added last, AFTER the scrub, so validation runs against exactly what will be',
+    '-- committed. This is the referential integrity check on the copy, not just cleanup.',
+    RESTORE_FOREIGN_KEYS,
   ].join('\n')
 
   const dir = mkdtempSync(join(tmpdir(), 'melanite-refresh-'))
