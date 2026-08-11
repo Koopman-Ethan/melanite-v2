@@ -66,7 +66,17 @@ jobs:
             | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update
           sudo apt-get install -y postgresql-client-18
-          pg_dump --version
+
+          # Installing 18 is NOT enough on its own. /usr/bin/pg_dump is postgresql-common's
+          # wrapper and it resolves to the DEFAULT installed major, which on this runner is the
+          # preinstalled 16 — so the first attempt at this died on "server version: 18.4;
+          # pg_dump version: 16.14" having installed 18 successfully. Put the versioned
+          # directory first for every later step.
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
+
+          # Absolute path, because $GITHUB_PATH only affects SUBSEQUENT steps — bare `pg_dump`
+          # here would still report 16 and prove nothing.
+          /usr/lib/postgresql/18/bin/pg_dump --version
 
       - name: Copy production into dev, scrubbed
         run: npm run db:refresh-dev

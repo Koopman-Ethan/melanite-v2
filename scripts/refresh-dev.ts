@@ -165,6 +165,45 @@ async function assertOwnsTables(targetUrl: string): Promise<void> {
   }
 }
 
+/**
+ * Confirms `pg_dump` is at least as new as the server it is about to read.
+ *
+ * pg_dump refuses outright against a newer server, and it does so AFTER connecting — so without
+ * this the failure lands in the middle of the run rather than in preflight. Nothing is written
+ * either way, but "aborting because of server version mismatch" is a worse first thing to read
+ * than a sentence naming both versions and where the client comes from.
+ *
+ * The trap it catches: Ubuntu's `/usr/bin/pg_dump` is postgresql-common's wrapper, which
+ * resolves to the DEFAULT installed major, not the newest. Installing postgresql-client-18
+ * beside the runner's preinstalled 16 is not enough on its own — the versioned directory has to
+ * come first on PATH.
+ */
+async function assertPgDumpVersion(sourceUrl: string): Promise<void> {
+  const clientMajor = Number(/(\d+)/.exec(run('pg_dump', ['--version']))?.[1])
+
+  const rows = (await neon(sourceUrl)`
+    SELECT current_setting('server_version') AS v
+  `) as { v: string }[]
+  const serverMajor = Number(/(\d+)/.exec(rows[0]?.v ?? '')?.[1])
+
+  if (!Number.isFinite(clientMajor) || !Number.isFinite(serverMajor)) return
+
+  if (clientMajor < serverMajor) {
+    throw new Error(
+      [
+        `Refusing to refresh: pg_dump ${clientMajor} cannot read a PostgreSQL ${serverMajor} server.`,
+        ``,
+        `  server:  ${serverMajor} (${describe(sourceUrl)})`,
+        `  pg_dump: ${clientMajor}`,
+        ``,
+        `  On Ubuntu, /usr/bin/pg_dump is a wrapper that picks the DEFAULT installed major, not`,
+        `  the newest — installing a newer client is not enough. Put its directory first:`,
+        `    echo /usr/lib/postgresql/${serverMajor}/bin >> "$GITHUB_PATH"`,
+      ].join('\n'),
+    )
+  }
+}
+
 // MAKING THE RESTORE ORDER-INDEPENDENT, WITHOUT SUPERUSER.
 //
 // `pg_dump --data-only` emits tables in an order that does not necessarily satisfy foreign
@@ -253,7 +292,8 @@ async function main() {
 
   await assertSameSchema(sourceUrl, targetUrl)
   await assertOwnsTables(targetUrl)
-  console.log('Preflight passed — same migration, and this role owns every table.\n')
+  await assertPgDumpVersion(sourceUrl)
+  console.log('Preflight passed — same migration, table ownership, and pg_dump new enough.\n')
 
   // --data-only: the schema is owned by the migrations, not by production. Restoring
   // production's schema would make dev's migration history a fiction.
