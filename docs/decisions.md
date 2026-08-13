@@ -1126,3 +1126,162 @@ Worth remembering because the symptom is so misleading: a long-lived Next dev se
 into hung server actions, which present as product bugs in exactly the areas being worked on.
 When a suite degrades broadly and slows down at the same time, suspect the server before the
 diff.
+
+### BACKLOG: marketing attribution, end to end — 2026-08-13
+
+A monthly report of revenue attributable to each marketing channel, feeding a revenue-share
+arrangement in a client contract. **This one pays somebody**, which changes what "good enough"
+means: a number that is merely plausible is worse than no number, because nobody audits a
+figure that looks right.
+
+**Attribution is per PROVIDER, not per transaction.** A provider's first-touch source is
+captured once and then applies to everything they ever generate — every course enrolment, every
+client treatment payment, for the life of the account. So the metadata goes onto every
+transaction tied to that provider, not just their first, and the report is a join from money
+back to the provider who produced it.
+
+Scope as asked:
+
+1. `docs/marketing-attribution.md` — **written 2026-08-13**, and it is Exhibit A to the contract
+   rather than only a developer reference, which is why it exists before the code does. The UTM
+   convention lives there: fixed `utm_source`/`utm_medium` pairs per channel, freeform
+   `utm_campaign`, organic detected from the referrer rather than tagged. Its Section 9 is marked
+   non-contractual and is the only part that names columns.
+2. First-touch capture: full landing URL including the raw query string, plus the referrer.
+3. Drizzle columns — source, medium, campaign, raw landing URL, referrer, first-touch timestamp
+   — keyed to the provider, and a generated migration.
+4. Stripe metadata (`source`, `campaign`, `provider_id`) on every course-enrolment and
+   client-treatment intent.
+5. An admin-only monthly report: course revenue and Melanite's share of treatment revenue,
+   grouped by source and campaign, excluding the provider's own share and all tips, excluding
+   providers with no tracked source, exportable.
+6. `ATTRIBUTION_START_DATE`, so nothing retroactive is ever counted.
+7. An end-to-end test covering a provider across MULTIPLE transactions over time, not one.
+
+**Four things in this repo make the plan above not fit as written.** All four were found by
+reading the code rather than assumed, and each changes the design rather than the effort.
+
+**There is no landing page on the app domain to capture.** `app/page.tsx` redirects `/` to
+`/app`; `proxy.ts` then bounces a signed-out request to `/login`. Marketing is Webflow on
+`melanitesuite.com` (see the domains entry, 2026-07-27) and the app is
+`app.melanitesuite.com` — note the real hostnames, not `melanite.com`. So a tagged link is
+clicked on a domain this app does not serve, and the app never sees the UTM parameters at all.
+Capture has to either happen on Webflow and be forwarded across the domain boundary, or attach
+to the one public app page that is genuinely a front door: `/training`.
+
+**There is no self-service provider signup, and there should not be.** A provider is created by
+claiming an invite token at `app/onboard/[token]`, issued by Keoni from the admin tools — the
+existing decision is that "a provider is someone Keoni has met, usually at a training course".
+The real funnel is therefore: tagged link → Webflow → `/training` → enrol and pay → invited
+weeks or months later → onboard. Attribution has to survive that entire chain, and at the point
+where it is first observable the identity is an EMAIL on a training enrolment, not a provider
+row.
+
+**Which inverts step 4 for course enrolments.** `training_enrollments.provider_id` is nullable
+precisely because the enrolment usually predates the provider — `ledger_entries.provider_id`
+carries the same comment ("null only for training enrolments by students who are not yet
+providers"). So "look up the associated provider's attribution" has nothing to look up at
+enrolment time. The workable shape is the reverse: capture attribution on the enrolment, and
+have the provider INHERIT it when the invite is claimed. `training_enrollments.invite_link_id`
+already links those two events, so the join exists.
+
+**Step 5 reads the ledger, not Stripe — DECIDED 2026-08-13.** Querying Stripe sounds more
+authoritative and is in fact less:
+
+- `ledger_entries.melanite_cut` is already, exactly, the number being asked for. Tips are their
+  own column and are excluded from it; provider-paid rows are unsplit by check constraint;
+  refunds are their own rows rather than mutations. Re-deriving Melanite's share from
+  `application_fee_amount` is a second implementation of the split, and the two will disagree
+  the first time an override is used.
+- **Stripe cannot see money that did not move through Stripe**, and a material amount of it is
+  Melanite's. **Groupon is the clearest case**: the client pays Groupon, the provider collects,
+  and the provider owes Melanite half — there is no PaymentIntent anywhere in that story, and
+  `lib/payments/direction.ts` already knows the money flows provider→Melanite rather than the
+  usual way. Cherry is the same shape: the client finances a package, Cherry pays Melanite by
+  ACH, no intent is created. A Stripe-sourced report omits both silently, which UNDER-pays the
+  revenue share on exactly the transactions hardest to notice missing. Cash and cheque follow.
+- Reconstructing revenue outside the ledger is the v1 pattern that left revenue $2,000 out for
+  months. Nothing crashed then either.
+
+Keep step 4 anyway — Stripe metadata is worth having so the report can be reconciled against
+Stripe, and so the channel is visible in the Dashboard. But it should be a cross-check, not the
+source. The report reads `ledger_entries`, joined to the provider, filtered on
+`created_at` within the month and `providers.joined_at >= ATTRIBUTION_START_DATE`.
+
+**The revenue definition stopped being a list — DECIDED 2026-08-13.** It began as course
+enrolments plus treatment payments, then grew Groupon, then room rental for providers marketing
+brought in. The next additions would have been membership, Epicutis and no-show fees, all of
+which are equally Melanite revenue from a provider the marketing produced, and all of which were
+excluded by silence rather than by decision.
+
+So the contract now reads "all revenue retained by Melanite from an attributed provider", which
+is one sentence, is exactly `SUM(melanite_cut)` filtered to attributed providers, and resolves
+every future stream automatically. Enumerating revenue types in a contract means amending the
+contract every time the platform grows one.
+
+Consequences that follow from reading the ledger, and that the test in step 7 must pin:
+
+- **Only `melanite_cut`, never `gross_amount`.** Several ledger sources are provider-paid and
+  unsplit, so `gross` and `cut` coincide there and a wrong column would pass a naive test. The
+  fixture needs at least one split row for the difference to show up at all.
+- **Refunds net, and they net ACROSS periods.** A refund in month two of a payment shared in
+  month one is subtracted from month two, and a month that nets negative carries forward. Within
+  the window alone is not enough — that was the first version and it silently keeps money paid on
+  revenue that was later returned.
+- **Write-offs net the same way.** Melanite's Groupon share is *owed*, not received — it is what
+  `getOwedByProvider` tracks — so a share paid on booked Groupon revenue is paid on money that may
+  never arrive. Rather than a second mechanism, an uncollectable provider debt nets like a refund.
+  Until written off it counts.
+- **The cutoff keys on `providers.joined_at`**, not on the ledger date. A provider who signed up
+  before the system went live must never be attributed, however recent their transactions.
+- **The attribution window is bounded by the contract term, not by the account.** The spec said
+  "life of the account", but §6 of the agreement pays through the final reporting period and
+  stops. So the window is a report parameter rather than perpetuity assumed in code.
+
+**No separate view for the consultant — DECIDED 2026-08-13.** The obvious-seeming shape is a
+private "what am I owed" page plus a shared report. That is two implementations of one money
+calculation, which is the exact failure this ledger exists to prevent, and the first time they
+disagree it is a payment dispute. It is one report, in the admin panel, reached through the
+`developer` role that `provider_role` already has. What the consultant needs is a LINE on it —
+the share, derived from the same total — not a page of their own.
+
+The report being runnable by Keoni herself is load-bearing rather than a nicety: a figure only
+the person being paid can generate is weaker than an identical figure anyone can, and §1.4.2 of
+the agreement gives her the right to the underlying data anyway.
+
+**Settled into Exhibit A, 2026-08-13:**
+
+- **Untracked providers are excluded from the share but reported as their own line.** Excluding
+  them from payment is right; hiding them is not. Attribution capture depends on a script outside
+  this repo (below), and its failure mode is silence — so a report listing only attributed
+  channels renders broken tracking as a quiet month rather than as a fault. The untracked line is
+  what makes that visible on the first report instead of the third, and it is what lets the total
+  reconcile against `/app/admin/revenue`.
+- **Provider referrals get their own source, `provider_referral`, recorded when the invite is
+  issued** — Keoni issues every invite by hand and already knows who sent them. Excluded from the
+  share, but recorded, so a referral is distinguishable from a tracking failure rather than
+  swallowed by the untracked bucket.
+- **A referral does NOT inherit the referring provider's source.** One first touch would otherwise
+  compound into an unbounded tree: Instagram sends A, A refers B, B refers C, and a single click
+  earns a share of three providers' lifetime revenue. That is the reading most likely to be
+  disputed, and a disputed payment figure is expensive to unwind.
+
+**Still open, and the only thing genuinely blocking a build: where capture happens.** The
+recommendation is that Webflow stores first touch and decorates the outbound `/training` link.
+First touch is on the marketing site by definition, so anything app-side-only catches only the
+people who skipped the site the tagged links point at. Cookies cannot cross from the apex to
+`app.melanitesuite.com`, so this has to be link decoration rather than a shared cookie, and
+Webflow has to refuse to overwrite an existing first touch or a return visit through a second
+channel silently reassigns credit.
+
+Worth stating plainly, because it does not get better with care: this puts a load-bearing piece of
+a payment calculation in a Webflow script that lives outside this repo, that nothing here tests,
+and that fails silently. The untracked line above is the mitigation and is not optional.
+
+**What the first draft of Exhibit A got wrong**, kept because two of the four are facts about this
+system rather than drafting slips. It named `melanite.com` and `app.melanite.com`, which are not
+the platform. It described attribution being "associated with their account upon signup", and
+there is no signup. It proposed detecting organic search through Search Console and Analytics,
+which report aggregate traffic and therefore cannot attribute an individual provider at all —
+organic has to come from the referrer at first touch. And it promised attribution "for the life of
+their account" while §6 of the agreement stops payment at termination.
