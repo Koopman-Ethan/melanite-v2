@@ -1,0 +1,37 @@
+<!-- ===========================================================================
+     melanitesuite.com (Webflow marketing site) - HEADER custom code.
+     Site Settings -> Custom Code -> Head Code. Paste this file whole, Save,
+     then Publish. Publishing is what makes it live; Designer preview does not
+     run custom code.
+
+     Versioned at webflow/site-header.html. Webflow keeps no history for these
+     fields, so this file is the only record of what is deployed - edit here
+     first, then paste.
+
+     Everything v1 was removed on 2026-08-14: Wized, the /app/* portal CSS and
+     the /pay/* checkout CSS. All of it was unreachable, because
+     webflow-redirects.csv forwards /app/(.*) and /pay/(.*) to
+     app.melanitesuite.com - those URLs have not rendered a Webflow page since
+     the cutover. See webflow/ARCHIVE-v1-custom-code.md for what was there.
+
+     Limit: 10,000 characters per field. Webflow truncates mid-token past that,
+     with no warning.
+     =========================================================================== -->
+
+<style>
+  /* Removable properly under Project Settings once on a paid Site plan. */
+  .w-webflow-badge { display: none !important; }
+</style>
+
+<!-- Google tag (gtag.js). Kept: this is live marketing analytics for the public
+     site, and channel volume here is the cross-check on the attribution report.
+     It cannot attribute an individual provider - only the first-touch capture in
+     the footer can do that - so the two are complements, not substitutes. -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-DP91MV4CKT"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-DP91MV4CKT');
+</script>

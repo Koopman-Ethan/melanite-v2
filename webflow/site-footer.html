@@ -1,0 +1,265 @@
+<!-- melanitesuite.com FOOTER custom code. Paste whole into Site Settings ->
+     Custom Code -> Footer Code, then Save and Publish.
+
+     Versioned at webflow/site-footer.html, which IS the deployed artifact - no
+     separate .js source, so the two cannot drift. Rationale and the v1 code this
+     replaced: webflow/ARCHIVE-v1-custom-code.md and docs/decisions.md.
+
+     Webflow limit is 10,000 characters per field, truncated silently past that. -->
+
+<script>
+/* Melanite first-touch attribution capture. Runs on the WEBFLOW marketing site
+ * (melanitesuite.com), pasted into Site Settings -> Custom Code -> Footer Code.
+ * Rationale and the contractual definition: docs/marketing-attribution.md (Exhibit A)
+ * and the attribution entry in docs/decisions.md.
+ *
+ * TWO HARD CONSTRAINTS ON THIS FILE, both learned by breaking it:
+ *
+ * 1. It must contain no markup-like text, ever, not even inside a comment. An earlier
+ *    version documented the install step using a literal script tag in this header.
+ *    Webflow ends the inline script at that text, so the remainder of the comment is
+ *    parsed as JavaScript and the whole file dies with "Unexpected identifier".
+ * 2. It must stay under 10,000 characters, which is Webflow's limit on a custom code
+ *    field. Over that it is silently truncated mid-token.
+ *
+ * Both failures are silent in the sense that matters: attribution reads zero and no
+ * alarm sounds anywhere. The untracked line on the monthly report is what surfaces it.
+ *
+ * PAYLOAD VERSION 1. Bump on any shape change; the app ignores versions it does not know.
+ */
+(function () {
+  'use strict'
+
+  var PAYLOAD_VERSION = 1
+  var STORAGE_KEY = 'mlt_first_touch'
+  var LINK_PARAM = 'mlt_ft'
+
+  /** Whitelist. Attribution data must never ride a link to a third party. */
+  var APP_HOSTS = ['app.melanitesuite.com']
+
+  /** Our own hosts. A self-referral is internal navigation, not a new visit. */
+  var SELF_HOSTS = ['melanitesuite.com', 'www.melanitesuite.com']
+
+  var SEARCH_ENGINES = {
+    'google.': 'google',
+    'bing.': 'bing',
+    'duckduckgo.': 'duckduckgo',
+    'search.yahoo.': 'yahoo',
+    'ecosia.': 'ecosia',
+    'search.brave.': 'brave',
+    'startpage.': 'startpage',
+    'yandex.': 'yandex',
+  }
+
+  var SOCIAL_HOSTS = {
+    'instagram.': 'instagram',
+    'facebook.': 'facebook',
+    'fb.com': 'facebook',
+    'fb.me': 'facebook',
+    'linkedin.': 'linkedin',
+    'lnkd.in': 'linkedin',
+    'pinterest.': 'pinterest',
+    'tiktok.': 'tiktok',
+    'youtube.': 'youtube',
+    'youtu.be': 'youtube',
+    't.co': 'twitter',
+    'reddit.': 'reddit',
+  }
+
+  // Storage throws outright in Safari private mode and when quota is full. A capture
+  // failure must never break the marketing site, so every access is guarded.
+  function readStored() {
+    try {
+      var raw = window.localStorage.getItem(STORAGE_KEY)
+      if (!raw) return null
+      var parsed = JSON.parse(raw)
+      return parsed && parsed.v === PAYLOAD_VERSION ? parsed : null
+    } catch {
+      return null
+    }
+  }
+
+  function writeStored(value) {
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(value))
+    } catch {
+      /* untracked visitor rather than a broken page */
+    }
+  }
+
+  function param(name) {
+    try {
+      return new URLSearchParams(window.location.search).get(name) || ''
+    } catch {
+      return ''
+    }
+  }
+
+  function referrerHost() {
+    try {
+      return document.referrer ? new URL(document.referrer).hostname.toLowerCase() : ''
+    } catch {
+      return ''
+    }
+  }
+
+  function hostMatches(host, list) {
+    for (var i = 0; i < list.length; i++) {
+      var h = list[i]
+      if (host === h || host.slice(-(h.length + 1)) === '.' + h) return true
+    }
+    return false
+  }
+
+  function lookup(host, table) {
+    for (var key in table) {
+      if (Object.prototype.hasOwnProperty.call(table, key) && host.indexOf(key) !== -1) {
+        return table[key]
+      }
+    }
+    return ''
+  }
+
+  /** Source and medium for this visit, in strict precedence order. The order is the
+   *  design: an explicit tag always beats an inferred one, because a tag is a statement
+   *  of intent and an inference is a guess. */
+  function classify() {
+    var campaign = param('utm_campaign').toLowerCase()
+    var utmSource = param('utm_source').toLowerCase()
+
+    // 1. Explicitly tagged. Nothing overrides this.
+    if (utmSource) {
+      return {
+        source: utmSource,
+        medium: param('utm_medium').toLowerCase() || 'unknown',
+        campaign: campaign,
+      }
+    }
+
+    // 2. Google Ads auto-tagging. These markers only ever appear on a paid click, and
+    //    auto-tagging without manual tagging is the Google Ads default -- without this
+    //    branch every paid click would read as organic.
+    if (param('gclid') || param('wbraid') || param('gbraid')) {
+      return { source: 'google_ads', medium: 'cpc', campaign: campaign }
+    }
+
+    // 3. fbclid is NOT an ads-only marker. Facebook and Instagram append it to ordinary
+    //    organic post links too, so it identifies the network, not the spend. Reading it
+    //    as paid would bill organic social as advertising.
+    if (param('fbclid')) {
+      return { source: 'facebook', medium: 'social', campaign: campaign }
+    }
+
+    var host = referrerHost()
+
+    // 4. Typed, bookmarked, or the referrer was stripped by the sending app.
+    if (!host) return { source: 'direct', medium: 'none', campaign: campaign }
+
+    // 5. Internal navigation. Null means "do not record" -- overwriting a real source
+    //    with our own domain is how first touch silently becomes last touch.
+    if (hostMatches(host, SELF_HOSTS)) return null
+
+    var engine = lookup(host, SEARCH_ENGINES)
+    if (engine) return { source: engine, medium: 'organic', campaign: campaign }
+
+    var social = lookup(host, SOCIAL_HOSTS)
+    if (social) return { source: social, medium: 'social', campaign: campaign }
+
+    // 6. Some other site linked here. Recorded by host, but not a tracked marketing
+    //    source under Exhibit A, so it earns no share.
+    return { source: host, medium: 'referral', campaign: campaign }
+  }
+
+  function capture() {
+    // FIRST touch. Never overwritten: a return visit through a different channel must
+    // not reassign credit.
+    var existing = readStored()
+    if (existing) return existing
+
+    var c = classify()
+    if (!c) return null
+
+    var record = {
+      v: PAYLOAD_VERSION,
+      source: c.source,
+      medium: c.medium,
+      campaign: c.campaign,
+      // Verbatim, so a disputed attribution can be re-derived from what actually
+      // arrived rather than from this script's reading of it.
+      landing_url: String(window.location.href).slice(0, 1000),
+      referrer: String(document.referrer || '').slice(0, 500),
+      // Client clock, so it can be wrong. Nothing about the payment depends on it --
+      // the Exhibit A cutoff keys on the server-side provider creation date.
+      ts: new Date().toISOString(),
+    }
+
+    writeStored(record)
+    return record
+  }
+
+  function encodePayload(record) {
+    var json = JSON.stringify(record)
+    var binary = ''
+    var bytes = new TextEncoder().encode(json)
+    for (var i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
+    return window.btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  }
+
+  /** The only way the data crosses the domain boundary. A cookie set here is not
+   *  readable on the app host, and localStorage is origin-scoped, so it has to be
+   *  the URL. */
+  function decorate(record) {
+    var encoded
+    try {
+      encoded = encodePayload(record)
+    } catch {
+      return
+    }
+
+    var anchors = document.getElementsByTagName('a')
+    for (var i = 0; i < anchors.length; i++) {
+      var a = anchors[i]
+      var href = a.getAttribute('href')
+      if (!href) continue
+
+      var url
+      try {
+        url = new URL(href, window.location.href)
+      } catch {
+        continue
+      }
+
+      if (!hostMatches(url.hostname.toLowerCase(), APP_HOSTS)) continue
+      if (url.searchParams.get(LINK_PARAM)) continue
+
+      url.searchParams.set(LINK_PARAM, encoded)
+      a.setAttribute('href', url.toString())
+    }
+  }
+
+  function run() {
+    var record = readStored() || capture()
+    if (record) decorate(record)
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', run)
+  } else {
+    run()
+  }
+
+  // Webflow interactions, tabs, sliders and CMS filtering inject links after load.
+  // Without this, a CTA inside a tab nobody had opened yet goes undecorated, which
+  // reads later as an untracked signup rather than as a bug.
+  if (window.MutationObserver) {
+    var pending = null
+    new MutationObserver(function () {
+      if (pending) return
+      pending = window.setTimeout(function () {
+        pending = null
+        run()
+      }, 250)
+    }).observe(document.documentElement, { childList: true, subtree: true })
+  }
+})()
+</script>
