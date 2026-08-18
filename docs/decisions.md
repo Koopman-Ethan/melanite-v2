@@ -1126,3 +1126,72 @@ Worth remembering because the symptom is so misleading: a long-lived Next dev se
 into hung server actions, which present as product bugs in exactly the areas being worked on.
 When a suite degrades broadly and slows down at the same time, suspect the server before the
 diff.
+
+### Marketing attribution: dropped before it was built — 2026-08-18
+
+The consulting arrangement changed to a flat $200/month with no revenue share. The attribution
+system was designed almost entirely around one property — that its output decided a contractual
+payment — so removing that removes the reason for nearly all of it.
+
+**What the money requirement was actually buying**, none of which is justified by "understand
+how the site is used":
+
+- Per-provider attribution surviving from first touch to an invite issued months later. A
+  payment attaches to a person; traffic analysis does not.
+- `ATTRIBUTION_START_DATE`. Existed only to stop retroactive payment on the nine providers
+  imported from v1.
+- Stripe metadata on every transaction — a reconciliation trail for a disputed invoice.
+- Refund netting, write-offs, negative months carried forward. All about not being paid on
+  money that came back.
+- The untracked line, so totals reconciled against `/app/admin/revenue`.
+- An admin report grouping `melanite_cut` by source. That was the invoice.
+- The `provider_referral` source, and the rule that a referral does not inherit the referring
+  provider's channel. Both were about who gets paid.
+
+**Approximate is now fine, and that is the whole difference.** A channel report that is 90%
+right is useful for deciding where to post. A payment that is 90% right is a dispute.
+
+**What replaces it is already installed.** GA4 (`G-DP91MV4CKT`) has been in the Webflow header
+the entire time and answers traffic, channel mix, landing pages and bounce with no bespoke code.
+
+The one question it does not answer out of the box is the interesting one: which channels bring
+people who actually enrol in training. That is cross-domain — melanitesuite.com is Webflow,
+`/training` is on app.melanitesuite.com — and GA4 handles it with cross-domain measurement plus
+a conversion event on the enrolment. Configuration, not code, and that is the entire remaining
+scope.
+
+**The first-touch script is removed from Webflow.** Written, deployed and verified on
+2026-08-14, and now read by nothing: the app side that would consume `mlt_ft` was never built
+and no longer will be. Left in place it would keep writing localStorage and hanging an opaque
+base64 blob off every link to the app, for data nobody looks at. Dead capture is worse than no
+capture — the next person to find it assumes something depends on it.
+
+The UTM convention survives in `docs/marketing-attribution.md`, trimmed to what it always
+actually was underneath the contract language: fixed `utm_source`/`utm_medium` pairs so a
+channel is spelled one way and GA4's reports do not fragment it into four.
+
+**Findings worth keeping, because they outlive the contract.** These came out of reading the
+repo for the attribution design and are true regardless of how anyone is paid:
+
+- **There is no landing page on the app domain.** `app/page.tsx` redirects `/` to `/app` and
+  `proxy.ts` bounces a signed-out request to `/login`. The only public pages on the app host
+  are `/training` and `/pay/*`. Anything that wants to observe an arriving visitor has to do it
+  on Webflow or at `/training`.
+- **There is no self-service provider signup, deliberately.** Providers are created by claiming
+  an invite token at `app/onboard/[token]`. The funnel is marketing → `/training` → invite →
+  onboard, and it can span months.
+- **`training_enrollments.provider_id` is nullable** because the enrolment routinely predates
+  the provider. `ledger_entries.provider_id` carries the same caveat. Anything joining a
+  student to a provider has to go through `invite_link_id`, not assume the row exists.
+- **Melanite revenue cannot be read from Stripe alone**, and this is the one worth remembering.
+  Groupon money reaches the provider, who then owes Melanite half; Cherry pays Melanite by ACH.
+  Neither creates a PaymentIntent. `ledger_entries.melanite_cut` is the only complete answer —
+  tips excluded by construction, provider-paid rows unsplit, refunds as their own rows. Any
+  future revenue report should start there, not at Stripe.
+
+**Removed with this change:** Exhibit A and its Word copy, the revenue-share clauses of the
+contract, and the attribution capture from the Webflow footer. The Webflow footer field is now
+empty, documented in `webflow/README.md` rather than as an HTML comment in the field itself --
+a comment there ships to every visitor and puts internal repo paths in view-source for no
+benefit to anyone reading the page. **The field has to be cleared in Webflow and republished,
+or the old code keeps running.**
