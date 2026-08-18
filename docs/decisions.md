@@ -1190,6 +1190,8 @@ repo for the attribution design and are true regardless of how anyone is paid:
   future revenue report should start there, not at Stripe.
 
 **Removed with this change:** Exhibit A and its Word copy, the revenue-share clauses of the
-contract, and the attribution capture from the Webflow footer. `webflow/site-footer.html` is
-now empty of scripts, which is worth stating out loud rather than quietly deleting the file:
-the field should be cleared in Webflow too, or the old code keeps running.
+contract, and the attribution capture from the Webflow footer. The Webflow footer field is now
+empty, documented in `webflow/README.md` rather than as an HTML comment in the field itself --
+a comment there ships to every visitor and puts internal repo paths in view-source for no
+benefit to anyone reading the page. **The field has to be cleared in Webflow and republished,
+or the old code keeps running.**

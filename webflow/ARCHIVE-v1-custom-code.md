@@ -1,8 +1,9 @@
 # Archive: melanitesuite.com custom code as it stood before 2026-08-14
 
-The Webflow header and footer custom code, verbatim, immediately before being replaced by
-`site-header.html` and `site-footer.html`. Webflow keeps no version history for these fields, so
-this file is the only record that this code ever existed.
+The Webflow header and footer custom code, verbatim, immediately before the header was replaced
+by `site-header.html` and the footer was emptied. Webflow keeps no version history for these
+fields, so this file is the only record that this code ever existed. See `README.md` for what
+those fields hold now.
 
 Kept because it is the most complete surviving description of how v1's front end actually
 behaved — the Xano calls, the role gating, the sidebar wiring — none of which is documented
