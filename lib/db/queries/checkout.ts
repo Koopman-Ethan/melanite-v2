@@ -14,6 +14,7 @@ import {
   providerServices,
   providers,
   services,
+  prepaidCheckoutLinks,
 } from '@/lib/db/schema'
 
 // Public checkout. Everything here is reachable by anyone holding a link token, so it returns
@@ -249,6 +250,75 @@ export async function getPackageCheckout(token: string): Promise<PackageCheckout
     paidAt: row.paidAt,
     expiresAt: row.expiresAt,
     items,
+  }
+}
+
+export interface PrepaidCheckout {
+  state: LinkState
+  linkId: string
+  amount: string
+  providerName: string
+  providerCredentials: string | null
+  clientName: string | null
+  clientEmail: string | null
+  /** Set when somebody other than the beneficiary is buying it. The page says so out loud —
+   *  a purchaser needs to know the balance will not be theirs. */
+  purchaserName: string | null
+  purchaserEmail: string | null
+  paidAt: Date | null
+  expiresAt: Date
+}
+
+export async function getPrepaidCheckout(token: string): Promise<PrepaidCheckout | null> {
+  const [row] = await db
+    .select({
+      linkId: prepaidCheckoutLinks.id,
+      status: prepaidCheckoutLinks.status,
+      amount: prepaidCheckoutLinks.amount,
+      purchaserName: prepaidCheckoutLinks.purchaserName,
+      purchaserEmail: prepaidCheckoutLinks.purchaserEmail,
+      paidAt: prepaidCheckoutLinks.paidAt,
+      expiresAt: prepaidCheckoutLinks.expiresAt,
+      clientName: clients.name,
+      clientEmail: clients.email,
+      providerFirst: providers.firstName,
+      providerLast: providers.lastName,
+      providerCredentials: providers.credentials,
+      providerStripeAccount: providers.stripeAccountId,
+    })
+    .from(prepaidCheckoutLinks)
+    .innerJoin(clients, eq(prepaidCheckoutLinks.clientId, clients.id))
+    .innerJoin(providers, eq(prepaidCheckoutLinks.providerId, providers.id))
+    .where(eq(prepaidCheckoutLinks.token, token))
+    .limit(1)
+
+  if (!row) return null
+
+  const state: LinkState =
+    row.status === 'paid'
+      ? 'paid'
+      : row.status === 'cancelled'
+        ? 'cancelled'
+        : row.expiresAt < new Date()
+          ? 'expired'
+          : // Destination charge, same as a package: without a connected account the provider
+            // cannot be paid their share, so there is nothing to collect into.
+            !row.providerStripeAccount
+            ? 'unpayable'
+            : 'payable'
+
+  return {
+    state,
+    linkId: row.linkId,
+    amount: row.amount,
+    providerName: `${row.providerFirst} ${row.providerLast}`,
+    providerCredentials: row.providerCredentials,
+    clientName: row.clientName,
+    clientEmail: row.clientEmail,
+    purchaserName: row.purchaserName,
+    purchaserEmail: row.purchaserEmail,
+    paidAt: row.paidAt,
+    expiresAt: row.expiresAt,
   }
 }
 

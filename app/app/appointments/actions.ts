@@ -12,6 +12,8 @@ import {
   clientPackageItems,
   clientPackages,
   packageRedemptions,
+  prepaidBalances,
+  prepaidRedemptions,
   providerServices,
   providers,
   services,
@@ -70,6 +72,21 @@ export async function cancelBooking(
     }
   }
 
+  const [drawn] = await db
+    .select({ id: prepaidRedemptions.id })
+    .from(prepaidRedemptions)
+    .where(
+      and(eq(prepaidRedemptions.bookingId, bookingId), isNull(prepaidRedemptions.voidedAt)),
+    )
+    .limit(1)
+
+  if (drawn) {
+    return {
+      error:
+        'This appointment was paid from a prepaid balance. Use "Cancel and return the balance" so the client keeps their money.',
+    }
+  }
+
   await db.update(bookings).set({ status: 'cancelled' }).where(eq(bookings.id, bookingId))
 
   // Only a PENDING link is cancelled. A paid one is never silently voided — refunds are
@@ -124,7 +141,10 @@ export async function cancelBooking(
  *  Best effort, always after the cancellation is committed: a bounced email must never leave a
  *  client believing an appointment still stands.
  */
-async function notifyCancelled(bookingId: string, sessionReturned: boolean): Promise<void> {
+async function notifyCancelled(
+  bookingId: string,
+  returned: false | 'package' | 'prepaid',
+): Promise<void> {
   try {
     const [row] = await db
       .select({
@@ -151,7 +171,7 @@ async function notifyCancelled(bookingId: string, sessionReturned: boolean): Pro
         providerName: `${row.providerFirst} ${row.providerLast}`,
         serviceName: row.serviceName,
         when: appointmentWhen(row.startTime),
-        sessionReturned,
+        returned,
       }),
     })
   } catch (err) {
@@ -238,9 +258,9 @@ export async function cancelPackageRedemption(bookingId: string): Promise<Action
     return { error: 'That session was already returned. Refresh to see the current state.' }
   }
 
-  // `true`: the session went back onto the package, and saying so is the difference between
-  // "your appointment is cancelled" and "your appointment is cancelled and you have lost $200".
-  await notifyCancelled(bookingId, true)
+  // Saying which is the difference between "your appointment is cancelled" and "your
+  // appointment is cancelled and you have lost $200".
+  await notifyCancelled(bookingId, 'package')
 
   revalidatePath('/app/appointments')
   // And the page that shows the count this just changed. Returning a session is the whole
@@ -248,6 +268,96 @@ export async function cancelPackageRedemption(bookingId: string): Promise<Action
   // this the provider cancels, goes to look, and sees the session still gone.
   revalidatePath('/app/packages')
   return { success: 'Appointment cancelled and the session returned to the package.' }
+}
+
+/** Cancel an appointment that drew on a prepaid balance, putting the money back.
+ *
+ *  The counterpart of `cancelPackageRedemption`, and the same single-CTE shape for the same
+ *  reason: the neon-http driver has no interactive transactions, so anything spanning several
+ *  writes has to be one statement or it is not atomic at all.
+ *
+ *  One difference that matters. A package session is always one row; a prepaid booking can draw
+ *  on SEVERAL balances at once, because oldest-first spending lets a $220 service take $50 off
+ *  one and $170 off the next. So `voided` returns a set, and the restore joins against it rather
+ *  than reading a single id. Getting this wrong would return one balance and quietly keep the
+ *  rest of the client's money.
+ */
+export async function cancelPrepaidBooking(bookingId: string): Promise<ActionState> {
+  const user = await requireProvider()
+
+  const [booking] = await db
+    .select({ id: bookings.id, status: bookings.status })
+    .from(bookings)
+    .where(and(eq(bookings.id, bookingId), eq(bookings.providerId, user.id)))
+    .limit(1)
+
+  if (!booking) return { error: 'Appointment not found.' }
+  if (booking.status !== 'upcoming') {
+    return { error: 'Only upcoming appointments can be cancelled.' }
+  }
+
+  const [drawn] = await db
+    .select({ id: prepaidRedemptions.id, balanceId: prepaidRedemptions.prepaidBalanceId })
+    .from(prepaidRedemptions)
+    .innerJoin(prepaidBalances, eq(prepaidRedemptions.prepaidBalanceId, prepaidBalances.id))
+    .where(
+      and(
+        eq(prepaidRedemptions.bookingId, bookingId),
+        isNull(prepaidRedemptions.voidedAt),
+        eq(prepaidBalances.providerId, user.id),
+      ),
+    )
+    .limit(1)
+
+  if (!drawn) return { error: 'This appointment did not draw on a prepaid balance.' }
+
+  // `voided_at IS NULL` is what makes a second click harmless. Without it, cancelling twice
+  // would hand the money back twice — a balance that grows when you poke it.
+  //
+  // No clamp on the way back up. The amount returned is exactly what was taken, so exceeding
+  // the original is arithmetically impossible; if it ever happens the check constraint should
+  // say so loudly rather than a `least()` silently absorbing it.
+  const undone = await db.execute(sql`
+    WITH voided AS (
+      UPDATE prepaid_redemptions SET voided_at = now()
+       WHERE booking_id = ${bookingId}::uuid AND voided_at IS NULL
+      RETURNING prepaid_balance_id, amount_applied
+    ),
+    restored AS (
+      UPDATE prepaid_balances b
+         SET remaining_amount = b.remaining_amount + v.amount_applied,
+             -- Exhausted becomes spendable again now the money is back. There is no expiry to
+             -- respect, so unlike a package this always reopens.
+             status = 'active'
+        FROM voided v
+       WHERE b.id = v.prepaid_balance_id
+      RETURNING b.id
+    ),
+    unlinked AS (
+      -- Any pending link for the remainder goes with it. A paid one is left alone: refunds are
+      -- deliberately a Stripe decision, so the record of payment must survive the cancellation.
+      UPDATE checkout_links SET status = 'cancelled'
+       WHERE booking_id = ${bookingId}::uuid AND status = 'pending'
+         AND EXISTS (SELECT 1 FROM voided)
+      RETURNING id
+    )
+    UPDATE bookings SET status = 'cancelled'
+     WHERE id = ${bookingId}::uuid
+       AND EXISTS (SELECT 1 FROM voided)
+    RETURNING id
+  `)
+
+  if ((undone.rows?.length ?? 0) === 0) {
+    return { error: 'That balance was already returned. Refresh to see the current state.' }
+  }
+
+  // The money went back, and the client needs to be told so — otherwise this reads as a
+  // cancellation that cost them the balance.
+  await notifyCancelled(bookingId, 'prepaid')
+
+  revalidatePath('/app/appointments')
+  revalidatePath('/app/prepaid')
+  return { success: 'Appointment cancelled and the money returned to their balance.' }
 }
 
 /** Mark a past appointment as a no-show.

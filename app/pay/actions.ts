@@ -3,13 +3,18 @@
 import { and, eq, isNull } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
-import { getBookingCheckout, getPackageCheckout } from '@/lib/db/queries/checkout'
+import {
+  getBookingCheckout,
+  getPackageCheckout,
+  getPrepaidCheckout,
+} from '@/lib/db/queries/checkout'
 import {
   bookings,
   checkoutLinks,
   clients,
   packageCheckoutLinks,
   platformSettings,
+  prepaidCheckoutLinks,
   providers,
 } from '@/lib/db/schema'
 import { splitClientPayment, toCents, toMoney } from '@/lib/money'
@@ -268,6 +273,103 @@ export async function createPackageIntent(input: {
       .where(eq(packageCheckoutLinks.id, link.id))
 
     return { clientSecret: intent.client_secret, amount: (priceCents + tipCents) / 100 }
+  } catch (err) {
+    return { error: friendlyStripeError(err, 'Could not start the payment. Try again shortly.') }
+  }
+}
+
+/** Creates the PaymentIntent for a prepaid balance.
+ *
+ *  A destination charge like a package, and split the same way — the provider's share reaches
+ *  them when the balance is BOUGHT, not when it is eventually used. That is what Keoni asked
+ *  for, and it is why redeeming later moves no money at all.
+ *
+ *  No tip. There is nothing to tip for yet; the treatment has not happened, and the tip on the
+ *  eventual appointment is collected there, where all of it goes to the provider.
+ *
+ *  No card is saved either. The consent wording exists to authorise no-show fees against a
+ *  future appointment, and nobody has booked one — asking for that authorisation months early,
+ *  on a purchase that is not an appointment, is consent collected under the wrong pretext.
+ */
+export async function createPrepaidIntent(input: {
+  token: string
+  purchaserEmail: string | null
+}): Promise<IntentState> {
+  const checkout = await getPrepaidCheckout(input.token)
+  if (!checkout) return { error: 'That payment link does not exist.' }
+  if (checkout.state !== 'payable') return { error: notPayableMessage(checkout.state) }
+
+  const [link] = await db
+    .select({
+      id: prepaidCheckoutLinks.id,
+      providerId: prepaidCheckoutLinks.providerId,
+      clientId: prepaidCheckoutLinks.clientId,
+      amount: prepaidCheckoutLinks.amount,
+      purchaserName: prepaidCheckoutLinks.purchaserName,
+    })
+    .from(prepaidCheckoutLinks)
+    .where(eq(prepaidCheckoutLinks.id, checkout.linkId))
+    .limit(1)
+
+  if (!link) return { error: 'That payment link does not exist.' }
+
+  const [provider] = await db
+    .select({ stripeAccountId: providers.stripeAccountId })
+    .from(providers)
+    .where(eq(providers.id, link.providerId))
+    .limit(1)
+
+  if (!provider?.stripeAccountId) {
+    return { error: 'This provider cannot accept payments yet. Contact them directly.' }
+  }
+
+  // The receipt goes to whoever is PAYING, which for a gift is not the person the balance
+  // belongs to. Sending it to the beneficiary would tell somebody what their present cost.
+  const receiptEmail = input.purchaserEmail?.trim() || checkout.purchaserEmail || checkout.clientEmail
+  if (receiptEmail && !isValidEmail(receiptEmail)) {
+    return { error: 'That doesn’t look like an email address.' }
+  }
+
+  const settings = await getSplitSettings()
+  const amountCents = toCents(link.amount)
+  const { melaniteCutCents: feeCents } = splitClientPayment({
+    grossCents: amountCents,
+    tipCents: 0,
+    providerSharePct: settings.providerSharePct,
+  })
+
+  try {
+    const customerId = await ensureStripeCustomer(
+      link.clientId,
+      checkout.clientName,
+      checkout.clientEmail,
+    )
+
+    const intent = await stripePost<{ id: string; client_secret: string }>('/payment_intents', {
+      amount: amountCents,
+      currency: 'usd',
+      customer: customerId,
+      payment_method_types: PAYMENT_METHODS,
+      ...(receiptEmail ? { receipt_email: receiptEmail } : {}),
+      transfer_data: { destination: provider.stripeAccountId },
+      application_fee_amount: feeCents,
+      metadata: {
+        type: 'prepaid_purchase',
+        prepaid_checkout_link_id: link.id,
+        provider_id: link.providerId,
+        // The BENEFICIARY. The handler attaches the balance to this, never to whoever paid.
+        client_id: link.clientId,
+        ...(link.purchaserName ? { purchaser_name: link.purchaserName } : {}),
+        ...(receiptEmail ? { purchaser_email: receiptEmail } : {}),
+      },
+    })
+
+    await db
+      .update(prepaidCheckoutLinks)
+      .set({ stripeCustomerId: customerId, stripePaymentIntentId: intent.id })
+      .where(eq(prepaidCheckoutLinks.id, link.id))
+
+    return { clientSecret: intent.client_secret, amount: amountCents / 100 }
   } catch (err) {
     return { error: friendlyStripeError(err, 'Could not start the payment. Try again shortly.') }
   }

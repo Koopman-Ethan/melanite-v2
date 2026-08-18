@@ -16,6 +16,8 @@ import {
   packageTemplateItems,
   packageTemplates,
   platformSettings,
+  prepaidBalances,
+  prepaidCheckoutLinks,
   providerServices,
   providers,
   roomBookings,
@@ -156,6 +158,8 @@ export async function handlePaymentIntentSucceeded(
       return roomRentalPaid(pi)
     case 'package_purchase':
       return packagePurchased(pi)
+    case 'prepaid_purchase':
+      return prepaidPurchased(pi)
     case 'training_deposit':
     case 'training_balance':
       return trainingPaid(pi, kind)
@@ -571,6 +575,105 @@ async function packagePurchased(pi: StripePaymentIntentObject): Promise<HandlerR
   })
 
   return { handled: true, detail: `package instance ${instance.id} created` }
+}
+
+/** A prepaid dollar balance was bought.
+ *
+ *  Same shape as a package purchase — the split happens HERE, at purchase, which is what Keoni
+ *  asked for. Redemption later moves no money at all; it only decrements the balance.
+ *
+ *  The consequence is worth being explicit about: an unspent balance stays split in the
+ *  proportion it was bought at, so both parties keep their share of money for a treatment that
+ *  never happened. With no expiry and no refunds that is the intended end state rather than a
+ *  gap — and it is why nothing here needs to reconcile at the end.
+ */
+async function prepaidPurchased(pi: StripePaymentIntentObject): Promise<HandlerResult> {
+  if (await alreadyRecorded(pi.id, 'purchase')) {
+    return { handled: true, detail: 'already recorded' }
+  }
+
+  const linkId = pi.metadata?.prepaid_checkout_link_id
+  const providerId = pi.metadata?.provider_id
+  const clientId = pi.metadata?.client_id
+  if (!providerId || !clientId) {
+    return { handled: false, detail: 'prepaid_purchase missing provider or client' }
+  }
+
+  // No tip. There is nothing to tip for yet — the treatment has not happened, and the tip on
+  // the eventual appointment is collected there, where it goes wholly to the provider.
+  const grossCents = pi.amount_received
+  const share = await providerShare()
+  const { providerPayoutCents, melaniteCutCents } = splitClientPayment({
+    grossCents,
+    tipCents: 0,
+    providerSharePct: share,
+  })
+
+  const amount = toMoney(grossCents)
+
+  const [balance] = await db
+    .insert(prepaidBalances)
+    .values({
+      providerId,
+      clientId,
+      originalAmount: amount,
+      // Bought and untouched, so the two are equal. Every later change to `remainingAmount`
+      // goes through the conditional claim in `bookFromPrepaid`.
+      remainingAmount: amount,
+      status: 'active',
+      purchasedAt: new Date(),
+      purchaserName: pi.metadata?.purchaser_name ?? null,
+      purchaserEmail: pi.metadata?.purchaser_email ?? null,
+    })
+    .returning({ id: prepaidBalances.id })
+
+  await db.insert(ledgerEntries).values({
+    source: 'prepaid',
+    payer: 'client',
+    entryType: 'purchase',
+    subjectType: 'prepaid_balance',
+    subjectId: balance.id,
+    providerId,
+    clientId,
+    grossAmount: amount,
+    tipAmount: '0.00',
+    providerPayout: toMoney(providerPayoutCents),
+    melaniteCut: toMoney(melaniteCutCents),
+    paymentMethod: 'stripe',
+    stripePaymentIntentId: pi.id,
+    // Destination charge, settled on the spot — the same reasoning as a package purchase.
+    payoutStatus: 'paid',
+    note: pi.metadata?.purchaser_name
+      ? `Prepaid balance, bought by ${pi.metadata.purchaser_name}`
+      : 'Prepaid balance',
+  })
+
+  // Close the link and point it at what it produced, or the client can reopen it and be shown
+  // a second payment form.
+  if (linkId) {
+    await db
+      .update(prepaidCheckoutLinks)
+      .set({
+        status: 'paid',
+        paidAt: new Date(),
+        stripePaymentIntentId: pi.id,
+        prepaidBalanceId: balance.id,
+      })
+      .where(eq(prepaidCheckoutLinks.id, linkId))
+  }
+
+  // `when` is null — nothing is scheduled. The provider is being told money arrived.
+  await notifyProviderPaid({
+    providerId,
+    clientName: await clientNameFor(clientId),
+    what: `Prepaid balance ($${amount})`,
+    when: null,
+    grossCents,
+    tipCents: 0,
+    payoutCents: providerPayoutCents,
+  })
+
+  return { handled: true, detail: `prepaid balance ${balance.id} created` }
 }
 
 /** Best-effort name for the notification. Null rather than throwing: failing to name the buyer

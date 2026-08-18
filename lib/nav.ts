@@ -56,6 +56,7 @@ const ITEMS: NavItem[] = [
   { label: 'Appointments', href: '/app/appointments', providerOnly: true },
   { label: 'Earnings', href: '/app/earnings', providerOnly: true },
   { label: 'Packages', href: '/app/packages', providerOnly: true },
+  { label: 'Prepaid', href: '/app/prepaid', providerOnly: true },
   { label: 'Daily Room Rental', href: '/app/room-rental', providerOnly: true },
   { label: 'My Services', href: '/app/services', providerOnly: true },
   { label: 'Membership', href: '/app/membership', providerOnly: true },
