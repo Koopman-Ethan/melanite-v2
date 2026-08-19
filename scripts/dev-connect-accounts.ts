@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+
 import { neon } from '@neondatabase/serverless'
 
 import '../envConfig'
@@ -77,6 +79,9 @@ async function main() {
   }
 
   const checkOnly = process.argv.includes('--check')
+  // Per invocation, so a network retry inside one run still reuses its key while a run
+  // tomorrow gets its own.
+  const RUN = randomUUID()
   console.log(`${checkOnly ? 'Checking' : 'Fixing'} ${describeDatabase()}\n`)
 
   const providers = (await q.query(
@@ -86,6 +91,7 @@ async function main() {
 
   let broken = 0
   let fixed = 0
+  let failed = 0
 
   for (const p of providers) {
     const name = `${p.first_name} ${p.last_name}`.padEnd(22)
@@ -131,14 +137,25 @@ async function main() {
         'metadata[provider_id]': p.id,
         'metadata[note]': 'dev only — created by scripts/dev-connect-accounts.ts',
       },
-      // One per provider per run of this script, so a retry after a network wobble does not
-      // leave a second account behind.
-      `dev-connect:${p.id}`,
+      // One per provider per RUN, which is what the key has to include to actually mean that.
+      //
+      // It was `dev-connect:${p.id}` alone, which is stable across runs while the parameters
+      // are not -- `tos_acceptance[date]` is the current time. Stripe refuses a reused
+      // idempotency key whose parameters have changed, for 24 hours, so the second run within
+      // a day failed for every provider at once. It cost a night: the refresh restored
+      // production's live account ids, this step could not replace them, and appdev was left
+      // unable to take a single payment.
+      //
+      // It broke the retry path specifically. The workflow offers workflow_dispatch so "a
+      // failed night can be retried without waiting for the next one", and a retry is exactly
+      // the case that collides.
+      `dev-connect:${RUN}:${p.id}`,
     )
 
     if (!created.ok) {
       const message = (created.body as { error?: { message?: string } }).error?.message
       console.log(`  FAILED   ${name} ${message ?? created.status}`)
+      failed++
       continue
     }
 
@@ -178,6 +195,17 @@ async function main() {
   }
 
   console.log(`\n${fixed} replaced. Live account ids are untouched in production.`)
+
+  // Exiting 0 here having replaced nothing is how appdev spent a day unable to take a
+  // payment while this step showed a green tick. The --check path already exits 1 when
+  // something is unusable; the path whose whole job is to FIX it must do at least as much.
+  if (failed > 0) {
+    console.error(
+      `\n${failed} provider(s) could not be given a usable account. ` +
+        `Every payment path in this environment will fail until that is resolved.`,
+    )
+    process.exit(1)
+  }
 }
 
 main().catch((err) => {
