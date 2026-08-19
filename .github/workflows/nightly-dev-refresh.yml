@@ -57,15 +57,33 @@ jobs:
       # server refuses outright ("server version mismatch"), so the version is pinned rather
       # than left to whatever the runner image happens to carry this month.
       - name: Install PostgreSQL 18 client
+        # A slow apt mirror must not be able to eat the whole job. On 2026-08-19 this step
+        # spent 19m56s retrying azure.archive.ubuntu.com and the run was cancelled at the
+        # 20-minute job timeout having copied nothing. A step timeout turns that into a
+        # fast, legible failure rather than a silent consumption of the entire budget.
+        timeout-minutes: 6
         run: |
           sudo install -d /usr/share/postgresql-common/pgdg
           sudo curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
-            --fail https://www.postgresql.org/media/keys/ACCC4CF8.asc
+            --fail --retry 3 --retry-delay 2 --max-time 60 \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
           echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
             https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
             | sudo tee /etc/apt/sources.list.d/pgdg.list
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client-18
+
+          # Refresh ONLY the pgdg list. Ubuntu’s own archives are already indexed in the
+          # runner image and are not what this step is here for — reaching for them is
+          # exactly what hung, and every index it did fetch from them went unused.
+          # List-Cleanup=0 stops apt discarding the indexes it is not refreshing.
+          sudo apt-get update \
+            -o Dir::Etc::sourcelist=sources.list.d/pgdg.list \
+            -o Dir::Etc::sourceparts=- \
+            -o APT::Get::List-Cleanup=0
+
+          # If the image’s indexes turn out to be stale after all, a dependency will not
+          # resolve — fall back to the full update rather than losing the night to it.
+          sudo apt-get install -y postgresql-client-18 \
+            || { sudo apt-get update && sudo apt-get install -y postgresql-client-18; }
 
           # Installing 18 is NOT enough on its own. /usr/bin/pg_dump is postgresql-common's
           # wrapper and it resolves to the DEFAULT installed major, which on this runner is the
