@@ -35,6 +35,7 @@ import {
 } from '@/lib/email'
 
 import { splitClientPayment, toCents, toMoney } from '@/lib/money'
+import { notifyMelaniteRoomRental } from '@/lib/notify-melanite'
 
 import { appOrigin, planFromMetadata } from './config'
 import { stripeGet } from './client'
@@ -449,6 +450,13 @@ async function roomRentalPaid(pi: StripePaymentIntentObject): Promise<HandlerRes
     .update(roomBookings)
     .set({ status: 'confirmed', stripePaymentIntentId: pi.id, holdExpiresAt: null })
     .where(eq(roomBookings.id, rental.id))
+
+  // Melanite is told here rather than in `startRoomRental`, because a pending hold is not a
+  // rental — it expires on its own, and announcing one would leave an unmatched booking email
+  // behind every abandoned checkout. Never throws, for the same reason as the sends above: a
+  // webhook that fails on an email is a webhook Stripe replays, and the money is already
+  // recorded.
+  await notifyMelaniteRoomRental(rental.id, 'booked')
 
   return { handled: true, detail: 'room rental recorded' }
 }
