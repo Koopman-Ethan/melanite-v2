@@ -29,6 +29,7 @@ import {
   sendEmail,
 } from '@/lib/email'
 import { toCents, toMoney } from '@/lib/money'
+import { notifyMelaniteBooked } from '@/lib/notify-melanite'
 import { appOrigin } from '@/lib/stripe/config'
 import { isValidEmail } from '@/lib/validation'
 
@@ -388,6 +389,10 @@ export async function bookFromPrepaid(input: {
   }
 
   const applied = claims.reduce((sum, claim) => sum + claim.cents, 0)
+
+  // Melanite hears about it either way. One call covers both shapes above — with a remainder
+  // still due and without — because what she is being told is that the laser is taken.
+  await notifyMelaniteBooked(bookingId)
 
   // What the client hears depends on whether they still owe anything. Sending "your
   // appointment is confirmed" alongside a bill, or a payment link for zero, are both wrong.

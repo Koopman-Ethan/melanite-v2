@@ -8,7 +8,18 @@ import 'server-only'
 // the key goes nowhere visible to the recipient — hence the loud warning. It must not fail
 // silently, because "the email never arrived" is indistinguishable from a broken flow.
 
+import { PROVIDER_ALREADY_HOLDS } from '@/lib/payments/direction'
+
 const RESEND_ENDPOINT = 'https://api.resend.com/emails'
+
+/** Where Melanite itself is told about calendar activity.
+ *
+ *  A constant rather than a database setting or a required variable: it is one business inbox,
+ *  it changes about never, and an unset env var must not be able to quietly turn the alerts
+ *  off. The override exists so a preview environment can point somewhere else without a commit
+ *  — though outside production `resolveRecipient` redirects everything anyway. */
+export const MELANITE_NOTIFY_EMAIL =
+  process.env.MELANITE_NOTIFY_EMAIL?.trim() || 'melanitelasersuite@gmail.com'
 
 export interface EmailMessage {
   to: string
@@ -629,6 +640,191 @@ export function providerInviteEmail(input: {
           `<strong>This link expires in ${input.expiresInDays} days</strong> and can only be used once.`,
         ),
       { label: 'Set up your account', url: input.url },
+    ),
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Melanite's own calendar alerts
+//
+// The first messages addressed to the business rather than to a client or a provider. Keoni
+// asked to hear about every booking and every cancellation, including the rental room, because
+// nothing told her: the client is emailed, the provider is emailed, and the calendar changes
+// under her without a word.
+//
+// Sent when the appointment ROW is created, not when it is paid for — deliberately unlike
+// `bookingConfirmedEmail`, which waits for the money. What she is being told about is the laser
+// being taken, and a Groupon, cash, package or prepaid booking never produces a payment event at
+// all, so waiting for one would hide most of her calendar from her.
+// ---------------------------------------------------------------------------
+
+/** The three room blocks, named the way they are named to a person. Shared with the Stripe line
+ *  item so the room is described identically in a receipt and in an alert. */
+export const ROOM_SLOT_LABELS: Record<'full' | 'am' | 'pm', string> = {
+  full: 'Full day',
+  am: 'Morning',
+  pm: 'Afternoon',
+}
+
+/** A rental date (`YYYY-MM-DD`, a `date` column with no time in it) as a person reads it.
+ *
+ *  Parsed as UTC noon and formatted in UTC. Not `appointmentWhen`: that takes an instant and
+ *  converts it to Denver, and putting a bare date through it lands on the previous day for any
+ *  server west of UTC. */
+export function roomDateLabel(rentalDate: string): string {
+  return new Date(`${rentalDate}T12:00:00Z`).toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    timeZone: 'UTC',
+  })
+}
+
+const EXTERNAL_METHOD_LABELS: Record<string, string> = {
+  groupon: 'Groupon',
+  cherry: 'Cherry',
+  cash: 'Cash',
+  check: 'Check',
+  other: 'another method',
+}
+
+/** One line describing what happens about money on this appointment.
+ *
+ *  Worth its own function rather than a ternary in the template: the five payment sources mean
+ *  genuinely different things to Keoni, and some of them mean somebody owes somebody money.
+ *
+ *  The direction is read from `PROVIDER_ALREADY_HOLDS` rather than restated here. Groupon, cash
+ *  and cheques are collected BY the provider, so Melanite's share has to be invoiced back —
+ *  which is the whole reason `price` is required on an external booking. Cherry runs the other
+ *  way: it pays Melanite, which then owes the provider. Saying "collected by the provider" about
+ *  a Cherry booking would point an invoice at somebody who never touched the money, and that is
+ *  a mistake this codebase has made once already.
+ */
+export function bookingPaymentSummary(input: {
+  paymentSource: string
+  externalMethod: string | null
+  /** The `money()` column, so a string like '180.00'. */
+  price: string
+}): string {
+  const amount = `$${Number(input.price).toFixed(2)}`
+
+  switch (input.paymentSource) {
+    case 'external': {
+      const raw = input.externalMethod ?? ''
+      const method = EXTERNAL_METHOD_LABELS[raw] ?? 'an external method'
+
+      if (PROVIDER_ALREADY_HOLDS.has(raw)) {
+        return `${amount} paid by ${method}, collected by the provider — Melanite's share to invoice`
+      }
+      if (raw === 'cherry') {
+        return `${amount} financed through Cherry, which pays Melanite — the provider's share is still owed`
+      }
+      // No method recorded, or one this list has never heard of. Naming a direction here would
+      // be guessing at who owes whom, which is the one thing this line must not do.
+      return `${amount} paid by ${method}, outside Melanite`
+    }
+    case 'package_redemption':
+      return 'A package session the client already owns — nothing to collect'
+    case 'prepaid':
+      return Number(input.price) > 0
+        ? `Paid from a prepaid balance, with ${amount} still due on a payment link`
+        : 'Paid in full from a prepaid balance — nothing to collect'
+    case 'comped':
+      return 'Comped — no charge'
+    default:
+      return `${amount} due on a payment link`
+  }
+}
+
+/** Tells Melanite that an appointment appeared on, or left, the calendar.
+ *
+ *  One template for both events rather than two nearly identical ones: every field is the same
+ *  and only the verb changes, so two copies would drift the first time a line was added. */
+export function deskBookingEmail(input: {
+  event: 'booked' | 'cancelled'
+  clientName: string
+  providerName: string
+  serviceName: string
+  when: string
+  durationMins: number
+  paying: string
+  url: string
+}): Omit<EmailMessage, 'to'> {
+  const verb = input.event === 'booked' ? 'Booked' : 'Cancelled'
+
+  return {
+    subject: `${verb}: ${input.serviceName} — ${input.when}`,
+    text: [
+      input.event === 'booked'
+        ? 'An appointment has been booked.'
+        : 'An appointment has been cancelled.',
+      '',
+      input.serviceName,
+      `${input.when} (${input.durationMins} minutes)`,
+      '',
+      `Client:   ${input.clientName}`,
+      `Provider: ${input.providerName}`,
+      `Payment:  ${input.paying}`,
+      '',
+      'See the calendar:',
+      input.url,
+    ].join('\n'),
+    html: wrap(
+      input.event === 'booked' ? 'Appointment booked' : 'Appointment cancelled',
+      p(`<strong>${input.serviceName}</strong><br>${input.when} (${input.durationMins} minutes)`) +
+        p(
+          `Client: <strong>${input.clientName}</strong><br>` +
+            `Provider: ${input.providerName}<br>` +
+            `Payment: ${input.paying}`,
+        ),
+      { label: 'Open the calendar', url: input.url },
+    ),
+  }
+}
+
+/** Tells Melanite that the rental room was taken, or given back.
+ *
+ *  Sent when the rental is CONFIRMED, not when the 30-minute hold is created. A hold that dies
+ *  in an abandoned checkout never occupied the room, and alerting on it would produce a booking
+ *  email with no cancellation to match when the sweep clears it. */
+export function deskRoomRentalEmail(input: {
+  event: 'booked' | 'cancelled'
+  providerName: string
+  slotLabel: string
+  dateLabel: string
+  price: string
+  /** True when the provider cancelled inside 24 hours, so the refund is Keoni's decision and
+   *  the rental is sitting in the admin queue waiting for it. */
+  awaitingRefundDecision?: boolean
+  url: string
+}): Omit<EmailMessage, 'to'> {
+  const verb = input.event === 'booked' ? 'Room booked' : 'Room cancelled'
+  const amount = `$${Number(input.price).toFixed(2)}`
+  const note = input.awaitingRefundDecision
+    ? 'Cancelled inside 24 hours, so the refund is yours to decide — it is waiting in the admin queue. The block is free either way.'
+    : null
+
+  return {
+    subject: `${verb}: ${input.slotLabel}, ${input.dateLabel}`,
+    text: [
+      input.event === 'booked'
+        ? 'The treatment room has been rented.'
+        : 'A room rental has been cancelled.',
+      '',
+      `${input.slotLabel}, ${input.dateLabel}`,
+      `Provider: ${input.providerName}`,
+      `Paid:     ${amount}`,
+      ...(note ? ['', note] : []),
+      '',
+      'See the calendar:',
+      input.url,
+    ].join('\n'),
+    html: wrap(
+      input.event === 'booked' ? 'Room rented' : 'Room rental cancelled',
+      p(`<strong>${input.slotLabel}, ${input.dateLabel}</strong>`) +
+        p(`Provider: <strong>${input.providerName}</strong><br>Paid: ${amount}`) +
+        (note ? p(note) : ''),
+      { label: 'Open the calendar', url: input.url },
     ),
   }
 }

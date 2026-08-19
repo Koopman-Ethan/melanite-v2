@@ -1,0 +1,140 @@
+import 'server-only'
+
+import { eq } from 'drizzle-orm'
+
+import { db } from '@/lib/db'
+import { bookings, providerServices, providers, roomBookings, services } from '@/lib/db/schema'
+import {
+  MELANITE_NOTIFY_EMAIL,
+  ROOM_SLOT_LABELS,
+  appointmentWhen,
+  bookingPaymentSummary,
+  deskBookingEmail,
+  deskRoomRentalEmail,
+  roomDateLabel,
+  sendEmail,
+} from '@/lib/email'
+import { appOrigin } from '@/lib/stripe/config'
+
+// Melanite's own calendar alerts.
+//
+// Every function here is BEST EFFORT and never throws. Each is called after the thing it
+// describes has already been committed — an appointment booked, a cancellation recorded, a room
+// rental paid for — so a failed send must never be mistaken for a failed operation. That is the
+// same rule `sendEmail` itself follows, and the same reason `notifyProviderPaid` in
+// `lib/stripe/handlers.ts` swallows its errors; these add the try/catch because a JOIN can fail
+// where a send cannot.
+//
+// They live in `lib/` rather than beside their callers because five call sites across four
+// modules need them, and because a `'use server'` file may only export server actions.
+
+/** The one join every appointment alert needs. Written once here; the same shape exists in
+ *  `notifyCancelled` and `confirmBooking` for the CLIENT emails, which need different columns. */
+async function bookingDetail(bookingId: string) {
+  const [row] = await db
+    .select({
+      clientName: bookings.clientName,
+      startTime: bookings.startTime,
+      durationMins: bookings.durationMins,
+      price: bookings.price,
+      paymentSource: bookings.paymentSource,
+      externalMethod: bookings.externalMethod,
+      serviceName: services.name,
+      providerFirst: providers.firstName,
+      providerLast: providers.lastName,
+    })
+    .from(bookings)
+    .innerJoin(providerServices, eq(bookings.providerServiceId, providerServices.id))
+    .innerJoin(services, eq(providerServices.serviceId, services.id))
+    .innerJoin(providers, eq(bookings.providerId, providers.id))
+    .where(eq(bookings.id, bookingId))
+    .limit(1)
+
+  return row ?? null
+}
+
+async function notifyBooking(bookingId: string, event: 'booked' | 'cancelled'): Promise<void> {
+  try {
+    const row = await bookingDetail(bookingId)
+    if (!row) return
+
+    await sendEmail({
+      to: MELANITE_NOTIFY_EMAIL,
+      ...deskBookingEmail({
+        event,
+        clientName: row.clientName,
+        providerName: `${row.providerFirst} ${row.providerLast}`,
+        serviceName: row.serviceName,
+        when: appointmentWhen(row.startTime),
+        durationMins: row.durationMins,
+        paying: bookingPaymentSummary({
+          paymentSource: row.paymentSource,
+          externalMethod: row.externalMethod,
+          price: row.price,
+        }),
+        url: `${await appOrigin()}/app/admin/calendar`,
+      }),
+    })
+  } catch (err) {
+    console.error(`[email] Melanite ${event} alert failed for booking`, bookingId, err)
+  }
+}
+
+/** An appointment now occupies the laser. Called from every path that creates a booking row a
+ *  provider chose to make: `/app/book`, a package redemption, and a prepaid redemption.
+ *
+ *  Deliberately NOT called from `createManualBooking` — that is the admin tool, Keoni is
+ *  usually the person typing into it, and a past-dated entry lands as `completed` rather than
+ *  on the upcoming calendar at all. */
+export async function notifyMelaniteBooked(bookingId: string): Promise<void> {
+  await notifyBooking(bookingId, 'booked')
+}
+
+/** An appointment has left the calendar. Called once, from `notifyCancelled`, which is already
+ *  the single funnel for the ordinary, package and prepaid cancellations. */
+export async function notifyMelaniteCancelled(bookingId: string): Promise<void> {
+  await notifyBooking(bookingId, 'cancelled')
+}
+
+/** The rental room was taken or given back.
+ *
+ *  `booked` fires on the `confirmed` transition in the Stripe webhook, not on the pending hold
+ *  `startRoomRental` writes before checkout. A hold is not a rental: it expires on its own, and
+ *  announcing one would leave an unmatched booking email behind every abandoned checkout. */
+export async function notifyMelaniteRoomRental(
+  roomBookingId: string,
+  event: 'booked' | 'cancelled',
+  options: { awaitingRefundDecision?: boolean } = {},
+): Promise<void> {
+  try {
+    const [row] = await db
+      .select({
+        rentalDate: roomBookings.rentalDate,
+        slotType: roomBookings.slotType,
+        price: roomBookings.price,
+        providerFirst: providers.firstName,
+        providerLast: providers.lastName,
+      })
+      .from(roomBookings)
+      .innerJoin(providers, eq(roomBookings.providerId, providers.id))
+      .where(eq(roomBookings.id, roomBookingId))
+      .limit(1)
+
+    if (!row) return
+
+    await sendEmail({
+      to: MELANITE_NOTIFY_EMAIL,
+      ...deskRoomRentalEmail({
+        event,
+        providerName: `${row.providerFirst} ${row.providerLast}`,
+        slotLabel: ROOM_SLOT_LABELS[row.slotType],
+        dateLabel: roomDateLabel(row.rentalDate),
+        price: row.price,
+        awaitingRefundDecision: options.awaitingRefundDecision,
+        url: `${await appOrigin()}/app/admin/calendar`,
+      }),
+    })
+  } catch (err) {
+    console.error(`[email] Melanite room ${event} alert failed for`, roomBookingId, err)
+  }
+}
