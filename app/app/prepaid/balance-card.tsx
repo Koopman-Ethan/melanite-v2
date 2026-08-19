@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 
+import { CopyButton } from '@/components/ui/copy-button'
 import { Notice } from '@/components/ui/field'
 import { cn } from '@/lib/cn'
 
@@ -54,6 +55,10 @@ export function BalanceCard({
 }) {
   const [open, setOpen] = useState(false)
   const [done, setDone] = useState<string | null>(null)
+  // Held alongside the confirmation, not inside the form — the form unmounts on success and
+  // would take the link with it, which is exactly how the booking flow once created a payment
+  // link and showed it to nobody.
+  const [payUrl, setPayUrl] = useState<string | null>(null)
 
   const spendable = balances.spendableCents > 0
 
@@ -95,8 +100,20 @@ export function BalanceCard({
       </div>
 
       {done && (
-        <div className="mt-3">
+        <div className="mt-3 space-y-2">
           <Notice tone="success">{done}</Notice>
+          {payUrl && (
+            <div className="rounded-field border border-warning/40 bg-warning/5 p-3">
+              <p className="text-xs text-ink-secondary">
+                They still owe the difference. This link has been emailed to them if they have
+                an address on file — send it by text too, which is how most of these arrive.
+              </p>
+              <p className="mt-2 break-all font-mono text-xs text-ink-faint">{payUrl}</p>
+              <div className="mt-2">
+                <CopyButton value={payUrl} label="Copy payment link" copiedLabel="Copied" />
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -122,9 +139,10 @@ export function BalanceCard({
           clientName={balances.clientName}
           spendableCents={balances.spendableCents}
           services={services}
-          onDone={(success) => {
+          onDone={(success, url) => {
             setOpen(false)
             if (success) setDone(success)
+            setPayUrl(url ?? null)
           }}
         />
       )}

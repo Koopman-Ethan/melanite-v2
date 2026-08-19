@@ -42,7 +42,10 @@ export function BookFromBalance({
   /** Everything this client holds with this provider, across balances. */
   spendableCents: number
   services: BookableForPrepaid[]
-  onDone: (success?: string) => void
+  /** `payUrl` is set only when the balance fell short and a card payment is owed. The caller
+   *  shows it — most of these travel by text, so the provider needs it in their hand rather
+   *  than only in the client's inbox. */
+  onDone: (success?: string, payUrl?: string) => void
 }) {
   const [pending, startTransition] = useTransition()
   const [state, setState] = useState<PrepaidState>({})
@@ -98,7 +101,7 @@ export function BookFromBalance({
         notes: notes.trim() || null,
       })
       setState(result)
-      if (!result.error) onDone(result.success)
+      if (!result.error) onDone(result.success, result.url)
     })
 
   const field =

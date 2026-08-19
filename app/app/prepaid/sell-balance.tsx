@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { CopyButton } from '@/components/ui/copy-button'
 import { Field, Notice } from '@/components/ui/field'
 import { AmountField, EmailField, PhoneField } from '@/components/ui/validated-field'
 
@@ -87,10 +88,8 @@ export function SellBalance({ clients }: { clients: PickableClient[] }) {
         <p className="mt-3 break-all rounded-field border border-line-control bg-overlay px-3 py-2 font-mono text-xs">
           {url}
         </p>
-        <div className="mt-3 flex gap-2">
-          <Button size="sm" variant="outline" onClick={() => void navigator.clipboard?.writeText(url)}>
-            Copy
-          </Button>
+        <div className="mt-3 flex items-center gap-2">
+          <CopyButton value={url} label="Copy" copiedLabel="Copied" />
           <Button size="sm" variant="ghost" onClick={() => setUrl(null)}>
             Done
           </Button>
