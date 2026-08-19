@@ -11,6 +11,7 @@ import { db } from '@/lib/db'
 import { isExclusionViolation } from '@/lib/db/errors'
 import { providerServices, services } from '@/lib/db/schema'
 import { bookingPaymentLinkEmail, sendEmail } from '@/lib/email'
+import { notifyMelaniteBooked } from '@/lib/notify-melanite'
 import { appOrigin } from '@/lib/stripe/config'
 import { isValidEmail, isValidPhone } from '@/lib/validation'
 
@@ -258,6 +259,10 @@ export async function createBooking(_prev: BookState, formData: FormData): Promi
   if ((booked.rows?.length ?? 0) === 0) {
     return { error: 'Someone just booked that slot. Pick another time.' }
   }
+
+  // Melanite hears about every appointment the moment it takes the laser, whatever the client
+  // is or is not told next. Best effort, like every send here.
+  await notifyMelaniteBooked(bookingId)
 
   // Send the link the moment it exists. Until now it was created and shown to nobody — the
   // provider had no way to get it to the client, which makes the whole checkout flow

@@ -1195,3 +1195,65 @@ empty, documented in `webflow/README.md` rather than as an HTML comment in the f
 a comment there ships to every visitor and puts internal repo paths in view-source for no
 benefit to anyone reading the page. **The field has to be cleared in Webflow and republished,
 or the old code keeps running.**
+
+### Melanite hears about its own calendar — 2026-08-19
+
+Keoni asked to be emailed whenever an appointment is booked or cancelled, the rental room
+included. Everything this app sent went to a **client** or to a **provider**; nothing at all was
+addressed to the business, so the calendar changed under her without a word.
+`melanitelasersuite@gmail.com`, via the existing Resend wrapper.
+
+**Booked means the row was created, not that it was paid for.** That is deliberately the opposite
+rule to `bookingConfirmedEmail`, which waits for the money — and the reasoning does not carry
+over. A client must not be told an appointment is theirs before they have paid; Keoni is being
+told the laser is taken, which is true the moment the row exists. Waiting for a payment would also
+hide most of her calendar from her: a Groupon, cash, package or prepaid booking produces no
+payment event at all.
+
+**The room is the exception, and alerts on `confirmed`.** `startRoomRental` writes a 30-minute
+`pending` hold before sending the provider to Stripe, and a hold is not a rental — it expires on
+its own with nothing to announce. Alerting on it would leave an unmatched booking email behind
+every abandoned checkout. Same reason the Stripe-failure rollback and `releaseExpiredHolds` send
+nothing.
+
+**Not wired up, on purpose:**
+
+- **`createManualBooking`** (`/app/admin/tools`). Keoni is usually the person typing into it, and
+  a past-dated entry lands as `completed` rather than on the upcoming calendar at all. Telling
+  her about her own data entry is noise, and noise is what makes an alert stop being read.
+- **`markNoShow`.** It frees the laser the way a cancellation does but it is not one, and she
+  asked for booked and cancelled.
+- **`refundRoomRental` / `declineRoomRefund`** in the admin queue. Those are her own decisions.
+
+**One call site per booking path, one for every cancellation.** The three creation paths
+(`/app/book`, package redemption, prepaid redemption) have no shared write function — each
+re-implements the same collision-checked INSERT — so each gets its own line. Cancellation is
+different: `notifyCancelled` is already the single funnel all three cancel actions pass through,
+so the alert goes in there. It fires **before** that function's `if (!row?.clientEmail) return`;
+a walk-in with no address still frees the laser, and that is the fact being reported.
+
+**The address is a constant in `lib/email.ts`, not configuration.** `MELANITE_NOTIFY_EMAIL`
+overrides it for a preview environment, but an unset variable must not be able to quietly switch
+the alerts off — which is exactly what a required env var would do the first time somebody
+forgot it in Vercel. It is one business inbox and it changes about never. A `platform_settings`
+column plus an admin field would be a migration and a form for a value nobody is going to edit.
+
+Nothing new reaches a stranger: these go through `sendEmail`, so outside `MELANITE_ENV=prod`
+they are redirected to `EMAIL_REDIRECT_TO` like everything else, and with no redirect set they
+are not sent at all.
+
+**The payment line reads its direction from `PROVIDER_ALREADY_HOLDS`**
+(`lib/payments/direction.ts`) rather than restating it. Groupon, cash and cheques are collected
+by the provider and Melanite invoices its half back; Cherry runs the other way and pays Melanite,
+which then owes the provider. An alert saying "collected by the provider" about a Cherry booking
+would point an invoice at somebody who never touched the money — the same mistake that once put
+providers on the collections list for Groupon revenue. A method the list has never heard of, and
+a null one, claim no direction at all rather than guessing.
+
+**If it becomes noise**, the next step is a per-event toggle in `platform_settings` — not built
+now, because there is nothing to tune until she has lived with it.
+
+The room slot labels ("Full day", "Morning", "Afternoon") moved into `lib/email.ts` and the
+Stripe line item now reads them from there. Three words, two copies, and the copy in the alert
+and the copy on the receipt describing the same block differently is the sort of thing nobody
+notices until a provider asks which one is right.

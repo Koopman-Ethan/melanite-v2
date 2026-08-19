@@ -19,6 +19,7 @@ import {
   services,
 } from '@/lib/db/schema'
 import { appointmentWhen, bookingCancelledEmail, sendEmail } from '@/lib/email'
+import { notifyMelaniteCancelled } from '@/lib/notify-melanite'
 import { chargeBookingFee } from '@/lib/stripe/fees'
 
 // Ported from v1's three booking-action endpoints. The preconditions are theirs, deliberately
@@ -131,7 +132,7 @@ export async function cancelBooking(
  *  Locked v1 decisions kept: always restore, with no cancellation-window cutoff; and an
  *  EXPIRED package gets its session back but stays expired.
  */
-/** Tells the client their appointment is off.
+/** Tells the client their appointment is off, and Melanite that it happened.
  *
  *  The counterpart to the confirmation sent when a payment lands. Once somebody has been told
  *  an appointment exists they will act on it until told otherwise, so confirming without
@@ -140,11 +141,18 @@ export async function cancelBooking(
  *
  *  Best effort, always after the cancellation is committed: a bounced email must never leave a
  *  client believing an appointment still stands.
+ *
+ *  Melanite's own alert is sent from HERE rather than from the three call sites, because this is
+ *  already the one funnel all three cancellations pass through — and it goes out BEFORE the
+ *  client lookup below, which returns early on a booking with no email address on it. A walk-in
+ *  with no address still frees the laser, and that is the fact Keoni is being told.
  */
 async function notifyCancelled(
   bookingId: string,
   returned: false | 'package' | 'prepaid',
 ): Promise<void> {
+  await notifyMelaniteCancelled(bookingId)
+
   try {
     const [row] = await db
       .select({

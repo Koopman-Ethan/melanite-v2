@@ -14,6 +14,8 @@ import {
   type SlotType,
 } from '@/lib/db/queries/room-rental'
 import { roomBookings } from '@/lib/db/schema'
+import { ROOM_SLOT_LABELS } from '@/lib/email'
+import { notifyMelaniteRoomRental } from '@/lib/notify-melanite'
 import { appOrigin } from '@/lib/stripe/config'
 import { friendlyStripeError, stripePost, stripeWritesEnabled } from '@/lib/stripe/client'
 
@@ -205,6 +207,10 @@ export async function cancelRoomRental(rentalId: string): Promise<RentalState> {
       .set({ status: 'cancellation_requested', cancelledAt: new Date() })
       .where(eq(roomBookings.id, rental.id))
 
+    // The alert says the refund is hers to decide, because it is — this row is now sitting in
+    // the admin queue waiting for it.
+    await notifyMelaniteRoomRental(rental.id, 'cancelled', { awaitingRefundDecision: true })
+
     revalidatePath('/app/room-rental')
     return {
       success:
@@ -219,6 +225,8 @@ export async function cancelRoomRental(rentalId: string): Promise<RentalState> {
       .update(roomBookings)
       .set({ status: 'cancellation_requested', cancelledAt: new Date() })
       .where(eq(roomBookings.id, rental.id))
+
+    await notifyMelaniteRoomRental(rental.id, 'cancelled', { awaitingRefundDecision: true })
 
     revalidatePath('/app/room-rental')
     return { success: 'Cancelled. Melanite will confirm the refund separately.' }
@@ -244,16 +252,12 @@ export async function cancelRoomRental(rentalId: string): Promise<RentalState> {
     .set({ status: 'cancelled', cancelledAt: new Date() })
     .where(eq(roomBookings.id, rental.id))
 
+  await notifyMelaniteRoomRental(rental.id, 'cancelled')
+
   revalidatePath('/app/room-rental')
   return { success: `Cancelled and refunded $${Number(rental.price).toFixed(2)}.` }
 }
 
-
-const SLOT_LABELS: Record<SlotType, string> = {
-  full: 'Full day',
-  am: 'Morning',
-  pm: 'Afternoon',
-}
 
 function roomLineItemName(date: string, slot: SlotType): string {
   const [y, m, d] = date.split('-').map(Number)
@@ -263,5 +267,5 @@ function roomLineItemName(date: string, slot: SlotType): string {
     day: 'numeric',
     timeZone: 'UTC',
   })
-  return `Room rental — ${SLOT_LABELS[slot]}, ${label}`
+  return `Room rental — ${ROOM_SLOT_LABELS[slot]}, ${label}`
 }

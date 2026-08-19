@@ -30,6 +30,7 @@ import {
   packageLinkEmail,
   sendEmail,
 } from '@/lib/email'
+import { notifyMelaniteBooked } from '@/lib/notify-melanite'
 import { appOrigin } from '@/lib/stripe/config'
 
 /** Package links live longer than booking links: a four-figure package is a decision, not a
@@ -460,6 +461,10 @@ export async function bookFromPackage(input: {
       .set({ status: 'exhausted' })
       .where(eq(clientPackages.id, input.clientPackageId))
   }
+
+  // Melanite hears about it the same as any other appointment — a redeemed session takes the
+  // laser exactly as a paid one does.
+  await notifyMelaniteBooked(bookingId)
 
   // Nothing else in this flow says a word to the client. A paid booking at least sends them a
   // payment link they can look at; a redemption has no payment, no link and no receipt, so
