@@ -7,6 +7,7 @@ import {
   bookings,
   checkoutLinks,
   packageRedemptions,
+  prepaidRedemptions,
   providerServices,
   services,
 } from '@/lib/db/schema'
@@ -52,6 +53,10 @@ export interface Appointment {
    *  look for a redemption row and refuse with USE_PACKAGE_CANCEL. Cancelling the wrong way
    *  would have destroyed a session the client had already paid for. */
   isPackageRedemption: boolean
+  /** Drew on a prepaid dollar balance. Decides which cancel is offered, exactly as the
+   *  flag above does — cancelling one of these as an ordinary booking would keep the
+   *  client's money and give them nothing. */
+  isPrepaidRedemption: boolean
 }
 
 /** Month boundaries computed in America/Denver. A booking at 7pm Mountain on the 31st is
@@ -107,6 +112,11 @@ export async function getAppointments(
         where ${packageRedemptions}.booking_id = ${bookings}.id
           and ${packageRedemptions}.voided_at is null
       )`,
+      isPrepaidRedemption: sql<boolean>`exists (
+        select 1 from ${prepaidRedemptions}
+        where ${prepaidRedemptions}.booking_id = ${bookings}.id
+          and ${prepaidRedemptions}.voided_at is null
+      )`,
     })
     .from(bookings)
     .innerJoin(providerServices, eq(bookings.providerServiceId, providerServices.id))
@@ -160,6 +170,11 @@ async function getAppointmentsById(providerId: string, bookingId: string) {
         select 1 from ${packageRedemptions}
         where ${packageRedemptions}.booking_id = ${bookings}.id
           and ${packageRedemptions}.voided_at is null
+      )`,
+      isPrepaidRedemption: sql<boolean>`exists (
+        select 1 from ${prepaidRedemptions}
+        where ${prepaidRedemptions}.booking_id = ${bookings}.id
+          and ${prepaidRedemptions}.voided_at is null
       )`,
     })
     .from(bookings)

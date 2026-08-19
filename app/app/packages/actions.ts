@@ -486,6 +486,7 @@ export async function bookFromPackage(input: {
           // Null, not "$0.00": nothing was charged today, and a receipt-shaped zero invites
           // the question of what happened to their money.
           amount: null,
+          coveredBy: 'package',
         }),
       })
     } catch (err) {

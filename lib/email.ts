@@ -283,13 +283,19 @@ export function bookingConfirmedEmail(input: {
   providerName: string
   serviceName: string
   when: string
-  /** Null for a package redemption — nothing was charged today. */
+  /** Null when nothing was charged today, which is not the same as free — see `coveredBy`. */
   amount: string | null
+  /** What covered it when `amount` is null. Required in practice: telling somebody who bought a
+   *  prepaid balance that their session "came from a package" describes a product they did not
+   *  buy, and the two are genuinely different things. */
+  coveredBy?: 'package' | 'prepaid'
 }): Omit<EmailMessage, 'to'> {
   const first = input.clientName.split(' ')[0]
   const paid = input.amount
     ? `Paid: ${input.amount}. Stripe has emailed your receipt separately.`
-    : 'This session came from a package you have already paid for.'
+    : input.coveredBy === 'prepaid'
+      ? 'This appointment was paid from the prepaid balance you already hold.'
+      : 'This session came from a package you have already paid for.'
 
   return {
     subject: `Confirmed: ${input.serviceName} on ${input.when}`,
@@ -330,13 +336,17 @@ export function bookingCancelledEmail(input: {
   providerName: string
   serviceName: string
   when: string
-  /** True when the session went back onto a package, so they know they have not lost it. */
-  sessionReturned: boolean
+  /** What went back to the client, if anything. Three states rather than a boolean and a
+   *  separate "which kind" flag, so "nothing returned, to a package" cannot be expressed. */
+  returned: false | 'package' | 'prepaid'
 }): Omit<EmailMessage, 'to'> {
   const first = input.clientName.split(' ')[0]
-  const reassurance = input.sessionReturned
-    ? 'The session has been returned to your package — nothing has been lost, and you can book it again whenever suits.'
-    : 'If you have already paid, any refund will come back to your original payment method.'
+  const reassurance =
+    input.returned === 'package'
+      ? 'The session has been returned to your package — nothing has been lost, and you can book it again whenever suits.'
+      : input.returned === 'prepaid'
+        ? 'The amount has gone back onto your prepaid balance — nothing has been lost, and you can put it towards another appointment whenever suits.'
+        : 'If you have already paid, any refund will come back to your original payment method.'
 
   return {
     subject: `Cancelled: ${input.serviceName} on ${input.when}`,

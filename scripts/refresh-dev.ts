@@ -103,33 +103,58 @@ function assertDistinct(sourceUrl: string, targetUrl: string): void {
 }
 
 /**
- * Refuses to continue unless both databases are on the same migration.
+ * Refuses to continue when DEV IS BEHIND production. Dev being ahead is allowed and normal.
  *
- * A data-only restore assumes the two schemas match. If they do not, the failure is not
- * always loud: a column dev does not have yet makes `pg_dump` output that errors on COPY, which
- * is fine, but a column dev has and production does not restores as NULL or a default, quietly.
- * Better to refuse and let somebody run the migration.
+ * A data-only restore reads production's rows into dev's schema, so the two directions are not
+ * the same problem:
+ *
+ *  - Dev BEHIND production is genuinely broken. `pg_dump` emits a COPY naming a column dev does
+ *    not have, and the restore dies partway. It also means somebody forgot to migrate dev.
+ *  - Dev AHEAD of production is the ordinary state of a schema under development. A column dev
+ *    has and production does not takes its default, which is the only value it could possibly
+ *    take: production holds no data for a column it has never had.
+ *
+ * This used to require exact equality, which was wrong in a way only production could show.
+ * Every feature branch that adds a migration puts dev ahead, so the nightly job broke on the
+ * first one and would have stayed broken until that feature shipped. It then told the operator
+ * to run `npm run db:migrate`, which does nothing when dev is already ahead — advice that
+ * cannot work is worse than none, because it sends somebody looking in the wrong place.
+ *
+ * The narrow risk accepted here: a new NOT NULL column with a meaningful default makes restored
+ * rows read as though production had asserted something it never did. It is dev, the default is
+ * the only available answer, and the alternative is a job that is broken more often than not.
  */
-async function assertSameSchema(sourceUrl: string, targetUrl: string): Promise<void> {
-  const latest = async (url: string): Promise<string> => {
+async function assertDevNotBehind(sourceUrl: string, targetUrl: string): Promise<void> {
+  const state = async (url: string) => {
     const rows = (await neon(url)`
-      SELECT coalesce(max(created_at)::text, 'none') AS v FROM drizzle.__drizzle_migrations
-    `) as { v: string }[]
-    return rows[0]?.v ?? 'none'
+      SELECT coalesce(max(created_at), 0)::text AS latest, count(*)::int AS n
+        FROM drizzle.__drizzle_migrations
+    `) as { latest: string; n: number }[]
+    return { latest: BigInt(rows[0]?.latest ?? '0'), count: Number(rows[0]?.n ?? 0) }
   }
 
-  const [source, target] = await Promise.all([latest(sourceUrl), latest(targetUrl)])
+  const [source, target] = await Promise.all([state(sourceUrl), state(targetUrl)])
 
-  if (source !== target) {
+  if (target.latest < source.latest) {
     throw new Error(
       [
-        `Refusing to refresh: the two databases are on different migrations.`,
+        `Refusing to refresh: dev is BEHIND production.`,
         ``,
-        `  ${describe(sourceUrl)} — ${source}`,
-        `  ${describe(targetUrl)} — ${target}`,
+        `  ${describe(sourceUrl)} — ${source.latest} (${source.count} migrations)`,
+        `  ${describe(targetUrl)} — ${target.latest} (${target.count} migrations)`,
         ``,
+        `  Production has schema dev does not, so the restore would fail partway.`,
         `  Bring dev up to date first:  npm run db:migrate`,
       ].join('\n'),
+    )
+  }
+
+  if (target.latest > source.latest) {
+    // Said out loud rather than passed over. It is expected, but "dev has schema production has
+    // never seen" is worth knowing when appdev later behaves in a way production would not.
+    console.log(
+      `Dev is ahead of production by ${target.count - source.count} migration(s) — expected ` +
+        `while a feature is unshipped. Columns production does not have take their defaults.\n`,
     )
   }
 }
@@ -290,10 +315,10 @@ async function main() {
   console.log(`  from  ${describe(sourceUrl)}  (read only)`)
   console.log(`  into  ${describe(targetUrl)}  (replaced)\n`)
 
-  await assertSameSchema(sourceUrl, targetUrl)
+  await assertDevNotBehind(sourceUrl, targetUrl)
   await assertOwnsTables(targetUrl)
   await assertPgDumpVersion(sourceUrl)
-  console.log('Preflight passed — same migration, table ownership, and pg_dump new enough.\n')
+  console.log('Preflight passed — dev not behind, table ownership, and pg_dump new enough.\n')
 
   // --data-only: the schema is owned by the migrations, not by production. Restoring
   // production's schema would make dev's migration history a fiction.

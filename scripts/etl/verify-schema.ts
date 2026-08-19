@@ -37,7 +37,7 @@ const rows = async (q: Sql, sql: string) =>
 
 const CHECKS: Check[] = [
   {
-    label: '24 tables',
+    label: '27 tables',
     because: 'a missing table means a migration did not run at all',
     run: async (q) =>
       (
@@ -45,7 +45,7 @@ const CHECKS: Check[] = [
           q,
           `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'`,
         )
-      ).length === 24,
+      ).length === 27,
   },
   {
     label: 'btree_gist installed',

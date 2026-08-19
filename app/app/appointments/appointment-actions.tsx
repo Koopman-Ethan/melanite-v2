@@ -8,6 +8,7 @@ import type { Appointment } from '@/lib/db/queries/appointments'
 import {
   cancelBooking,
   cancelPackageRedemption,
+  cancelPrepaidBooking,
   markCompleted,
   markNoShow,
   type ActionState,
@@ -15,20 +16,47 @@ import {
 
 /** Actions available on one appointment.
  *
- *  Which cancel is offered comes from `isPackageRedemption`, so the provider is never asked to
+ *  Which cancel is offered comes from the booking itself, so the provider is never asked to
  *  know the difference. In v1 both paths looked identical — a redemption came back as an
  *  ordinary $0 booking — and picking wrong destroyed a paid session, which is why the backend
  *  had to refuse with USE_PACKAGE_CANCEL. Here the right button is simply the only one shown.
+ *
+ *  There are three now: an ordinary cancel, one that returns a package session, and one that
+ *  returns prepaid money. The third was missing for a day — the server action existed, was
+ *  tested, and refused the ordinary cancel with a message naming a button nobody had built,
+ *  which left the provider reading an instruction they could not follow. Exactly what the
+ *  paragraph above says this component exists to prevent.
  */
 export function AppointmentActions({ appointment }: { appointment: Appointment }) {
   const [pending, startTransition] = useTransition()
   const [state, setState] = useState<ActionState>({})
   const [confirming, setConfirming] = useState<'cancel' | 'no_show' | null>(null)
 
-  if (appointment.status !== 'upcoming') return null
+  // NOT a bare `return null`.
+  //
+  // Every action here moves the appointment out of `upcoming` — cancel, complete, no-show — so
+  // the instant one succeeds this component stops rendering and takes its own confirmation with
+  // it. The provider sees a green flash too brief to read and has no way to tell a cancellation
+  // that returned $75 from one that did not.
+  //
+  // Fixing it with a timer would not work: the message is not fading, it is being unmounted.
+  // So the buttons go and the message stays, until the provider navigates away.
+  if (appointment.status !== 'upcoming') {
+    if (!state.success && !state.feeNote) return null
+    return (
+      <div className="space-y-1">
+        {state.success && <p className="text-xs text-success">{state.success}</p>}
+        {state.feeNote && <p className="text-xs text-warning">{state.feeNote}</p>}
+      </div>
+    )
+  }
 
   const isPast = appointment.startTime <= new Date()
   const restoresSession = appointment.isPackageRedemption
+  const returnsBalance = appointment.isPrepaidRedemption
+  // Either kind of prepaid value coming back. Both refuse the ordinary cancel server-side, so
+  // this decides which of the two specific buttons is offered.
+  const returnsValue = restoresSession || returnsBalance
 
   const run = (fn: (id: string) => Promise<ActionState>) => {
     startTransition(async () => {
@@ -81,18 +109,28 @@ export function AppointmentActions({ appointment }: { appointment: Appointment }
           <p className="text-xs text-ink-secondary">
             {restoresSession
               ? 'Cancel this appointment and return the session to the client’s package?'
-              : 'Cancel this appointment? The client’s payment link will be cancelled if it is still unpaid.'}
+              : returnsBalance
+                ? 'Cancel this appointment and put the money back on the client’s prepaid balance? Anything they have already paid on a card is refunded in Stripe, not here.'
+                : 'Cancel this appointment? The client’s payment link will be cancelled if it is still unpaid.'}
           </p>
           <div className="flex flex-wrap gap-2">
             <Button
               size="sm"
               variant="danger"
               disabled={pending}
-              onClick={() => run(restoresSession ? cancelPackageRedemption : cancelBooking)}
+              onClick={() =>
+                run(
+                  restoresSession
+                    ? cancelPackageRedemption
+                    : returnsBalance
+                      ? cancelPrepaidBooking
+                      : cancelBooking,
+                )
+              }
             >
               {pending ? 'Cancelling…' : 'Yes, cancel'}
             </Button>
-            {!restoresSession && canCharge && (
+            {!returnsValue && canCharge && (
               <Button
                 size="sm"
                 variant="outline"
@@ -125,7 +163,11 @@ export function AppointmentActions({ appointment }: { appointment: Appointment }
             </>
           )}
           <Button size="sm" variant="ghost" disabled={pending} onClick={() => setConfirming('cancel')}>
-            {restoresSession ? 'Cancel and restore session' : 'Cancel'}
+            {restoresSession
+              ? 'Cancel and restore session'
+              : returnsBalance
+                ? 'Cancel and return the balance'
+                : 'Cancel'}
           </Button>
         </div>
       )}

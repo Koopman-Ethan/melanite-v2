@@ -101,6 +101,10 @@ export const discountType = pgEnum('discount_type', ['none', 'percent', 'amount'
 export const bookingPaymentSource = pgEnum('booking_payment_source', [
   'checkout_link',
   'package_redemption',
+  /** Paid from a prepaid dollar balance. Set whenever ANY balance was applied, including a
+   *  partial one that still left something on a card — `prepaid_redemptions.amount_applied` is
+   *  the figure, and a `price` above zero says the rest was owed. */
+  'prepaid',
   'comped',
   /** Paid outside the app — Groupon, Cherry, cash, a card in person. WHICH of those is on
    *  `bookings.externalMethod`, because the route and the method are different questions and
@@ -125,6 +129,11 @@ export const clientPackageStatus = pgEnum('client_package_status', [
 /** A provider can hold more than one of these at once, and they mean completely different
  *  things: `medical_director` is a booking gate, `epicutis` is content and wholesale access
  *  that unlocks nothing in this app. Code that touches a subscription must say which. */
+/** No `expired` and no `refunded`: Keoni's decision is that a prepaid balance never expires
+ *  and is never refunded, so those states cannot arise. Adding them "just in case" would
+ *  invite code that handles a case the product does not have. */
+export const prepaidStatus = pgEnum('prepaid_status', ['active', 'exhausted'])
+
 export const membershipPlan = pgEnum('membership_plan', ['medical_director', 'epicutis'])
 
 export const membershipStatus = pgEnum('membership_status', ['active', 'past_due', 'cancelled'])
@@ -170,6 +179,11 @@ export const ledgerSource = pgEnum('ledger_source', [
    *  makes every revenue report answer a question nobody asked. */
   'epicutis',
   'training',
+  /** A dollar balance bought up front and spent on whatever the client books later. Its own
+   *  source rather than a flavour of `package`: a package is sessions of a NAMED service, and
+   *  reporting that folds the two together cannot answer "how much unspent credit is out
+   *  there", which is the only question a never-expiring balance raises. */
+  'prepaid',
 ])
 
 /** Who handed over the money. This is what makes `SUM(melanite_cut)` mean the same thing
@@ -192,6 +206,7 @@ export const ledgerSubjectType = pgEnum('ledger_subject_type', [
   'room_booking',
   'membership',
   'training_enrollment',
+  'prepaid_balance',
 ])
 
 export const payoutStatus = pgEnum('payout_status', ['pending', 'paid', 'failed'])
@@ -764,6 +779,134 @@ export const packageCheckoutLinks = pgTable('package_checkout_links', {
 ])
 
 // ---------------------------------------------------------------------------
+// Prepaid balances
+// ---------------------------------------------------------------------------
+
+/** Money paid up front and spent later on whatever the client books.
+ *
+ *  NOT a package. A package is N sessions of a NAMED service; this is a dollar amount good for
+ *  anything. The distinction was Keoni's and it is about who carries a price rise: a client who
+ *  prepaid a session owns that session whatever it later costs, whereas a client holding $200
+ *  gets $200 of whatever the price is on the day. She wanted the second, so the provider is not
+ *  out of pocket on a balance that sits for a year.
+ *
+ *  Never expires and is never refunded, both decided 2026-08-18. `purchasedAt` is therefore not
+ *  decoration: it is the only date this row has, and it is what any future unclaimed-property
+ *  rule would key on.
+ */
+export const prepaidBalances = pgTable('prepaid_balances', {
+  id: uuid().primaryKey().defaultRandom(),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  /** Scoped to the provider it was bought from. The split is paid out at PURCHASE, so another
+   *  provider redeeming it would be working against money already sitting in someone else's
+   *  Stripe account. */
+  providerId: uuid()
+    .notNull()
+    .references(() => providers.id, { onDelete: 'restrict' }),
+  /** The beneficiary, not the payer. A gift is bought by one person for another, and it is this
+   *  column that makes "link their payment under a specific client" true. */
+  clientId: uuid()
+    .notNull()
+    .references(() => clients.id, { onDelete: 'restrict' }),
+
+  originalAmount: money().notNull(),
+  /** Stored rather than derived from the redemptions.
+   *
+   *  The rest of this codebase prefers deriving, and for reporting that is right. This one is
+   *  a claim: two bookings must not spend the same dollar, so it is decremented by a
+   *  conditional UPDATE that only succeeds while the money is there — exactly what
+   *  `client_package_items.qty_used` does for a session, and for the same race. */
+  remainingAmount: money().notNull(),
+
+  purchasedAt: timestamp({ withTimezone: true }),
+  status: prepaidStatus().notNull().default('active'),
+
+  /** Who paid, when that is not the beneficiary. Recorded because a gift is the one case where
+   *  the person on the Stripe receipt is not the person holding the balance, and "who bought
+   *  this" is unanswerable from `clients` alone. */
+  purchaserName: text(),
+  purchaserEmail: text(),
+}, (t) => [
+  index().on(t.clientId, t.status),
+  index().on(t.providerId, t.status),
+  // Oldest-first spending reads this.
+  index().on(t.clientId, t.purchasedAt),
+  check(
+    'prepaid_balances_remaining_in_range',
+    sql`${t.remainingAmount} >= 0 AND ${t.remainingAmount} <= ${t.originalAmount}`,
+  ),
+])
+
+/** Append-only: one row per booking that drew on a balance.
+ *
+ *  `voidedAt` set means the booking was cancelled and the money went back — the row stays for
+ *  audit and must be excluded from any total. Same shape as `package_redemptions`, and for the
+ *  same reason: deleting the row would erase the fact that the money ever moved. */
+export const prepaidRedemptions = pgTable('prepaid_redemptions', {
+  id: uuid().primaryKey().defaultRandom(),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  prepaidBalanceId: uuid()
+    .notNull()
+    .references(() => prepaidBalances.id, { onDelete: 'cascade' }),
+  bookingId: uuid()
+    .notNull()
+    .references(() => bookings.id, { onDelete: 'restrict' }),
+  /** What this booking actually took. Not the service price — a $250 service against a $180
+   *  balance applies $180 and leaves $70 on a card. */
+  amountApplied: money().notNull(),
+  redeemedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  voidedAt: timestamp({ withTimezone: true }),
+}, (t) => [
+  index().on(t.prepaidBalanceId),
+  index().on(t.bookingId),
+  // One draw per booking PER BALANCE, not one per booking.
+  //
+  // package_redemptions is unique on booking_id alone and that is right for it — a booking
+  // consumes exactly one session. This is money, and oldest-first spending means a $220
+  // service can legitimately draw $50 off one balance and $170 off the next. Keying on the
+  // booking alone would refuse the second row and reject precisely the case the feature
+  // exists for, while still leaving the first balance debited.
+  uniqueIndex().on(t.bookingId, t.prepaidBalanceId),
+  check('prepaid_redemptions_amount_positive', sql`${t.amountApplied} > 0`),
+])
+
+/** Purchase links, mirroring `packageCheckoutLinks`. */
+export const prepaidCheckoutLinks = pgTable('prepaid_checkout_links', {
+  id: uuid().primaryKey().defaultRandom(),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  token: text().notNull(),
+  providerId: uuid()
+    .notNull()
+    .references(() => providers.id, { onDelete: 'cascade' }),
+  /** Resolved when the link is CREATED, not from whoever pays it. That is the whole of the
+   *  gifting requirement — a mother can pay her daughter's link and the balance is the
+   *  daughter's. */
+  clientId: uuid()
+    .notNull()
+    .references(() => clients.id, { onDelete: 'restrict' }),
+
+  /** The amount quoted when the link was sent. Snapshotted for the same reason the package
+   *  link snapshots its price: the client sees a number in a text message and must be charged
+   *  that number. */
+  amount: money().notNull(),
+
+  purchaserName: text(),
+  purchaserEmail: text(),
+
+  status: checkoutLinkStatus().notNull().default('pending'),
+  stripeCustomerId: text(),
+  stripePaymentIntentId: text(),
+  /** The balance this link produced, once paid. */
+  prepaidBalanceId: uuid().references(() => prepaidBalances.id, { onDelete: 'set null' }),
+  paidAt: timestamp({ withTimezone: true }),
+  expiresAt: timestamp({ withTimezone: true }).notNull(),
+}, (t) => [
+  uniqueIndex().on(t.token),
+  index().on(t.providerId, t.status),
+  index().on(t.stripePaymentIntentId),
+])
+
+// ---------------------------------------------------------------------------
 // Memberships
 // ---------------------------------------------------------------------------
 
@@ -1105,6 +1248,7 @@ export const bookingsRelations = relations(bookings, ({ one, many }) => ({
   client: one(clients, { fields: [bookings.clientId], references: [clients.id] }),
   checkoutLink: one(checkoutLinks),
   redemption: one(packageRedemptions),
+  prepaidRedemption: one(prepaidRedemptions),
   ledgerEntries: many(ledgerEntries),
 }))
 
@@ -1162,6 +1306,32 @@ export const packageRedemptionsRelations = relations(packageRedemptions, ({ one 
     references: [clientPackageItems.id],
   }),
   booking: one(bookings, { fields: [packageRedemptions.bookingId], references: [bookings.id] }),
+}))
+
+export const prepaidBalancesRelations = relations(prepaidBalances, ({ one, many }) => ({
+  provider: one(providers, { fields: [prepaidBalances.providerId], references: [providers.id] }),
+  client: one(clients, { fields: [prepaidBalances.clientId], references: [clients.id] }),
+  redemptions: many(prepaidRedemptions),
+}))
+
+export const prepaidRedemptionsRelations = relations(prepaidRedemptions, ({ one }) => ({
+  balance: one(prepaidBalances, {
+    fields: [prepaidRedemptions.prepaidBalanceId],
+    references: [prepaidBalances.id],
+  }),
+  booking: one(bookings, { fields: [prepaidRedemptions.bookingId], references: [bookings.id] }),
+}))
+
+export const prepaidCheckoutLinksRelations = relations(prepaidCheckoutLinks, ({ one }) => ({
+  provider: one(providers, {
+    fields: [prepaidCheckoutLinks.providerId],
+    references: [providers.id],
+  }),
+  client: one(clients, { fields: [prepaidCheckoutLinks.clientId], references: [clients.id] }),
+  balance: one(prepaidBalances, {
+    fields: [prepaidCheckoutLinks.prepaidBalanceId],
+    references: [prepaidBalances.id],
+  }),
 }))
 
 export const membershipsRelations = relations(memberships, ({ one }) => ({

@@ -43,6 +43,7 @@ export const APP_DESTINATIONS: readonly string[] = [
   '/app/membership',
   '/app/oversight',
   '/app/packages',
+  '/app/prepaid',
   '/app/room-rental',
   '/app/services',
   '/onboarding',
