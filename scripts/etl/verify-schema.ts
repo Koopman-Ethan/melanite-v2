@@ -2,9 +2,13 @@ import { readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { neon, type NeonQueryFunction } from '@neondatabase/serverless'
+import { getTableName, is } from 'drizzle-orm'
+import { PgTable } from 'drizzle-orm/pg-core'
 
 import '../../envConfig'
 import { describeDatabase, requireEnv } from '../../lib/env-guard'
+import * as schema from '@/lib/db/schema'
+import { db } from '../db'
 
 // Does this database have the schema we think it has?
 //
@@ -27,7 +31,10 @@ interface Check {
   label: string
   /** Why it matters, in the terms of what breaks. Printed on failure. */
   because: string
-  run: (q: Sql) => Promise<boolean>
+  /** `true` passes. A STRING fails and is printed instead of `because` — for checks that can
+   *  say which object is missing, which is the difference between "go and look" and "go and
+   *  fix this one thing at 11pm". */
+  run: (q: Sql) => Promise<boolean | string>
 }
 
 type Sql = NeonQueryFunction<false, false>
@@ -35,17 +42,86 @@ type Sql = NeonQueryFunction<false, false>
 const rows = async (q: Sql, sql: string) =>
   (await q.query(sql)) as Record<string, unknown>[]
 
+/** Every table the application code declares, read out of the schema module rather than listed
+ *  here. A hand-maintained list is a second source of truth that goes stale silently. */
+const appTables = (): PgTable[] => Object.values(schema).filter((v) => is(v, PgTable))
+
+/** Every enum, likewise. `enumName` is written explicitly in the schema, so unlike column names
+ *  it needs no casing conversion. */
+const appEnums = (): { enumName: string; enumValues: readonly string[] }[] =>
+  // Through `unknown` so the predicate is legal: the union of everything the schema module
+  // exports is far wider than the shape being narrowed to.
+  (Object.values(schema) as unknown[]).filter(
+    (v): v is { enumName: string; enumValues: readonly string[] } =>
+      !!v &&
+      typeof v === 'object' &&
+      'enumName' in v &&
+      Array.isArray((v as { enumValues?: unknown }).enumValues),
+  )
+
+const firstLine = (err: unknown) => String(err).split('\n')[0].replace(/^Error:\s*/, '')
+
 const CHECKS: Check[] = [
+  // Replaces a hardcoded "27 tables" count, which was weaker in both directions: it needed
+  // editing on every migration, and a database that had gained one table while losing another
+  // still counted 27 and passed.
   {
-    label: '27 tables',
-    because: 'a missing table means a migration did not run at all',
-    run: async (q) =>
-      (
-        await rows(
-          q,
-          `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'`,
-        )
-      ).length === 27,
+    label: 'every table and column the code reads',
+    because: 'the app queries columns by name; one that is not there takes the page down',
+    run: async (q) => {
+      // Drizzle generates the SQL, so this asks the question the APPLICATION asks — same
+      // casing cache, same column list — rather than a copy of it that can drift. EXPLAIN
+      // plans the statement without executing it, which is enough to resolve every table and
+      // column named in it, and reads nothing.
+      //
+      // This is the check that would have caught 2026-08-19: `prepaid_redemptions` was
+      // missing, `/app/appointments` was down for every provider, and the schema still
+      // counted the number of tables it expected to see minus three.
+      const broken: string[] = []
+
+      for (const table of appTables()) {
+        const { sql } = db.select().from(table).toSQL()
+        try {
+          await q.query(`EXPLAIN ${sql}`)
+        } catch (err) {
+          broken.push(`${getTableName(table)} — ${firstLine(err)}`)
+        }
+      }
+
+      return broken.length === 0 ? true : broken.join('\n       ')
+    },
+  },
+  {
+    label: 'every enum value the code uses',
+    because:
+      'ALTER TYPE ... ADD VALUE is its own statement and is the easiest half of a migration to leave behind',
+    run: async (q) => {
+      // Not covered by the check above: a SELECT plans perfectly well against an enum that is
+      // missing a value. It is the INSERT that fails, later, in production, on the one payment
+      // source nobody tested.
+      const live = new Map<string, Set<string>>()
+      for (const r of await rows(
+        q,
+        `SELECT t.typname, e.enumlabel FROM pg_type t JOIN pg_enum e ON e.enumtypid = t.oid`,
+      )) {
+        const name = r.typname as string
+        if (!live.has(name)) live.set(name, new Set())
+        live.get(name)!.add(r.enumlabel as string)
+      }
+
+      const gaps: string[] = []
+      for (const e of appEnums()) {
+        const have = live.get(e.enumName)
+        if (!have) {
+          gaps.push(`${e.enumName} — the type does not exist`)
+          continue
+        }
+        const missing = e.enumValues.filter((v) => !have.has(v))
+        if (missing.length > 0) gaps.push(`${e.enumName} — missing ${missing.join(', ')}`)
+      }
+
+      return gaps.length === 0 ? true : gaps.join('\n       ')
+    },
   },
   {
     label: 'btree_gist installed',
@@ -145,7 +221,11 @@ async function main() {
     let pass = false
     let error: string | null = null
     try {
-      pass = await check.run(q)
+      const result = await check.run(q)
+      pass = result === true
+      // A returned string is a failure that knows what is wrong, and says so instead of
+      // falling back to the generic `because`.
+      if (typeof result === 'string') error = result
     } catch (err) {
       error = String(err)
     }
