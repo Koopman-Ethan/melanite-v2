@@ -1301,3 +1301,19 @@ and `db:verify` is how you know. `db:migrate`, never `db:migrate:kit` — 0025 c
 Worth noting what did NOT go wrong: the migration runner, rewritten twice already, applied both
 files correctly on the first attempt — all 25 statements, keyed on the journal's `when`. The
 gap was never the tool. It was that nothing asked the question.
+
+**`db:verify` now asks a stronger question than it did.** It counted tables — a hardcoded 27,
+needing an edit every migration, and blind to a database that had gained one table while losing
+another. It now checks **every table and every column the code reads**, by having Drizzle
+generate the same SQL the application generates and asking Postgres to `EXPLAIN` it. Same casing
+cache, same column list, no hand-copied query to drift, and nothing is executed or read.
+
+**Enum values are checked separately, because a SELECT plans straight past a missing one.**
+Confirmed rather than assumed: `explain select payment_source from bookings` succeeds against a
+`booking_payment_source` that has never heard of `prepaid`. It is the INSERT that fails, later,
+on the one payment source nobody tested — so the two halves of migration 0025 need two different
+checks to catch them.
+
+Both detectors were proved to fire before being trusted, by asking the live database about a
+table, a column and an enum value that do not exist. A check that has only ever printed `ok` is
+not evidence of anything.
