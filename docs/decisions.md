@@ -1257,3 +1257,47 @@ The room slot labels ("Full day", "Morning", "Afternoon") moved into `lib/email.
 Stripe line item now reads them from there. Three words, two copies, and the copy in the alert
 and the copy on the receipt describing the same block differently is the sort of thing nobody
 notices until a provider asks which one is right.
+
+### Production ran for ten hours without the tables its code required — 2026-08-19
+
+The prepaid/gift-card feature merged to main and deployed. Its code went live; migrations 0025
+and 0026 were never applied to production. So `prepaid_balances`, `prepaid_redemptions` and
+`prepaid_checkout_links` did not exist, and 25 of 27 migrations showed as applied.
+
+**Everything whose query MENTIONS a missing table dies; everything else keeps working.** That is
+what made it hard to read. `/app/appointments` returned a server error for every provider,
+because `getAppointments` runs `exists (… from prepaid_redemptions …)` on every row and
+Postgres cannot plan a query against a table that is not there. Cancelling was broken for the
+same reason — `cancelBooking` reads `prepaid_redemptions` as a guard before it changes
+anything, so it threw first. Meanwhile the DASHBOARD was fine, because `getNextAppointment` is
+deliberately a narrower shape that never touches prepaid.
+
+The provider who reported it described exactly that split without knowing why: "It shows two
+upcoming appointments but I can't actually see them." An app that is half-alive reads as a
+product bug, and she reasonably assumed she had done something wrong.
+
+Client payments were never affected. The prepaid references in `app/pay/actions.ts`,
+`lib/db/queries/checkout.ts` and `lib/stripe/handlers.ts` all sit inside prepaid-only branches,
+which nothing could reach because no prepaid link could exist.
+
+**Nothing caught it and nothing structurally could have:**
+
+- **The vitest suite runs against DEV**, which has every migration applied. A suite pointed at
+  dev cannot see production schema drift, however green it is. It was green when main was
+  pushed, twice, on the day this was already broken.
+- **Vercel deploys code.** It has no idea a migration exists.
+- `db:verify` finds it in one command and nobody had a reason to run it.
+
+It surfaced because a provider texted Keoni, roughly ten hours in. That is the worst available
+monitoring, and it is what `.github/workflows/prod-schema-check.yml` now replaces: `db:verify`
+against production on every push to main, daily at 10:10 UTC, and on demand. It uses the same
+read-only production role as the nightly refresh, so it is incapable of writing.
+
+**The rule this encodes:** a merge to main that carries a migration is not finished when the
+deploy is green. `MELANITE_ENV_FILE=.env.migration npm run db:migrate` is part of shipping it,
+and `db:verify` is how you know. `db:migrate`, never `db:migrate:kit` — 0025 contains
+`ALTER TYPE … ADD VALUE`, which is the 55P04 case above.
+
+Worth noting what did NOT go wrong: the migration runner, rewritten twice already, applied both
+files correctly on the first attempt — all 25 statements, keyed on the journal's `when`. The
+gap was never the tool. It was that nothing asked the question.
