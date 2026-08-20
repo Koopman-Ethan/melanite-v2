@@ -1,0 +1,102 @@
+name: Production schema check
+
+# Does production have the schema the code on main expects?
+#
+# WHY THIS EXISTS
+#
+# On 2026-08-19 the prepaid/gift-card feature merged to main and deployed. Its CODE went live;
+# its MIGRATIONS did not. Production sat without `prepaid_balances`, `prepaid_redemptions` and
+# `prepaid_checkout_links` for about ten hours, during which `/app/appointments` returned a
+# server error for every provider — `getAppointments` runs an `exists (… from
+# prepaid_redemptions …)` on every row, and Postgres cannot plan a query against a table that
+# is not there. Cancelling an appointment was broken for the same reason. It surfaced because a
+# provider texted Keoni, which is the worst available monitoring.
+#
+# Nothing caught it, and nothing structurally could have:
+#
+#   - The vitest suite runs against DEV, which has every migration applied. A test suite
+#     pointed at dev can never see production schema drift, however green it is.
+#   - Vercel deploys code. It has no idea a migration exists.
+#   - `db:verify` would have found it in one command, and nobody had a reason to run it.
+#
+# So it runs here instead of relying on somebody remembering on the night they are tired.
+#
+# WHY IT IS SAFE
+#
+# `verify-schema.ts` only reads — no DDL, no DML — and the credential is the same read-only
+# production role the nightly refresh uses. Read-only by intention AND by grant, so this
+# workflow is incapable of touching production even if something in it is wrong.
+
+on:
+  # The moment that matters: a deploy just went out, so ask immediately whether the database
+  # underneath it agrees with the code. A failure here means the schema is behind and something
+  # is already broken in production — not that a future deploy might be.
+  push:
+    branches: [main]
+
+  schedule:
+    # 10:10 UTC. Drift does not only arrive by push: a migration applied by hand can fail
+    # halfway, and `scripts/migrate.ts` runs without a transaction precisely so that enum
+    # changes work, which means a partial application is a real state.
+    #
+    # Deliberately not on the hour — GitHub queues everything set to :00 — and deliberately
+    # after the 09:40 dev refresh rather than beside it.
+    - cron: '10 10 * * *'
+
+  workflow_dispatch:
+
+# A queued run tells you nothing the newer one will not. Cancel it.
+concurrency:
+  group: prod-schema-check
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      # Stated, never inferred — `requireEnv` refuses an absent value, and a branch name says
+      # where the code is, never where the data is. Scoped to this job, which is unrelated to
+      # the Vercel variable of the same name (that one is deliberately absent from Preview;
+      # see docs/decisions.md).
+      MELANITE_ENV: prod
+      DATABASE_URL: ${{ secrets.PROD_DATABASE_URL_READONLY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # `npm ci`, not `npm install` — see AGENTS.md. If this step fails on a lock file the
+      # tests were happy with, the lock was written by npm 11 and needs `npx npm@10 install`.
+      - run: npm ci
+
+      # Fails the run when a table is missing, a guarantee is absent, or the journal is short
+      # of the migrations on disk. The output names the host it checked and never the
+      # credentials.
+      - name: Verify production schema matches the migrations on disk
+        run: npm run db:verify
+
+      - name: What to do when this fails
+        if: failure()
+        run: |
+          echo "::error::Production's schema does not match the migrations on this commit."
+          echo ""
+          echo "Something in production is very likely broken RIGHT NOW — a missing table"
+          echo "takes down every page whose query mentions it, while pages that avoid it keep"
+          echo "working, so the app looks half-alive rather than down."
+          echo ""
+          echo "Apply the pending migrations from a machine with production credentials:"
+          echo ""
+          echo "  MELANITE_ENV_FILE=.env.migration npm run db:migrate"
+          echo "  MELANITE_ENV_FILE=.env.migration npm run db:verify"
+          echo ""
+          echo "Use db:migrate, NOT db:migrate:kit. drizzle-kit wraps the whole run in one"
+          echo "transaction, and 'ALTER TYPE ... ADD VALUE' followed by a use of that value"
+          echo "raises 55P04 there. scripts/migrate.ts sends statements one at a time."
+          echo ""
+          echo "No redeploy is needed afterwards: the code is already live and correct."
