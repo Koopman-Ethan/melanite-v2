@@ -42,10 +42,10 @@ export function licenseStatus(
   expiry: string | null | undefined,
   now: Date = new Date(),
 ): LicenseStatus {
-  // Deliberately its own state rather than folded into 'ok'. `isLicenseExpired` treats a
-  // missing date as "not expired", which is defensible for a gate that must not lock out
-  // imported rows — but it is not something to repeat here, where the whole point is to make
-  // the situation visible.
+  // Its own state rather than folded into 'ok', and the booking gate now reads it that way
+  // too: `hasCurrentLicense` in `lib/auth/dal.ts` blocks on 'missing' as well as 'expired'.
+  // It did not always — a null expiry is not an expired one, so a provider with no licence
+  // recorded passed the check — and this distinction is what the fix was built on.
   if (!expiry) return { state: 'missing', daysLeft: null }
 
   const daysLeft = daysBetween(denverToday(now), expiry)

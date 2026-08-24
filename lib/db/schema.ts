@@ -66,6 +66,22 @@ export const providerStatus = pgEnum('provider_status', ['pending', 'active', 'i
  *  app can know — those appointments never touch this system. */
 export const practiceType = pgEnum('practice_type', ['laser', 'room_only'])
 
+/** Where the money from this provider's appointments ends up.
+ *
+ *  `split` — the normal arrangement. The client pays Melanite's platform account, the
+ *  provider's share is forwarded to their Connect account as a destination charge, and
+ *  Melanite keeps `platform_settings.provider_share_pct` as an application fee.
+ *
+ *  `house` — the provider IS Melanite. There is nobody to transfer to and no share to
+ *  calculate: the charge stays on the platform account, the whole amount including any tip is
+ *  `melanite_cut`, and `provider_payout` is zero. Same shape training already writes.
+ *
+ *  A column rather than `role = 'platform_owner'` on purpose. Roles decide what somebody may
+ *  SEE; this decides where money GOES, and letting a permission field carry that means a second
+ *  admin who is an ordinary revenue-share provider would silently keep 100%. Same reasoning
+ *  that keeps `fee_provider_share_pct` separate from `provider_share_pct`. */
+export const providerRevenueModel = pgEnum('provider_revenue_model', ['split', 'house'])
+
 export const medicalDirectorType = pgEnum('medical_director_type', ['melanite', 'own'])
 
 /** The booking gate. `melanite` path mirrors the Stripe subscription; `own` path is set
@@ -329,6 +345,12 @@ export const providers = pgTable('providers', {
   /** When they made that declaration. Without it, an empty list cannot be told apart from a
    *  question nobody has answered yet — and those need very different handling. */
   roomProceduresDeclaredAt: timestamp({ withTimezone: true }),
+
+  /** Where this provider's client money ends up. See `providerRevenueModel`.
+   *
+   *  A `house` provider needs NO Connect account, and should not have one — that is the point.
+   *  Every other provider defaults to `split`, so this changes nothing for them. */
+  revenueModel: providerRevenueModel().notNull().default('split'),
 
   // Stripe Connect (money out, to the provider).
   stripeAccountId: text(),
