@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { and, eq, sql } from 'drizzle-orm'
+import { and, eq, ne, sql } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
 import { isUniqueViolation } from '@/lib/db/errors'
@@ -35,7 +35,7 @@ import {
 } from '@/lib/email'
 
 import { splitClientPayment, toCents, toMoney } from '@/lib/money'
-import { notifyMelaniteRoomRental } from '@/lib/notify-melanite'
+import { notifyBookingAccessChanged, notifyMelaniteRoomRental } from '@/lib/notify-melanite'
 
 import { appOrigin, planFromMetadata } from './config'
 import { stripeGet } from './client'
@@ -938,11 +938,20 @@ export async function handleInvoicePaid(invoice: StripeInvoiceObject): Promise<H
   // Paying restores the gate — but ONLY for the director plan. This line used to run for any
   // subscription invoice carrying a provider_id, so buying a $95 content membership would have
   // granted physician oversight. That is a compliance problem, not a data one.
+  //
+  // Conditional, and the returned rows are the signal that it MOVED. An ordinary monthly
+  // invoice arrives while the provider is already active, and telling somebody their booking
+  // access has been restored when it was never lost is noise that teaches them to ignore the
+  // message that matters.
+  let reopened = false
   if (plan === 'medical_director') {
-    await db
+    const moved = await db
       .update(providers)
       .set({ medicalDirectorStatus: 'active' })
-      .where(eq(providers.id, providerId))
+      .where(and(eq(providers.id, providerId), ne(providers.medicalDirectorStatus, 'active')))
+      .returning({ id: providers.id })
+
+    reopened = moved.length > 0
   }
 
   await db
@@ -950,7 +959,12 @@ export async function handleInvoicePaid(invoice: StripeInvoiceObject): Promise<H
     .set({ status: 'active' })
     .where(and(eq(memberships.providerId, providerId), eq(memberships.plan, plan)))
 
-  return { handled: true, detail: `${plan} invoice recorded for ${providerId}` }
+  if (reopened) await notifyBookingAccessChanged(providerId, 'active')
+
+  return {
+    handled: true,
+    detail: `${plan} invoice recorded for ${providerId}${reopened ? ' (booking access restored)' : ''}`,
+  }
 }
 
 export async function handleInvoicePaymentFailed(
@@ -966,11 +980,21 @@ export async function handleInvoicePaymentFailed(
 
   // The same trap as the paid path, in reverse: a failed card on a $95 content subscription
   // would have marked the provider's MEDICAL DIRECTION past due and closed the booking gate.
+  //
+  // Conditional, because THIS handler has no replay guard and needs none: Stripe re-sends
+  // `invoice.payment_failed` on every dunning retry for two to three weeks. An unconditional
+  // update is harmless — it writes past_due over past_due — but notifying from it would mail
+  // the provider about one decline half a dozen times. The row count is the transition, decided
+  // by Postgres, so two concurrent deliveries produce one winner and one no-op.
+  let closed = false
   if (plan === 'medical_director') {
-    await db
+    const moved = await db
       .update(providers)
       .set({ medicalDirectorStatus: 'past_due' })
-      .where(eq(providers.id, providerId))
+      .where(and(eq(providers.id, providerId), ne(providers.medicalDirectorStatus, 'past_due')))
+      .returning({ id: providers.id })
+
+    closed = moved.length > 0
   }
 
   await db
@@ -978,7 +1002,12 @@ export async function handleInvoicePaymentFailed(
     .set({ status: 'past_due' })
     .where(and(eq(memberships.providerId, providerId), eq(memberships.plan, plan)))
 
-  return { handled: true, detail: `${plan} past_due for ${providerId}` }
+  if (closed) await notifyBookingAccessChanged(providerId, 'past_due')
+
+  return {
+    handled: true,
+    detail: `${plan} past_due for ${providerId}${closed ? ' (booking access paused)' : ' (already past due)'}`,
+  }
 }
 
 /** Covers created / updated / deleted. v1 subscribed to customer.subscription.updated but had
@@ -1047,16 +1076,26 @@ export async function handleSubscriptionChanged(
   // And only the DIRECTOR plan closes it at all. Cancelling Epicutis used to set
   // medicalDirectorStatus to inactive, which would have revoked a provider's ability to book
   // because they stopped paying for a content subscription.
+  let closed = false
   if (ended && plan === 'medical_director') {
-    await db
+    const moved = await db
       .update(providers)
       .set({ medicalDirectorStatus: 'inactive' })
-      .where(eq(providers.id, providerId))
+      .where(and(eq(providers.id, providerId), ne(providers.medicalDirectorStatus, 'inactive')))
+      .returning({ id: providers.id })
+
+    closed = moved.length > 0
   }
+
+  // Only from the gate transition above, never from the event. Stripe sent THREE events for the
+  // decline on 2026-08-23 — two subscription.updated and one invoice.payment_failed — and the
+  // membership row above is written on every one of them. Hanging the notification on the
+  // provider column instead is what makes that one email rather than three.
+  if (closed) await notifyBookingAccessChanged(providerId, 'inactive')
 
   return {
     handled: true,
-    detail: `${plan} subscription ${sub.id} -> ${ended ? 'ended' : sub.status}`,
+    detail: `${plan} subscription ${sub.id} -> ${ended ? 'ended' : sub.status}${closed ? ' (booking access ended)' : ''}`,
   }
 }
 
