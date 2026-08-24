@@ -17,7 +17,7 @@ import {
   prepaidCheckoutLinks,
   providers,
 } from '@/lib/db/schema'
-import { splitClientPayment, toCents, toMoney } from '@/lib/money'
+import { splitClientPayment, splitHouse, toCents, toMoney } from '@/lib/money'
 import { friendlyStripeError, stripePost } from '@/lib/stripe/client'
 import { isValidEmail } from '@/lib/validation'
 
@@ -95,12 +95,19 @@ export async function createBookingIntent(input: {
   if (!booking) return { error: 'That appointment no longer exists.' }
 
   const [provider] = await db
-    .select({ stripeAccountId: providers.stripeAccountId })
+    .select({
+      stripeAccountId: providers.stripeAccountId,
+      revenueModel: providers.revenueModel,
+    })
     .from(providers)
     .where(eq(providers.id, booking.providerId))
     .limit(1)
 
-  if (!provider?.stripeAccountId) {
+  // Melanite treating its own client. There is no second party, so there is nothing to transfer
+  // and no Connect account to require — and requiring one is all this guard would achieve.
+  const house = provider?.revenueModel === 'house'
+
+  if (!house && !provider?.stripeAccountId) {
     return { error: 'This provider cannot accept payments yet. Contact them directly.' }
   }
 
@@ -109,11 +116,13 @@ export async function createBookingIntent(input: {
   const tipCents = toCents(tip)
   // The SAME function the webhook uses to write the ledger row, so what Stripe takes and what
   // the books record cannot drift apart.
-  const { melaniteCutCents: feeCents } = splitClientPayment({
-    grossCents: priceCents,
-    tipCents,
-    providerSharePct: settings.providerSharePct,
-  })
+  const { melaniteCutCents: feeCents } = house
+    ? splitHouse({ grossCents: priceCents, tipCents })
+    : splitClientPayment({
+        grossCents: priceCents,
+        tipCents,
+        providerSharePct: settings.providerSharePct,
+      })
 
   try {
     const clientId = await ensureClientRow({
@@ -136,8 +145,15 @@ export async function createBookingIntent(input: {
       // the card's last four and a permanent hosted URL, and a refund later produces a matching
       // refund receipt with no work at all. Training already did this; bookings never did.
       receipt_email: input.clientEmail,
-      transfer_data: { destination: provider.stripeAccountId },
-      application_fee_amount: feeCents,
+      // A house appointment omits BOTH of these rather than sending a zero transfer: the charge
+      // simply stays on the platform account, which is what training does and what was verified
+      // against a real intent showing `transfer_data: null`.
+      ...(house
+        ? {}
+        : {
+            transfer_data: { destination: provider!.stripeAccountId },
+            application_fee_amount: feeCents,
+          }),
       // Saving the card is what makes a no-show fee collectable at all. It is the client's
       // choice, and declining must not block the payment.
       ...(input.saveCard ? { setup_future_usage: 'off_session' } : {}),
@@ -149,6 +165,10 @@ export async function createBookingIntent(input: {
         tip_amount: toMoney(toCents(tip)),
         save_card: input.saveCard ? '1' : '0',
         card_policy_version: settings.cardPolicyVersion,
+        // Carried so the webhook writes the ledger the way this intent was built. The mode is
+        // otherwise read twice, independently, with nothing joining the two reads — and a flag
+        // flipped in between would leave Stripe's fee and the books disagreeing.
+        revenue_model: house ? 'house' : 'split',
       },
     })
 

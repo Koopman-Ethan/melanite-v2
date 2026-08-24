@@ -4,6 +4,7 @@ import { cache } from 'react'
 import { redirect } from 'next/navigation'
 
 import { canSeeOversight, isAdmin } from './roles'
+import { licenseStatus } from '@/lib/license'
 import { getSessionUser, type SessionUser } from './session'
 
 // The Data Access Layer. Per the Next 16 authentication guide, `proxy.ts` performs only an
@@ -56,7 +57,7 @@ export async function requireOversight(): Promise<SessionUser> {
  *  All must pass:
  *   - `bookingEnabled`         manual admin flip once documents are confirmed on file
  *   - `medicalDirectorStatus`  the credential / subscription gate
- *   - `licenseExpiry`          a lapsed professional license blocks booking outright
+ *   - `licenseExpiry`          a lapsed OR missing professional license blocks booking
  *
  *  Account status is a fourth, handled upstream: getSessionUser() signs out an inactive
  *  provider rather than letting them reach a gate at all. */
@@ -64,8 +65,23 @@ export function canBook(user: SessionUser): boolean {
   return (
     user.bookingEnabled &&
     user.medicalDirectorStatus === 'active' &&
-    !isLicenseExpired(user)
+    hasCurrentLicense(user)
   )
+}
+
+/** A licence that is BOTH on file and in date.
+ *
+ *  `isLicenseExpired` alone is not the gate, and used as one it left a hole: a null expiry is
+ *  not expired, so a provider with no licence recorded at all passed the licence check. That was
+ *  defensible while the column was full of imported rows nobody wanted to lock out, and it is
+ *  not defensible now — the first person it would have waved through is the platform owner.
+ *
+ *  The states come from `lib/license.ts`, which already distinguishes `missing` from `expired`
+ *  for the account page and the admin roster. One definition of what a licence state is, rather
+ *  than a fourth. */
+export function hasCurrentLicense(user: SessionUser): boolean {
+  const { state } = licenseStatus(user.licenseExpiry)
+  return state !== 'missing' && state !== 'expired'
 }
 
 /** Compared as a calendar date in America/Denver, not a timestamp — a license valid "through
@@ -79,8 +95,9 @@ export function isLicenseExpired(user: SessionUser): boolean {
 export interface BlockedGate {
   gate: 'booking_enabled' | 'medical_director' | 'license'
   message: string
-  /** Where the provider can act on it themselves, if anywhere. Documents and license renewal
-   *  both go through Keoni, so those have no self-serve route. */
+  /** Where the provider can act on it themselves, if anywhere. Cleared documents still go
+   *  through Keoni and have no self-serve route; the licence does — the account page is where
+   *  the number and expiry are entered. */
   href?: string
   action?: string
 }
@@ -122,10 +139,19 @@ export function bookingBlockedReasons(user: SessionUser): BlockedGate[] {
     })
   }
 
-  if (isLicenseExpired(user)) {
+  // Two different situations wearing one word. "Expired" tells somebody to renew; "we have no
+  // licence for you" tells them to go and enter one, and sending the second person to renew
+  // something they never recorded is how a gate turns into a support message.
+  const license = licenseStatus(user.licenseExpiry)
+  if (license.state === 'missing' || license.state === 'expired') {
     blocked.push({
       gate: 'license',
-      message: `Your professional license expired on ${user.licenseExpiry}. Renew it, then contact Melanite to update your record.`,
+      message:
+        license.state === 'missing'
+          ? 'There is no professional license on your account. Add its number and expiry date before booking.'
+          : `Your professional license expired on ${user.licenseExpiry}. Renew it, then update the date on your account.`,
+      href: '/app/account',
+      action: license.state === 'missing' ? 'Add your license' : 'Update your license',
     })
   }
 

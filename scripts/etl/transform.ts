@@ -102,6 +102,12 @@ export function transformProvider(p: XanoProvider): typeof providers.$inferInser
     stripeBillingCustomerId: p.stripe_billing_customer_id,
     medicalDirectorType: p.medical_director_type,
     medicalDirectorStatus: p.medical_director_status,
+    // `revenueModel` is deliberately absent: v1 has no such concept, so every imported provider
+    // correctly takes the 'split' default. It is a v2-only decision, and `load.ts --force`
+    // truncates `providers` — so a reload would silently move a 'house' provider back onto the
+    // revenue share, and their next appointment would transfer money to a Connect account they
+    // do not have. Same shape as the catalogue problem: anything the ETL rebuilds cannot hold a
+    // v2 decision unless something re-applies it afterwards.
     bookingEnabled: p.booking_enabled,
     roomRentalEnabled: p.room_rental_enabled,
     trainingCertDocumentId: p.training_cert_document_id,

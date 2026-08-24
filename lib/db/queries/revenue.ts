@@ -226,6 +226,11 @@ export async function getOwedByProvider(): Promise<OwedByProvider[]> {
         eq(bookings.paymentSource, 'external'),
         sql`${bookings.externalMethod} <> 'cherry'`,
         sql`${bookings.status} <> 'cancelled'`,
+        // Melanite's own appointments are not a debt Melanite owes itself. This query reads
+        // `bookings` rather than the ledger, so it would pick one up the moment Keoni took a
+        // cash or Groupon client — and hand her an invoice addressed to herself, counted into
+        // a total she is meant to go and chase.
+        sql`${providers.revenueModel} <> 'house'`,
         sql`not exists (
           select 1 from ${ledgerEntries}
           where ${ledgerEntries}.subject_type = 'booking'

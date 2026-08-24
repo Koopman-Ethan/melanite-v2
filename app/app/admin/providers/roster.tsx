@@ -248,10 +248,10 @@ export function Roster({
                 </button>
               </div>
 
-              {/* Only an EXPIRED license blocks. An expiring one still works, and a missing
-                  one passes the gate entirely — `isLicenseExpired` reads a null as not-expired.
-                  Saying "the gate will block them" for either would be plainly false, and a
-                  warning that is wrong twice out of three times is one nobody reads. */}
+              {/* Expired and missing BOTH block now — `hasCurrentLicense` treats a null expiry
+                  as no licence rather than as a valid one. An expiring licence still works, so
+                  it is deliberately not warned about here; a warning that fires when nothing is
+                  wrong is one nobody reads. */}
               {provider.bookingEnabled && license.state === 'expired' && (
                 <p className="mt-2 text-xs text-warning">
                   Booking is on, but the license expired — the license gate blocks them
@@ -260,8 +260,8 @@ export function Roster({
               )}
               {provider.bookingEnabled && license.state === 'missing' && (
                 <p className="mt-2 text-xs text-warning">
-                  Booking is on with no license on file. Nothing stops them: the license gate
-                  treats a missing date as valid.
+                  Booking is on but there is no license on file, so the license gate blocks them
+                  regardless of this toggle. They need to add it on their account.
                 </p>
               )}
 

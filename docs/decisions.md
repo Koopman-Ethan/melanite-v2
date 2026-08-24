@@ -1387,3 +1387,81 @@ email, and the code says so in a comment to stop the next person "fixing" it.
   `subjectId: membership?.id ?? providerId`, which is the same "defensive" fallback pattern
   removed from the ETL in July and still live here. The fixture now creates a membership, which
   is realistic; **the fallback itself is still there and is worth removing separately.**
+
+### Melanite treats its own clients — 2026-08-24
+
+Keoni wanted to schedule her own clients and keep the money. She could not: her provider row had
+`booking_enabled = false`, no priced services, and no Stripe Connect account.
+
+Almost none of that was UI work. `providers` is one table for every human, so she already WAS a
+provider row, and `canBook` is not role-based at all. What did not work was the money.
+
+**Every booking payment is a destination charge.** The client pays the platform account, the
+provider's share is transferred to their connected account, and Melanite's cut is taken as an
+`application_fee_amount`. When the provider IS Melanite there is nobody to transfer to — and the
+code did not mis-split, it refused outright: `createBookingIntent` returns "This provider cannot
+accept payments yet" on a null account, and `getCheckoutByToken` marks the link `unpayable` for
+the same reason, so the pay page would not even render a button.
+
+**`providers.revenue_model` = `split` | `house`, not `role = 'platform_owner'`.** Roles decide
+what somebody may SEE. This decides where money GOES, and a permission field carrying that means
+the second admin — one who is an ordinary revenue-share provider — silently keeps 100%. Same
+reasoning that keeps `fee_provider_share_pct` separate from `provider_share_pct`.
+
+**The ledger needed no migration.** `provider_payout = 0, melanite_cut = gross + tip` on a
+`source='booking'`, `payer='client'` row satisfies both CHECK constraints — the unsplit one only
+fires on `payer = 'provider'`. It is the mirror image of the provider-sold Groupon voucher the
+schema comment already describes. A test now asserts it rather than assuming it.
+
+**`splitHouse` is its own function, and the test that matters proves why.**
+`splitClientPayment({ providerSharePct: 0 })` is legal and looks like the obvious way to express
+this. It is wrong: the tip is excluded from the fee base by design, so at a share of zero 100% of
+every tip still routes to the provider. Untipped the two agree exactly, which is what makes it
+easy to miss — so the test uses a tipped payment deliberately.
+
+**The mode is stamped into the PaymentIntent metadata.** The share was read twice, independently
+— once at intent creation, once in the webhook — with nothing joining the two reads. Carrying
+`revenue_model` in metadata costs nothing, needs no extra column, and closes the window where a
+flag flipped mid-checkout would leave Stripe's fee and the books disagreeing. The webhook falls
+back to the provider row only for intents created before the field existed, which are all
+`split` anyway.
+
+**The fee path was the dangerous one.** `chargeBookingFee` already tolerated a missing Connect
+account and degraded to a plain platform charge, so nothing would have thrown — it would simply
+have kept splitting the fee 50/50 and stamping `payout_status: 'paid'`, understating Melanite by
+half of every no-show fee on a row that looked settled. Wrong numbers, no error, no symptom.
+
+**The licence gate had a hole, and closing it was a prerequisite rather than a nicety.**
+`isLicenseExpired` returns false for a null expiry, so a provider with NO licence on file passed
+the licence check outright. Four places in the repo documented this and none fixed it. The gate
+now uses `hasCurrentLicense`, which reads `lib/license.ts`'s existing `missing` state rather than
+inventing a fourth licence concept — and "expired" and "never recorded" now say different things,
+because telling somebody to renew a licence they never entered is how a gate becomes a support
+message.
+
+Checked before changing it: of nine production providers, the three with no expiry are Keoni,
+Ethan and Brandon, and none had `booking_enabled`. It broke nobody. It DID apply to Keoni, which
+is why her licence had to be on file first — she holds an Idaho esthetician licence
+(`EST-254813`, expires 2027-08-27) and an RN licence (`65517`, expires 2027-08-31). The
+esthetician one is recorded: it covers the treatments in this catalogue and expires first, so the
+gate watches the one that lapses first. **The schema holds one licence per provider**, so the RN
+licence is held in no form at all and nothing will notice if it lapses.
+
+Two test fixtures were quietly exercising the hole and had to be corrected rather than made to
+pass: `test/gates.test.ts` had `licenseExpiry: null` in its base user and an explicit test
+asserting that a missing licence was fine. The e2e roster spec asserted the page said "nothing
+stops them", which was true of the old code and is now false — the copy moved with the gate.
+
+**Verified end to end against the Stripe sandbox**, which is the only thing that proves it. On a
+dev provider who DOES have a Connect account — so the branch could not be passing by accident —
+the created intent came back `transfer_data: null`, `application_fee_amount: null`,
+`metadata.revenue_model: "house"`. Paying it wrote `provider_payout 0.00 / melanite_cut 180.00 /
+payout_status paid`, and a late-cancellation fee on the same booking wrote
+`0.00 / 50.00 / paid` with its own intent also carrying no transfer.
+
+**Not done:** packages and prepaid balances still hard-abort on a missing Connect account
+(`createPackageIntent`, `createPrepaidIntent`), so a house provider can book but cannot sell
+either. Nobody has asked for it; it is the same three-line branch when they do. The Earnings page
+is also left alone — it would honestly read zero earned for her, since her payout genuinely is
+zero, while the money shows on `/app/admin/revenue`. Nav keeps it hidden from admins, so nobody
+meets the contradiction.

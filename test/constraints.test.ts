@@ -170,6 +170,36 @@ describe('ledger check constraints', () => {
     )
   })
 
+  it('ACCEPTS a house booking, where Melanite keeps everything', async () => {
+    // The mirror image of the provider-sold Groupon voucher the schema comment describes:
+    // `provider_payout = 0, melanite_cut = gross + tip` for an appointment Melanite performed
+    // itself. Worth asserting rather than assuming, because the shape is unusual enough to look
+    // like a bug — and because `ledger_entries_provider_paid_is_unsplit` only exempts it by a
+    // short-circuit: the payer is 'client', not 'provider', so the constraint never fires.
+    await db.execute(sql`
+      INSERT INTO ledger_entries
+        (source, payer, entry_type, subject_type, subject_id, provider_id,
+         gross_amount, tip_amount, provider_payout, melanite_cut, payment_method,
+         stripe_payment_intent_id, payout_status, note)
+      VALUES ('booking', 'client', 'purchase', 'booking', gen_random_uuid(),
+              ${providerId}::uuid, '180.00', '25.00', '0.00', '205.00', 'stripe',
+              ${`pi_${TAG}_house`}, 'paid', ${TAG})
+    `)
+
+    const [row] = (
+      await db.execute<{ provider_payout: string; melanite_cut: string; payout_status: string }>(
+        sql`SELECT provider_payout, melanite_cut, payout_status FROM ledger_entries
+            WHERE stripe_payment_intent_id = ${`pi_${TAG}_house`}`,
+      )
+    ).rows
+
+    expect(row.provider_payout).toBe('0.00')
+    expect(row.melanite_cut).toBe('205.00')
+    // Nothing is owed to anybody, so it is settled on arrival. Left 'pending' it would sit in
+    // the payout queue for ever describing a payment nobody is going to make.
+    expect(row.payout_status).toBe('paid')
+  })
+
   it('refuses a Stripe entry with no Stripe reference', async () => {
     // Without one it cannot be reconciled, and is indistinguishable from a mislabelled manual
     // entry.

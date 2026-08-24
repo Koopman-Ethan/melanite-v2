@@ -15,8 +15,9 @@ import type { SessionUser } from '@/lib/auth/session'
 export interface NavItem {
   label: string
   href: string
-  /** Hidden from admin-view roles. In v1 this was the BUG-15 HIDE array — an admin does not
-   *  book, has no earnings, and holds no membership, so those surfaces are noise. */
+  /** Hidden from admin-view roles who do not themselves practise. In v1 this was the BUG-15
+   *  HIDE array, on the assumption that an admin never books — which stopped being true when
+   *  the platform owner started treating her own clients. See `practises`. */
   providerOnly?: boolean
   /** Shown only to the medical director. His surfaces are neither provider nor admin. */
   directorOnly?: boolean
@@ -36,6 +37,19 @@ const ADMIN_VIEW_ROLES = new Set<SessionUser['role']>([
 
 export function isAdminView(user: SessionUser): boolean {
   return ADMIN_VIEW_ROLES.has(user.role)
+}
+
+/** Does this person treat clients, whatever else they are?
+ *
+ *  Keyed on `bookingEnabled` rather than on a role or on `revenueModel`. The question the nav
+ *  is asking is "do they need the booking surfaces", and that is what the flag Keoni already
+ *  flips to let somebody book means — no new concept, and nothing to keep in step.
+ *
+ *  It deliberately reads the flag rather than `canBook`: an admin blocked by a DIFFERENT gate
+ *  still needs the Book link, because the page behind it is the one that explains why they are
+ *  blocked. Hiding it would leave them with no route to the explanation. */
+export function practises(user: SessionUser): boolean {
+  return user.bookingEnabled
 }
 
 /** Dashboard is the one item whose destination depends on who you are — v1 expressed this as
@@ -77,7 +91,7 @@ export function navFor(user: SessionUser): NavItem[] {
 
   return ITEMS.filter(
     (item) =>
-      !(item.providerOnly && adminView) &&
+      !(item.providerOnly && adminView && !practises(user)) &&
       !(item.adminOnly && !admin) &&
       !(item.directorOnly && !director) &&
       // Dashboard is the director's Oversight page, so listing both is one link too many.
