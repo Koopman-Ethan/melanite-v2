@@ -1317,3 +1317,73 @@ checks to catch them.
 Both detectors were proved to fire before being trusted, by asking the live database about a
 table, a column and an enum value that do not exist. A check that has only ever printed `ok` is
 not evidence of anything.
+
+### A provider lost the ability to book and nobody was told — 2026-08-24
+
+On 2026-08-23 at 11:36 Denver, a provider's $150 medical-director renewal was declined by her
+issuing bank. Everything downstream worked: the webhook arrived, verified, and
+`handleInvoicePaymentFailed` set `medical_director_status` and the membership row to
+`past_due`, which is correct.
+
+`canBook()` requires `active`, so from that moment she could not create appointments. **Nothing
+said so.** Not to her, not to Melanite. Keoni found it a day later by opening Stripe; the
+provider may not have found it at all, since there is no banner until you try to book and are
+turned away.
+
+We had shipped an alert five days earlier for an appointment being booked. Silently revoking a
+provider's ability to work is the larger event, and it was the one nothing covered.
+
+**Notify on the TRANSITION of `providers.medical_director_status`, never on the Stripe event.**
+That single decision is most of this change. Stripe sent THREE events for that one decline — two
+`customer.subscription.updated` and one `invoice.payment_failed` — and dunning re-sends
+`invoice.payment_failed` on every retry for two to three weeks. Hanging mail off the event would
+have told her about one decline roughly six times, and the sixth is read as carefully as the
+first.
+
+So the four writes to that column became conditional, and the returned rows ARE the signal:
+
+    .where(and(eq(providers.id, providerId), ne(providers.medicalDirectorStatus, 'past_due')))
+    .returning({ id: providers.id })
+
+Postgres decides, atomically, so two concurrent deliveries produce one winner and one no-op —
+race-safe as well as replay-safe, the same property the invite claim and the package session
+claim already lean on. `handleInvoicePaymentFailed` has no replay guard and needs none: writing
+`past_due` over `past_due` was always harmless, and only the notification made it matter.
+
+**The fourth writer is the admin tool.** `recordMedicalDirectorPayment` opens the gate when
+Keoni records a direct payment. The provider is told; Melanite is not, because the admin standing
+there is the person who just did it — the same rule that keeps the manual booking tool off the
+calendar alerts.
+
+**Never say "your card".** The provider this was written for pays by Link, which carries no card
+object at all — already recorded here for `paymentMethodType`, and it applies to the copy as
+much as the code. "Update your card" sends somebody looking for something that does not exist.
+The email says "the payment method on file".
+
+**It leads with what is NOT broken.** Existing appointments stand; only creating new ones is
+blocked. That is true, and it is the difference between a provider updating their billing and a
+provider ringing every client on their week.
+
+**Melanite's copy names whether it is hers to deal with**, from whether the provider has a
+`stripe_billing_customer_id`. With one they can fix it in the portal themselves; without one
+they cannot, however clear the email, and it needs her. An alert that reports an event without
+saying whether to act on it just moves the question.
+
+**`notifyMembershipBilling` is deliberately NOT honoured.** It exists, sits in account settings
+as a live toggle, and is read by nothing — so gating this on it looks like tidying up. It is not
+a billing reminder; it is notice that somebody cannot work. Same argument as the cancellation
+email, and the code says so in a comment to stop the next person "fixing" it.
+
+**Two things the tests found that reasoning did not:**
+
+- The notifier cannot resolve a URL outside a request scope — `appOrigin()` calls `headers()`,
+  which throws — so the suite prints a swallowed error per transition. That is the notifier being
+  reached and failing safe, and production is always inside a request. The test file says so, and
+  says not to silence it: the presence of that line, and its ABSENCE on the replayed retries, is
+  itself the evidence that one decline sends one email.
+- A fixture provider with no membership row made `handleInvoicePaid` write a
+  `subject_type = 'membership'` ledger entry pointing at a PROVIDER, failing
+  `ledger-invariants` — the exact shape that suite exists to catch. Caused by
+  `subjectId: membership?.id ?? providerId`, which is the same "defensive" fallback pattern
+  removed from the ETL in July and still live here. The fixture now creates a membership, which
+  is realistic; **the fallback itself is still there and is worth removing separately.**
