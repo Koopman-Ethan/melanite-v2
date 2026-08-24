@@ -828,3 +828,163 @@ export function deskRoomRentalEmail(input: {
     ),
   }
 }
+
+// ---------------------------------------------------------------------------
+// Booking access — when the medical-director gate opens or closes
+//
+// `canBook` requires `medicalDirectorStatus === 'active'`, so a failed subscription payment
+// silently revokes a provider's ability to create appointments. On 2026-08-23 that happened to
+// a real provider and nothing told her or Melanite; it was found a day later, in Stripe.
+//
+// Sent on the TRANSITION of that column, never per Stripe event — see the handlers for why.
+// ---------------------------------------------------------------------------
+
+/** Tells a provider their booking access has closed.
+ *
+ *  Three things this has to say, in this order of importance:
+ *
+ *  1. **Existing appointments still stand.** Only creating new ones is blocked, which is true,
+ *     and it is the difference between a provider fixing their billing and a provider ringing
+ *     every client on their week in a panic.
+ *  2. What to do about it.
+ *  3. For `past_due`, that Stripe keeps retrying — and that the subscription cancels if those
+ *     run out, which is a harder state to come back from than a billing update.
+ *
+ *  Never says "your card". The provider this was written for pays by Link, which carries no card
+ *  object at all — the same trap already recorded for `paymentMethodType`. "Update your card"
+ *  sends somebody looking for something that is not there.
+ *
+ *  Not gated on `providers.notifyMembershipBilling`, deliberately. That toggle exists, is shown
+ *  in account settings and is read by nothing, so gating this on it would look like tidying up.
+ *  It is not a billing reminder; it is notice that somebody cannot work. Same argument as the
+ *  cancellation email.
+ */
+export function bookingAccessLostEmail(input: {
+  firstName: string
+  reason: 'past_due' | 'inactive'
+  url: string
+}): Omit<EmailMessage, 'to'> {
+  const pastDue = input.reason === 'past_due'
+
+  const what = pastDue
+    ? 'The payment for your medical director subscription did not go through, so booking is paused on your account.'
+    : 'Your medical director subscription has ended, so booking is paused on your account.'
+
+  const fix = pastDue
+    ? 'Update the payment method on file and booking switches back on by itself, usually within a few minutes of the payment clearing.'
+    : 'Start the subscription again and booking switches back on by itself.'
+
+  const urgency = pastDue
+    ? 'The payment will be retried automatically over the next couple of weeks. If those retries do not succeed the subscription is cancelled, which takes more to undo than a billing update — so it is worth sorting out now.'
+    : null
+
+  return {
+    subject: pastDue
+      ? 'Action needed — booking is paused on your Melanite account'
+      : 'Your medical director subscription has ended',
+    text: [
+      `Hi ${input.firstName},`,
+      '',
+      what,
+      '',
+      'Appointments already in your calendar are not affected — they stand, and your clients',
+      'need do nothing. What is paused is creating NEW appointments.',
+      '',
+      fix,
+      ...(urgency ? ['', urgency] : []),
+      '',
+      'Manage it here:',
+      input.url,
+    ].join('\n'),
+    html: wrap(
+      'Booking is paused on your account',
+      p(`Hi ${input.firstName},`) +
+        p(what) +
+        p(
+          '<strong>Appointments already in your calendar are not affected</strong> — they stand, ' +
+            'and your clients need do nothing. What is paused is creating new appointments.',
+        ) +
+        p(fix) +
+        (urgency ? p(urgency) : ''),
+      { label: 'Manage your subscription', url: input.url },
+    ),
+  }
+}
+
+/** Booking is back on. Short on purpose — it closes a loop the message above opened, and the
+ *  only fact that matters is that they can work again. */
+export function bookingAccessRestoredEmail(input: {
+  firstName: string
+  url: string
+}): Omit<EmailMessage, 'to'> {
+  return {
+    subject: 'Booking is back on for your Melanite account',
+    text: [
+      `Hi ${input.firstName},`,
+      '',
+      'Your medical director subscription is up to date and booking is switched back on. You can',
+      'create appointments again straight away.',
+      '',
+      input.url,
+    ].join('\n'),
+    html: wrap(
+      'Booking is back on',
+      p(`Hi ${input.firstName},`) +
+        p(
+          'Your medical director subscription is up to date and booking is switched back on. ' +
+            'You can create appointments again straight away.',
+        ),
+      { label: 'Open Melanite', url: input.url },
+    ),
+  }
+}
+
+/** Tells Melanite that a provider's booking access changed.
+ *
+ *  `canSelfServe` is the line Keoni actually acts on: a provider with a Stripe billing customer
+ *  can fix a past-due subscription themselves in the portal, and one without cannot and needs
+ *  her. Leaving it out would report that something happened and leave her to work out whether
+ *  it is hers to deal with. */
+export function deskProviderAccessEmail(input: {
+  event: 'lost' | 'restored'
+  providerName: string
+  reason: 'past_due' | 'inactive' | 'active'
+  canSelfServe: boolean
+  url: string
+}): Omit<EmailMessage, 'to'> {
+  const lost = input.event === 'lost'
+
+  const why = !lost
+    ? 'Their subscription is paid up, and they have been told.'
+    : input.reason === 'past_due'
+      ? 'A subscription payment was declined, so they cannot create appointments until it is paid.'
+      : 'Their subscription has ended, so they cannot create appointments until it is restarted.'
+
+  const action = !lost
+    ? null
+    : input.canSelfServe
+      ? 'They can fix this themselves in the Stripe billing portal from their Membership page, and they have been emailed a link to it. Nothing is needed from you unless they ask.'
+      : 'They have no billing account on file, so they CANNOT fix this themselves — this one needs you.'
+
+  return {
+    subject: lost
+      ? `Booking paused: ${input.providerName}`
+      : `Booking restored: ${input.providerName}`,
+    text: [
+      lost
+        ? `${input.providerName} has lost the ability to book.`
+        : `${input.providerName} can book again.`,
+      '',
+      why,
+      ...(action ? ['', action] : []),
+      '',
+      'Providers:',
+      input.url,
+    ].join('\n'),
+    html: wrap(
+      lost ? 'A provider cannot book' : 'A provider can book again',
+      p(`<strong>${input.providerName}</strong>`) + p(why) + (action ? p(action) : ''),
+      { label: 'Open the provider roster', url: input.url },
+    ),
+  }
+}

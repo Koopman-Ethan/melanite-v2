@@ -2,7 +2,7 @@
 
 import { randomBytes } from 'node:crypto'
 
-import { and, eq, sql } from 'drizzle-orm'
+import { and, eq, ne, sql } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 
 import { requireAdmin } from '@/lib/auth/dal'
@@ -23,6 +23,7 @@ import {
   services,
 } from '@/lib/db/schema'
 import { providerInviteEmail, sendEmail } from '@/lib/email'
+import { notifyBookingAccessChanged } from '@/lib/notify-melanite'
 import { appOrigin } from '@/lib/stripe/config'
 
 export interface ToolState {
@@ -232,11 +233,21 @@ export async function recordMembershipPayment(input: {
 
   // Opening the gate is the point of recording this, but it is stated as a choice rather than
   // assumed — the money might be a back-payment for a period already served.
+  //
+  // Conditional and notified on the transition, exactly as the Stripe handlers do it. The
+  // provider is told their booking access is back; Melanite is NOT, because the admin standing
+  // here is the person who just did it. Same reasoning that keeps the manual booking tool off
+  // the calendar alerts.
   if (input.activateGate) {
-    await db
+    const moved = await db
       .update(providers)
       .set({ medicalDirectorStatus: 'active' })
-      .where(eq(providers.id, provider.id))
+      .where(and(eq(providers.id, provider.id), ne(providers.medicalDirectorStatus, 'active')))
+      .returning({ id: providers.id })
+
+    if (moved.length > 0) {
+      await notifyBookingAccessChanged(provider.id, 'active', { tellMelanite: false })
+    }
   }
 
   revalidatePath('/app/admin/tools')

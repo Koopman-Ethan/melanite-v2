@@ -8,19 +8,27 @@ import {
   MELANITE_NOTIFY_EMAIL,
   ROOM_SLOT_LABELS,
   appointmentWhen,
+  bookingAccessLostEmail,
+  bookingAccessRestoredEmail,
   bookingPaymentSummary,
   deskBookingEmail,
+  deskProviderAccessEmail,
   deskRoomRentalEmail,
   roomDateLabel,
   sendEmail,
 } from '@/lib/email'
 import { appOrigin } from '@/lib/stripe/config'
 
-// Melanite's own calendar alerts.
+// Notifications about things that have already happened.
+//
+// Named for the calendar alerts it started as, and now also carries the booking-access alerts,
+// which go to the PROVIDER as well as to Melanite. The cohesion was never the calendar: it is
+// best-effort mail, looked up by id, sent after the fact, never throwing.
 //
 // Every function here is BEST EFFORT and never throws. Each is called after the thing it
 // describes has already been committed — an appointment booked, a cancellation recorded, a room
-// rental paid for — so a failed send must never be mistaken for a failed operation. That is the
+// rental paid for, a booking gate closed — so a failed send must never be mistaken for a failed
+// operation. That is the
 // same rule `sendEmail` itself follows, and the same reason `notifyProviderPaid` in
 // `lib/stripe/handlers.ts` swallows its errors; these add the try/catch because a JOIN can fail
 // where a send cannot.
@@ -136,5 +144,77 @@ export async function notifyMelaniteRoomRental(
     })
   } catch (err) {
     console.error(`[email] Melanite room ${event} alert failed for`, roomBookingId, err)
+  }
+}
+
+/** The medical-director gate opened or closed for a provider.
+ *
+ *  Called from the FOUR places that write `providers.medicalDirectorStatus`, and only when that
+ *  column actually moved — the handlers decide that with a conditional UPDATE, because Stripe
+ *  sends `invoice.payment_failed` again on every dunning retry and a provider does not want to
+ *  be told six times about one decline.
+ *
+ *  `tellMelanite` is false for the admin tool: Keoni opening the gate herself by recording a
+ *  direct payment does not need an email telling her she did. Same reasoning that keeps the
+ *  manual booking tool off the calendar alerts.
+ */
+export async function notifyBookingAccessChanged(
+  providerId: string,
+  next: 'past_due' | 'inactive' | 'active',
+  options: { tellMelanite?: boolean } = {},
+): Promise<void> {
+  const tellMelanite = options.tellMelanite ?? true
+
+  try {
+    const [row] = await db
+      .select({
+        firstName: providers.firstName,
+        lastName: providers.lastName,
+        email: providers.email,
+        billingCustomerId: providers.stripeBillingCustomerId,
+      })
+      .from(providers)
+      .where(eq(providers.id, providerId))
+      .limit(1)
+
+    if (!row) return
+
+    const origin = await appOrigin()
+    const restored = next === 'active'
+
+    // The provider first. They are the one who cannot work, and unlike Melanite they have no
+    // other way of finding out — there is no banner until they try to book and are turned away.
+    if (row.email) {
+      await sendEmail({
+        to: row.email,
+        ...(restored
+          ? bookingAccessRestoredEmail({
+              firstName: row.firstName,
+              url: `${origin}/app`,
+            })
+          : bookingAccessLostEmail({
+              firstName: row.firstName,
+              reason: next,
+              url: `${origin}/app/membership`,
+            })),
+      })
+    }
+
+    if (!tellMelanite) return
+
+    await sendEmail({
+      to: MELANITE_NOTIFY_EMAIL,
+      ...deskProviderAccessEmail({
+        event: restored ? 'restored' : 'lost',
+        providerName: `${row.firstName} ${row.lastName}`,
+        reason: next,
+        // Decides whether this is hers to deal with: without a billing customer there is no
+        // portal to send them to, so they cannot fix it themselves however clear the email is.
+        canSelfServe: row.billingCustomerId !== null,
+        url: `${origin}/app/admin/providers`,
+      }),
+    })
+  } catch (err) {
+    console.error(`[email] booking access ${next} alert failed for provider`, providerId, err)
   }
 }
