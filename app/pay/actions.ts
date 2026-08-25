@@ -222,12 +222,19 @@ export async function createPackageIntent(input: {
   if (!link) return { error: 'That payment link does not exist.' }
 
   const [provider] = await db
-    .select({ stripeAccountId: providers.stripeAccountId })
+    .select({
+      stripeAccountId: providers.stripeAccountId,
+      revenueModel: providers.revenueModel,
+    })
     .from(providers)
     .where(eq(providers.id, link.providerId))
     .limit(1)
 
-  if (!provider?.stripeAccountId) {
+  // Same rule as a booking: when the provider IS Melanite there is nothing to transfer and no
+  // Connect account to require. See `providerRevenueModel` in the schema.
+  const house = provider?.revenueModel === 'house'
+
+  if (!house && !provider?.stripeAccountId) {
     return { error: 'This provider cannot accept payments yet. Contact them directly.' }
   }
 
@@ -243,11 +250,13 @@ export async function createPackageIntent(input: {
   const settings = await getSplitSettings()
   const priceCents = toCents(checkout.price)
   const tipCents = toCents(tip)
-  const { melaniteCutCents: feeCents } = splitClientPayment({
-    grossCents: priceCents,
-    tipCents,
-    providerSharePct: settings.providerSharePct,
-  })
+  const { melaniteCutCents: feeCents } = house
+    ? splitHouse({ grossCents: priceCents, tipCents })
+    : splitClientPayment({
+        grossCents: priceCents,
+        tipCents,
+        providerSharePct: settings.providerSharePct,
+      })
 
   try {
     const clientId = await ensureClientRow({
@@ -265,11 +274,16 @@ export async function createPackageIntent(input: {
       customer: customerId,
       payment_method_types: PAYMENT_METHODS,
       receipt_email: email,
-      transfer_data: { destination: provider.stripeAccountId },
-      application_fee_amount: feeCents,
+      ...(house
+        ? {}
+        : {
+            transfer_data: { destination: provider!.stripeAccountId },
+            application_fee_amount: feeCents,
+          }),
       ...(input.saveCard ? { setup_future_usage: 'off_session' } : {}),
       metadata: {
         type: 'package_purchase',
+        revenue_model: house ? 'house' : 'split',
         package_template_id: link.templateId,
         package_checkout_link_id: link.id,
         provider_id: link.providerId,
@@ -334,12 +348,19 @@ export async function createPrepaidIntent(input: {
   if (!link) return { error: 'That payment link does not exist.' }
 
   const [provider] = await db
-    .select({ stripeAccountId: providers.stripeAccountId })
+    .select({
+      stripeAccountId: providers.stripeAccountId,
+      revenueModel: providers.revenueModel,
+    })
     .from(providers)
     .where(eq(providers.id, link.providerId))
     .limit(1)
 
-  if (!provider?.stripeAccountId) {
+  // Same rule as a booking: when the provider IS Melanite there is nothing to transfer and no
+  // Connect account to require. See `providerRevenueModel` in the schema.
+  const house = provider?.revenueModel === 'house'
+
+  if (!house && !provider?.stripeAccountId) {
     return { error: 'This provider cannot accept payments yet. Contact them directly.' }
   }
 
@@ -352,11 +373,13 @@ export async function createPrepaidIntent(input: {
 
   const settings = await getSplitSettings()
   const amountCents = toCents(link.amount)
-  const { melaniteCutCents: feeCents } = splitClientPayment({
-    grossCents: amountCents,
-    tipCents: 0,
-    providerSharePct: settings.providerSharePct,
-  })
+  const { melaniteCutCents: feeCents } = house
+    ? splitHouse({ grossCents: amountCents, tipCents: 0 })
+    : splitClientPayment({
+        grossCents: amountCents,
+        tipCents: 0,
+        providerSharePct: settings.providerSharePct,
+      })
 
   try {
     const customerId = await ensureStripeCustomer(
@@ -371,10 +394,15 @@ export async function createPrepaidIntent(input: {
       customer: customerId,
       payment_method_types: PAYMENT_METHODS,
       ...(receiptEmail ? { receipt_email: receiptEmail } : {}),
-      transfer_data: { destination: provider.stripeAccountId },
-      application_fee_amount: feeCents,
+      ...(house
+        ? {}
+        : {
+            transfer_data: { destination: provider!.stripeAccountId },
+            application_fee_amount: feeCents,
+          }),
       metadata: {
         type: 'prepaid_purchase',
+        revenue_model: house ? 'house' : 'split',
         prepaid_checkout_link_id: link.id,
         provider_id: link.providerId,
         // The BENEFICIARY. The handler attaches the balance to this, never to whoever paid.

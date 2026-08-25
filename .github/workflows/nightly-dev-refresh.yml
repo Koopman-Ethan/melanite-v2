@@ -108,5 +108,11 @@ jobs:
       # Independent of the run that just happened. The refresh asserts its own scrub; this asks
       # the question again from outside, so a bug that made the assertion vacuous still gets
       # caught before anybody looks at appdev.
+      # Production has no house provider — that is the thing being reviewed — so the copy puts
+      # the owner back on the revenue split with no licence and no services, and appdev stops
+      # being able to demonstrate the feature at all. Same shape as the Connect repair above.
+      - name: Restore the house provider
+        run: npx tsx --tsconfig scripts/tsconfig.json scripts/dev-house-provider.ts
+
       - name: Confirm nothing identifying survived
         run: npm run db:scrub -- --check

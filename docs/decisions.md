@@ -1459,9 +1459,19 @@ the created intent came back `transfer_data: null`, `application_fee_amount: nul
 payout_status paid`, and a late-cancellation fee on the same booking wrote
 `0.00 / 50.00 / paid` with its own intent also carrying no transfer.
 
-**Not done:** packages and prepaid balances still hard-abort on a missing Connect account
-(`createPackageIntent`, `createPrepaidIntent`), so a house provider can book but cannot sell
-either. Nobody has asked for it; it is the same three-line branch when they do. The Earnings page
-is also left alone — it would honestly read zero earned for her, since her payout genuinely is
+**Packages and prepaid balances got the same branch**, because leaving them out would have made
+her capabilities oddly partial — able to book a client but not sell them a package, failing with
+"this provider cannot accept payments yet" about herself. Same guard, same omission of
+`transfer_data`, same `revenue_model` in metadata, same `splitHouse` in the webhook. Only the
+booking path was driven through Stripe end to end; the other two are the identical branch.
+
+**Dev cannot hold this on its own.** `refresh-dev.ts` copies production over dev nightly, and
+production has no house provider — so every morning the copy put Keoni back on the revenue split
+with no licence, no services and booking disabled, which is exactly what happened the first night.
+`scripts/dev-house-provider.ts` repairs it, is idempotent and `--check`-able, refuses to run
+against production, and now runs as a step in the nightly workflow beside the Connect repair. It
+is the fourth item in the list `docs/decisions.md` already says that job must end with.
+
+**The Earnings page is left alone** — it would honestly read zero earned for her, since her payout genuinely is
 zero, while the money shows on `/app/admin/revenue`. Nav keeps it hidden from admins, so nobody
 meets the contradiction.
