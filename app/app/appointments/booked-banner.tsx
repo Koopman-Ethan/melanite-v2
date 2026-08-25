@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { CopyButton } from '@/components/ui/copy-button'
 
 /** Shown once, immediately after booking.
  *
@@ -22,20 +22,6 @@ export function BookedBanner({
   clientEmail: string | null
   emailed: boolean
 }) {
-  const [copied, setCopied] = useState(false)
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(url)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    } catch {
-      // Clipboard access can be refused. The link is on screen and selectable, so this is a
-      // convenience failing rather than the feature failing.
-      setCopied(false)
-    }
-  }
-
   return (
     <div className="rounded-card border border-success/30 bg-success/10 p-5">
       <h2 className="text-sm font-medium">Booked for {clientName}</h2>
@@ -52,13 +38,7 @@ export function BookedBanner({
         <code className="min-w-0 flex-1 truncate rounded-field border border-line bg-surface px-3 py-2 text-xs text-ink-secondary">
           {url}
         </code>
-        <button
-          type="button"
-          onClick={copy}
-          className="rounded-control border border-line-strong px-3 py-2 text-xs font-bold tracking-[0.3px] text-ink-secondary transition-colors hover:border-ink-faint hover:bg-overlay"
-        >
-          {copied ? 'Copied' : 'Copy link'}
-        </button>
+        <CopyButton value={url} label="Copy link" />
       </div>
 
       <p className="mt-2 text-xs text-ink-faint">
