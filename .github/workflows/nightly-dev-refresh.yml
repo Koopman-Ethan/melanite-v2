@@ -42,6 +42,12 @@ jobs:
       DATABASE_URL: ${{ secrets.DEV_DATABASE_URL }}
       SOURCE_DATABASE_URL: ${{ secrets.PROD_DATABASE_URL_READONLY }}
       STRIPE_SECRET_KEY_WRITE: ${{ secrets.DEV_STRIPE_SECRET_KEY_WRITE }}
+      # The accounts the Playwright suite signs in as. The emails are not secret; they are kept
+      # alongside the password so all three move together and none can be left behind.
+      E2E_PROVIDER_EMAIL: ${{ secrets.E2E_PROVIDER_EMAIL }}
+      E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
+      E2E_PROVIDER_PASSWORD: ${{ secrets.E2E_PROVIDER_PASSWORD }}
+      E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
 
     steps:
       - uses: actions/checkout@v4
@@ -108,11 +114,29 @@ jobs:
       # Independent of the run that just happened. The refresh asserts its own scrub; this asks
       # the question again from outside, so a bug that made the assertion vacuous still gets
       # caught before anybody looks at appdev.
+      # The scrub does not touch password_hash, so the test accounts come over carrying
+      # PRODUCTION's hashes and E2E_PROVIDER_PASSWORD stops opening them. This also reopens the
+      # booking gates, which is the half nobody predicted: a real medical-director payment
+      # declined in production on 2026-08-23 and the next copy imported that provider's billing
+      # problem into dev, blocking the entire booking journey.
+      - name: Restore the e2e test accounts
+        run: npm run dev:e2e-credentials
+
       # Production has no house provider — that is the thing being reviewed — so the copy puts
       # the owner back on the revenue split with no licence and no services, and appdev stops
       # being able to demonstrate the feature at all. Same shape as the Connect repair above.
       - name: Restore the house provider
-        run: npx tsx --tsconfig scripts/tsconfig.json scripts/dev-house-provider.ts
+        run: npm run dev:house-provider
 
       - name: Confirm nothing identifying survived
         run: npm run db:scrub -- --check
+
+      # LAST, and the only step that asks the question the repairs are for.
+      #
+      # Every repair above exists because something broke and somebody spent a cycle assuming it
+      # was their own change. That list only ever contains failures that have already happened.
+      # This asserts the END STATE — the suite can sign in, somebody can book, the house provider
+      # is set up — so a fixture nobody has thought to repair fails HERE, with a message about
+      # the fixture, rather than in a spec whose error is about something else entirely.
+      - name: Confirm dev is actually usable
+        run: npm run dev:usable

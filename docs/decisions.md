@@ -1475,3 +1475,52 @@ is the fourth item in the list `docs/decisions.md` already says that job must en
 **The Earnings page is left alone** — it would honestly read zero earned for her, since her payout genuinely is
 zero, while the money shows on `/app/admin/revenue`. Nav keeps it hidden from admins, so nobody
 meets the contradiction.
+
+### The nightly copy kept breaking dev, one fixture at a time — 2026-08-25
+
+`refresh-dev.ts` replaces dev wholesale with a scrubbed copy of production, so anything
+dev-specific is gone by morning. Four things turned out to depend on that and each was
+discovered the same way: something broke, somebody spent a cycle assuming it was their own
+change, and a repair script was added afterwards.
+
+1. **Live Stripe Connect ids** — `dev-connect-accounts.ts`, already known, "cost most of a
+   morning once".
+2. **Test account passwords.** The scrub rewrites names, emails, phones and treatment notes and
+   never touches `password_hash`, so the accounts come over carrying production's. The suite
+   then fails at `auth.setup.ts` with the PROVIDER stuck on /login while the ADMIN sails
+   through — because that admin's production password happens to be the one in `.env.local`. A
+   half-failing suite reads as a regression, not an environment problem. Cost a cycle on three
+   separate days.
+3. **The house provider**, which production does not have because it is the thing being
+   reviewed.
+4. **A booking gate nobody predicted.** A real medical-director payment declined in production
+   on 2026-08-23; the next copy imported `past_due` into dev and blocked the whole booking
+   journey. Nothing was broken — dev was faithfully reproducing somebody's billing problem.
+
+**The repairs are necessary and they are not sufficient**, because the list only ever contains
+the failures that have already happened. Number 4 could not have been on it.
+
+So `scripts/dev-usable.ts` runs LAST and asserts the END STATE: the e2e accounts exist and can
+be signed in to, the e2e provider passes every booking gate, they have something to book, the
+owner is set up as a house provider, and the Connect ids were replaced. A fixture nobody has
+thought to repair now fails there, naming the fixture, instead of surfacing three steps later in
+a spec whose error message is about something else.
+
+Same argument `db:verify` makes about schema: "the migrations ran" is not the claim you want.
+
+**It calls `canBook` rather than re-deriving the gates.** A check that reimplements the rule it
+is checking drifts from it, and would have kept passing through exactly the licence change that
+made `missing` a blocking state.
+
+**Every detector was proved to fire before being trusted**, by breaking both fixtures — setting
+the e2e provider back to `past_due` and the owner back to `split` — confirming the two failures
+named the right causes, running the repairs, and re-asserting clean.
+
+**What is still wrong, and is the real fix:** the suite signs in as a REAL provider's account,
+which is why somebody's genuine billing problem became a test failure at all. A dedicated
+fixture provider would make item 4 impossible and shrink item 2 to a password. Not done here —
+the specs assume an account with a service menu, a history and a Connect account — and it is
+worth doing before the roster grows.
+
+`E2E_PROVIDER_EMAIL`, `E2E_ADMIN_EMAIL`, `E2E_PROVIDER_PASSWORD` and `E2E_ADMIN_PASSWORD` now
+have to exist as repository secrets, or the new step fails.
