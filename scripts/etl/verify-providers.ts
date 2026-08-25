@@ -228,10 +228,12 @@ async function main() {
   for (const got of loaded) {
     if (!got.booking_enabled || got.status !== 'active') continue
 
-    // `isLicenseExpired` returns false for a null expiry, so a missing date clears the licence
-    // gate rather than blocking it. Importing nulls imports providers who bypass it.
+    // A missing expiry used to CLEAR the licence gate; it now closes it (`hasCurrentLicense`).
+    // Still worth failing the import on, for the opposite reason: a provider imported as
+    // booking-enabled with no expiry believes they can book and cannot, and will find out at
+    // the gates page rather than here.
     if (!got.license_expiry) {
-      fail(got.email, 'booking-enabled with NO licence expiry — the licence gate cannot fire')
+      fail(got.email, 'booking-enabled with NO licence expiry — the licence gate will block them')
     }
     if (!got.license_number) {
       fail(got.email, 'booking-enabled with no licence number on file')

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   percentDiscountCents,
   splitClientPayment,
+  splitHouse,
   splitFee,
   toCents,
   toMoney,
@@ -168,5 +169,52 @@ describe('percentDiscountCents', () => {
   it('is zero at zero percent and everything at a hundred', () => {
     expect(percentDiscountCents(12345, 0)).toBe(0)
     expect(percentDiscountCents(12345, 100)).toBe(12345)
+  })
+})
+
+describe('splitHouse', () => {
+  it('gives Melanite the service and the tip', () => {
+    const split = splitHouse({ grossCents: 18000, tipCents: 2500 })
+
+    expect(split.providerPayoutCents).toBe(0)
+    expect(split.melaniteCutCents).toBe(20500)
+  })
+
+  it('still sums to what the client paid', () => {
+    // The invariant every split in this file holds, and the database does not enforce.
+    for (const [gross, tip] of [[0, 0], [1, 0], [18000, 2500], [12345, 6789]]) {
+      const s = splitHouse({ grossCents: gross, tipCents: tip })
+      expect(s.providerPayoutCents + s.melaniteCutCents).toBe(gross + tip)
+    }
+  })
+
+  it('is NOT the same as a zero share, which is the whole reason it exists', () => {
+    // `splitClientPayment` excludes the tip from the fee base by design — 100% of a tip reaches
+    // the provider, which is v1's rule and the one providers were told. At a share of zero that
+    // rule still fires, so the "obvious" way to express a house payment routes every tip away
+    // from Melanite while looking perfectly correct.
+    const gross = 18000
+    const tip = 2500
+
+    const asZeroShare = splitClientPayment({ grossCents: gross, tipCents: tip, providerSharePct: 0 })
+    const asHouse = splitHouse({ grossCents: gross, tipCents: tip })
+
+    expect(asZeroShare.providerPayoutCents).toBe(tip)
+    expect(asHouse.providerPayoutCents).toBe(0)
+    expect(asHouse.melaniteCutCents - asZeroShare.melaniteCutCents).toBe(tip)
+  })
+
+  it('agrees with a zero share when there is no tip', () => {
+    // Which is exactly why the difference above is easy to miss: untipped, the two are
+    // identical, so a test written without a tip would have proved nothing.
+    const untipped = { grossCents: 18000, tipCents: 0 }
+    expect(splitHouse(untipped)).toEqual(
+      splitClientPayment({ ...untipped, providerSharePct: 0 }),
+    )
+  })
+
+  it('refuses fractional cents, like every other split here', () => {
+    expect(() => splitHouse({ grossCents: 100.5, tipCents: 0 })).toThrow()
+    expect(() => splitHouse({ grossCents: 100, tipCents: -1 })).toThrow()
   })
 })

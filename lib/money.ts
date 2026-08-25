@@ -83,6 +83,28 @@ export function splitClientPayment(input: {
 }
 
 /**
+ * The house takes everything.
+ *
+ * For an appointment performed by Melanite itself there is no second party: no Connect
+ * transfer, no payout, and the tip is Melanite's too.
+ *
+ * Deliberately NOT `splitClientPayment({ providerSharePct: 0 })`. That call is legal —
+ * `assertShare` accepts zero — and it is wrong in a way nothing would catch: the tip is
+ * excluded from the fee base by design, so a share of zero still routes 100% of every tip to
+ * the provider side. A house payment is a different rule, not an extreme of the ordinary one,
+ * and writing it as one is how a tip would quietly go missing from Melanite's revenue.
+ */
+export function splitHouse(input: { grossCents: number; tipCents: number }): Split {
+  assertWhole(input.grossCents, 'gross')
+  assertWhole(input.tipCents, 'tip')
+
+  return {
+    providerPayoutCents: 0,
+    melaniteCutCents: input.grossCents + input.tipCents,
+  }
+}
+
+/**
  * Splits a no-show or late-cancellation fee.
  *
  * Separate from the service split on purpose: a fee is not a service, and Melanite splits fees

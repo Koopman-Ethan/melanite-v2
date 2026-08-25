@@ -37,10 +37,14 @@ test.describe('booking to payment link', () => {
 
     // A provider who cannot book sees the gates instead of the form. That is a real state, and
     // failing here with a clear message beats a confusing timeout on a missing field.
+    // Asserts the gates are ABSENT, not that the h1 is present. The page renders that h1 above
+    // the gates too, so the old check passed for a blocked provider and the run then failed
+    // eight lines later on a missing slot button — with a message about availability, for a
+    // problem that was nothing to do with availability.
     await expect(
-      page.getByRole('heading', { name: 'Book laser time' }),
-      'provider cannot reach the booking form — check the seeded account still passes the gates',
-    ).toBeVisible()
+      page.getByRole('heading', { name: /Booking isn.t available yet/ }),
+      'the seeded provider is blocked by a booking gate — check medical director and licence',
+    ).toHaveCount(0)
 
     // Pick the first open time.
     const slot = page.locator('button', { hasText: /^\d{1,2}:\d{2} (AM|PM)$/ }).first()
@@ -63,6 +67,13 @@ test.describe('booking to payment link', () => {
 
     const url = (await link.textContent())?.trim() ?? ''
     expect(url, 'no payment link was shown').toMatch(/\/pay\/[A-Za-z0-9_-]+$/)
+
+    // Copying must SAY it copied. A button that looks identical before and after leaves
+    // somebody clicking it twice and pasting somewhere else to check whether it worked.
+    // Untested until now, and the packages page had a version with no feedback at all.
+    await page.context().grantPermissions(['clipboard-write'])
+    await page.getByRole('button', { name: 'Copy link' }).click()
+    await expect(page.getByRole('button', { name: 'Copied' })).toBeVisible()
 
     // And the appointment itself is on the list.
     await expect(page.getByText(clientName).first()).toBeVisible()

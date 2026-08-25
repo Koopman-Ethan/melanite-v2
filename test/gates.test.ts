@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { bookingBlockedReasons, canBook, isLicenseExpired } from '@/lib/auth/dal'
+import {
+  bookingBlockedReasons,
+  canBook,
+  hasCurrentLicense,
+  isLicenseExpired,
+} from '@/lib/auth/dal'
 import type { SessionUser } from '@/lib/auth/session'
 
 // The booking gates.
@@ -19,7 +24,10 @@ const base: SessionUser = {
   bookingEnabled: true,
   roomRentalEnabled: true,
   medicalDirectorStatus: 'active',
-  licenseExpiry: null,
+  // A licence on file and in date. It used to be null here, and the suite still passed —
+  // because a null expiry cleared the licence gate rather than closing it. A fixture that
+  // silently exercised the hole is part of why it survived this long.
+  licenseExpiry: '2099-12-31',
   requiresPasswordReset: false,
 }
 
@@ -46,8 +54,28 @@ describe('canBook', () => {
     expect(canBook(user({ licenseExpiry: '2020-01-01' }))).toBe(false)
   })
 
-  it('allows a license with no expiry on file', () => {
-    expect(canBook(user({ licenseExpiry: null }))).toBe(true)
+  it('blocks when there is no license on file at all', () => {
+    // This asserted the opposite until 2026-08-24, and was correct about the code at the time:
+    // the gate was `!isLicenseExpired`, and a null expiry is not an expired one. So a provider
+    // with no licence recorded passed the licence check outright — which nobody noticed while
+    // every bookable provider happened to have one.
+    expect(canBook(user({ licenseExpiry: null }))).toBe(false)
+  })
+})
+
+describe('hasCurrentLicense', () => {
+  it('wants a licence that is both on file AND in date', () => {
+    expect(hasCurrentLicense(user({ licenseExpiry: '2099-12-31' }))).toBe(true)
+    expect(hasCurrentLicense(user({ licenseExpiry: '2020-01-01' }))).toBe(false)
+    expect(hasCurrentLicense(user({ licenseExpiry: null }))).toBe(false)
+  })
+
+  it('still counts a licence expiring soon as current', () => {
+    // 'expiring' is a warning state for the account page and the roster, not a gate. Somebody
+    // with three weeks left can still work.
+    const soon = new Date()
+    soon.setDate(soon.getDate() + 21)
+    expect(hasCurrentLicense(user({ licenseExpiry: soon.toISOString().slice(0, 10) }))).toBe(true)
   })
 })
 
@@ -102,8 +130,21 @@ describe('bookingBlockedReasons', () => {
     const [docGate] = bookingBlockedReasons(user({ bookingEnabled: false }))
     expect(docGate.href).toBeUndefined()
 
+    // The licence DOES have one: the number and expiry are entered on the account page, so
+    // sending them there is a real action rather than a dead end dressed up as one.
     const [licenseGate] = bookingBlockedReasons(user({ licenseExpiry: '2020-01-01' }))
-    expect(licenseGate.href).toBeUndefined()
+    expect(licenseGate.href).toBe('/app/account')
+  })
+
+  it('says something different for a missing licence than for an expired one', () => {
+    // "Renew it" is useless advice to somebody who never recorded one in the first place.
+    const [missing] = bookingBlockedReasons(user({ licenseExpiry: null }))
+    const [expired] = bookingBlockedReasons(user({ licenseExpiry: '2020-01-01' }))
+
+    expect(missing.message).not.toBe(expired.message)
+    expect(missing.message).toMatch(/no professional license/i)
+    expect(expired.message).toMatch(/expired/i)
+    expect(missing.action).not.toBe(expired.action)
   })
 
   it('says something different for past_due than for none', () => {

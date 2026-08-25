@@ -34,7 +34,7 @@ import {
   trainingEnrolledEmail,
 } from '@/lib/email'
 
-import { splitClientPayment, toCents, toMoney } from '@/lib/money'
+import { splitClientPayment, splitHouse, toCents, toMoney } from '@/lib/money'
 import { notifyBookingAccessChanged, notifyMelaniteRoomRental } from '@/lib/notify-melanite'
 
 import { appOrigin, planFromMetadata } from './config'
@@ -207,17 +207,24 @@ async function bookingPaid(pi: StripePaymentIntentObject): Promise<HandlerResult
 
   const tipCents = toCents(link?.tipAmount ?? '0')
   const grossCents = toCents(booking.price)
-  const share = await providerShare()
+
+  // Which arrangement this payment was CREATED under, read from the intent rather than from the
+  // provider row. The row is the current policy; the metadata is what the charge was actually
+  // built from, and between those two reads somebody could have changed it. Falls back to the
+  // row for intents created before this field existed.
+  const house = await isHousePayment(pi, booking.providerId)
 
   // One split implementation, in cents. This used to be computed here in float dollars while
   // the PaymentIntent's application fee was computed in cents elsewhere — the two disagreed
   // wherever price × share landed on a half cent, so Stripe took one amount and the ledger
   // recorded another.
-  const { providerPayoutCents, melaniteCutCents } = splitClientPayment({
-    grossCents,
-    tipCents,
-    providerSharePct: share,
-  })
+  const { providerPayoutCents, melaniteCutCents } = house
+    ? splitHouse({ grossCents, tipCents })
+    : splitClientPayment({
+        grossCents,
+        tipCents,
+        providerSharePct: await providerShare(),
+      })
 
   const serviceId = await serviceIdFor(booking.providerServiceId)
 
@@ -236,7 +243,10 @@ async function bookingPaid(pi: StripePaymentIntentObject): Promise<HandlerResult
     melaniteCut: toMoney(melaniteCutCents),
     paymentMethod: 'stripe',
     stripePaymentIntentId: pi.id,
-    payoutStatus: 'pending',
+    // Nothing is owed to anybody on a house appointment, so it is settled the moment it is
+    // recorded. Left at 'pending' it would sit in the payout queue for ever, describing a
+    // payment that is never going to be made.
+    payoutStatus: house ? 'paid' : 'pending',
   })
 
   if (link) {
@@ -254,7 +264,10 @@ async function bookingPaid(pi: StripePaymentIntentObject): Promise<HandlerResult
 
   // The provider is told separately, and only if they asked to be. Same reasoning as above: a
   // notification that fails must not undo a payment that succeeded.
-  if (detail) {
+  //
+  // Not for a house appointment: the "payment received, your share is X" message would be
+  // Melanite telling Melanite it had paid itself nothing.
+  if (detail && !house) {
     await notifyProviderPaid({
       providerId: booking.providerId,
       clientName: detail.clientName,
@@ -382,6 +395,32 @@ async function notifyProviderPaid(input: {
   }
 }
 
+/** Was this payment — a booking, a package or a prepaid balance — created as Melanite's own?
+ *
+ *  The intent's metadata is authoritative because it records what the charge was BUILT from —
+ *  whether Stripe was told to transfer a share, and how much fee to take. Re-deriving it from
+ *  the provider row would be re-deriving a decision instead of reading it, which is the same
+ *  mistake the split itself used to make when it was computed twice in different units.
+ *
+ *  The row is consulted only when the metadata is absent, which means an intent created before
+ *  this field existed. Those are all ordinary split bookings, so the fallback is also the
+ *  correct answer for them. */
+async function isHousePayment(
+  pi: StripePaymentIntentObject,
+  providerId: string,
+): Promise<boolean> {
+  const stamped = pi.metadata?.revenue_model
+  if (stamped) return stamped === 'house'
+
+  const [provider] = await db
+    .select({ revenueModel: providers.revenueModel })
+    .from(providers)
+    .where(eq(providers.id, providerId))
+    .limit(1)
+
+  return provider?.revenueModel === 'house'
+}
+
 async function serviceIdFor(providerServiceId: string): Promise<string | null> {
   const [row] = await db
     .select({ serviceId: providerServices.serviceId })
@@ -503,12 +542,9 @@ async function packagePurchased(pi: StripePaymentIntentObject): Promise<HandlerR
   // v1's package ledger stored gross INCLUDING the tip; v2 normalised to gross excluding it,
   // so the tip is subtracted back out here rather than carried forward.
   const grossCents = pi.amount_received - tipCents
-  const share = await providerShare()
-  const { providerPayoutCents, melaniteCutCents } = splitClientPayment({
-    grossCents,
-    tipCents,
-    providerSharePct: share,
-  })
+  const { providerPayoutCents, melaniteCutCents } = (await isHousePayment(pi, providerId))
+    ? splitHouse({ grossCents, tipCents })
+    : splitClientPayment({ grossCents, tipCents, providerSharePct: await providerShare() })
 
   const [instance] = await db
     .insert(clientPackages)
@@ -610,12 +646,9 @@ async function prepaidPurchased(pi: StripePaymentIntentObject): Promise<HandlerR
   // No tip. There is nothing to tip for yet — the treatment has not happened, and the tip on
   // the eventual appointment is collected there, where it goes wholly to the provider.
   const grossCents = pi.amount_received
-  const share = await providerShare()
-  const { providerPayoutCents, melaniteCutCents } = splitClientPayment({
-    grossCents,
-    tipCents: 0,
-    providerSharePct: share,
-  })
+  const { providerPayoutCents, melaniteCutCents } = (await isHousePayment(pi, providerId))
+    ? splitHouse({ grossCents, tipCents: 0 })
+    : splitClientPayment({ grossCents, tipCents: 0, providerSharePct: await providerShare() })
 
   const amount = toMoney(grossCents)
 

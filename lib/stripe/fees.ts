@@ -173,6 +173,7 @@ export async function chargeBookingFee(bookingId: string, kind: FeeKind): Promis
   const [provider] = await db
     .select({
       stripeAccountId: providers.stripeAccountId,
+      revenueModel: providers.revenueModel,
       firstName: providers.firstName,
       lastName: providers.lastName,
     })
@@ -180,10 +181,16 @@ export async function chargeBookingFee(bookingId: string, kind: FeeKind): Promis
     .where(eq(providers.id, booking.providerId))
     .limit(1)
 
-  const { providerPayoutCents: providerCents, melaniteCutCents: melaniteCents } = splitFee({
-    amountCents,
-    providerSharePct: policy.providerSharePct,
-  })
+  // A fee on Melanite's own appointment is Melanite's, all of it. Worth being explicit about
+  // rather than leaving to the transfer branch below: that branch already tolerates a missing
+  // Connect account and quietly falls back to a platform charge, so without this the fee would
+  // still be SPLIT in the ledger — half of it recorded as owed to a provider who does not
+  // exist, on a row stamped 'paid'. Nothing would throw and the number would simply be wrong.
+  const house = provider?.revenueModel === 'house'
+
+  const { providerPayoutCents: providerCents, melaniteCutCents: melaniteCents } = house
+    ? { providerPayoutCents: 0, melaniteCutCents: amountCents }
+    : splitFee({ amountCents, providerSharePct: policy.providerSharePct })
 
   const [svc] = await db
     .select({ serviceId: providerServices.serviceId })
@@ -207,7 +214,7 @@ export async function chargeBookingFee(bookingId: string, kind: FeeKind): Promis
         confirm: true,
         // Same destination-charge shape as the original payment, so the provider's half
         // arrives the same way their service revenue does.
-        ...(provider?.stripeAccountId
+        ...(!house && provider?.stripeAccountId
           ? {
               transfer_data: { destination: provider.stripeAccountId },
               application_fee_amount: melaniteCents,
@@ -255,7 +262,7 @@ export async function chargeBookingFee(bookingId: string, kind: FeeKind): Promis
     melaniteCut: toMoney(melaniteCents),
     paymentMethod: 'stripe',
     stripePaymentIntentId: intentId,
-    payoutStatus: provider?.stripeAccountId ? 'pending' : 'paid',
+    payoutStatus: !house && provider?.stripeAccountId ? 'pending' : 'paid',
     note: `${kind === 'no_show_fee' ? 'No-show fee' : 'Late cancellation fee'}, ${describeMethod(card)}`,
   })
 

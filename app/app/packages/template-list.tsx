@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { CopyButton } from '@/components/ui/copy-button'
 import { Notice } from '@/components/ui/field'
 import { cn } from '@/lib/cn'
 
@@ -396,13 +397,7 @@ export function TemplateList({
             />
           </label>
           <div className="flex gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => void navigator.clipboard?.writeText(linkUrl)}
-            >
-              Copy
-            </Button>
+            <CopyButton value={linkUrl} />
             <Button size="sm" variant="ghost" onClick={() => setLinkUrl(null)}>
               Done
             </Button>

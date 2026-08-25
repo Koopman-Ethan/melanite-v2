@@ -149,3 +149,32 @@ describe('after Keoni records it, is the provider still owed anything?', () => {
     }
   })
 })
+
+describe('Melanite does not invoice itself', () => {
+  it('drops a house provider off the list entirely', async () => {
+    // A house provider IS Melanite. Cash they took is Melanite's already, so there is no half
+    // to collect — and this query reads `bookings` rather than the ledger, so without the
+    // exclusion it would hand Keoni an invoice addressed to herself and add it to a total she
+    // is meant to go and chase.
+    const before = await owedNow()
+    await external('cash', '300.00', 15)
+    expect(await owedNow(), 'the debt should exist while the provider is on a split').toBeCloseTo(
+      before + 150,
+      2,
+    )
+
+    // Restored in a finally: leaving a real dev provider marked 'house' would break every
+    // payment path for them until somebody noticed.
+    await sql.query(`UPDATE providers SET revenue_model = 'house' WHERE id = $1`, [providerId])
+    try {
+      const row = (await getOwedByProvider()).find((r) => r.providerId === providerId)
+      expect(row, 'a house provider must not appear at all').toBeUndefined()
+    } finally {
+      await sql.query(`UPDATE providers SET revenue_model = 'split' WHERE id = $1`, [providerId])
+    }
+
+    // Putting them back restores the debt, which is what proves the flag did it rather than
+    // something incidental about the booking.
+    expect(await owedNow()).toBeCloseTo(before + 150, 2)
+  })
+})

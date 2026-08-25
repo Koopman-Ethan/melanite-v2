@@ -109,6 +109,7 @@ export async function getBookingCheckout(token: string): Promise<BookingCheckout
       providerLast: providers.lastName,
       providerCredentials: providers.credentials,
       providerStripeAccount: providers.stripeAccountId,
+      providerRevenueModel: providers.revenueModel,
       cardLast4: clients.cardLast4,
       cardBrand: clients.cardBrand,
     })
@@ -132,7 +133,10 @@ export async function getBookingCheckout(token: string): Promise<BookingCheckout
           ? 'expired'
           : // A link can be live while the appointment behind it is not — cancelled from the
             // provider's side, or already past. Paying then would take money for nothing.
-            row.bookingStatus !== 'upcoming' || !row.providerStripeAccount
+            // A house appointment is Melanite's own: the charge stays on the platform
+            // account, so there is no Connect account to be missing and nothing to check.
+            row.bookingStatus !== 'upcoming' ||
+              (row.providerRevenueModel !== 'house' && !row.providerStripeAccount)
             ? 'unpayable'
             : 'payable'
 
@@ -200,6 +204,7 @@ export async function getPackageCheckout(token: string): Promise<PackageCheckout
       providerLast: providers.lastName,
       providerCredentials: providers.credentials,
       providerStripeAccount: providers.stripeAccountId,
+      providerRevenueModel: providers.revenueModel,
     })
     .from(packageCheckoutLinks)
     .innerJoin(
@@ -230,7 +235,7 @@ export async function getPackageCheckout(token: string): Promise<PackageCheckout
         ? 'cancelled'
         : row.expiresAt < new Date()
           ? 'expired'
-          : !row.providerStripeAccount
+          : row.providerRevenueModel !== 'house' && !row.providerStripeAccount
             ? 'unpayable'
             : 'payable'
 
@@ -285,6 +290,7 @@ export async function getPrepaidCheckout(token: string): Promise<PrepaidCheckout
       providerLast: providers.lastName,
       providerCredentials: providers.credentials,
       providerStripeAccount: providers.stripeAccountId,
+      providerRevenueModel: providers.revenueModel,
     })
     .from(prepaidCheckoutLinks)
     .innerJoin(clients, eq(prepaidCheckoutLinks.clientId, clients.id))
@@ -303,7 +309,7 @@ export async function getPrepaidCheckout(token: string): Promise<PrepaidCheckout
           ? 'expired'
           : // Destination charge, same as a package: without a connected account the provider
             // cannot be paid their share, so there is nothing to collect into.
-            !row.providerStripeAccount
+            row.providerRevenueModel !== 'house' && !row.providerStripeAccount
             ? 'unpayable'
             : 'payable'
 
