@@ -1524,3 +1524,29 @@ worth doing before the roster grows.
 
 `E2E_PROVIDER_EMAIL`, `E2E_ADMIN_EMAIL`, `E2E_PROVIDER_PASSWORD` and `E2E_ADMIN_PASSWORD` now
 have to exist as repository secrets, or the new step fails.
+
+### Chin added to the LHR areas — 2026-08-28
+
+The client asked for chin laser hair removal. It is a thirteenth body area, not a new kind of
+service, so it went into `scripts/etl/catalogue.ts` beside the other twelve rather than into a
+migration — the ETL truncates `services`, and a migration runs once, so a migration would have
+held it only until the next import and then never repaired it. That trap is the entry above,
+"The ETL would have erased the LHR catalogue".
+
+Named `Laser Hair Removal — Chin` to sort into the group with its siblings, priced by each
+provider like every other area: it appears in every provider's picker and on nobody's profile
+until they add it. No schema change, no code path, no new UI. Catalogue is now 24 live options.
+
+**The duration was proposed, then confirmed.** Chin was not on Keoni's 2026-07-31 list, so it
+was first entered as 15/15/30 — the Upper Lip bracket, comparable area and same laser time —
+with `fromKeoni: false`, the flag that makes `etl:catalogue` print "(duration proposed, not from
+Keoni)". She confirmed those numbers the same day, so it now carries `true`. Three areas are
+still proposed: Half Arms, Full Arms and Bikini. Keeping the flag honest is the only thing that
+keeps those three findable.
+
+Still open: whether Chin and Full Face overlapping confuses what a client thinks they booked.
+
+**Nothing tells providers it exists.** There is no announcement when the catalogue grows — a
+provider finds it by opening My Services. That is fine for one area added on request; it will
+not stay fine, and neither will adding every future service by hand. There is still no admin UI
+for the catalogue.
