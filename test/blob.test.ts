@@ -28,12 +28,16 @@ const file = (type: string, size: number) => ({
 
 const CHECK_ID = '3f6d1a30-b017-47b6-8553-0881639f8ce6'
 const original = process.env.BLOB_READ_WRITE_TOKEN
+const originalEnv = process.env.MELANITE_ENV
 
 afterEach(() => {
   put.mockReset()
   if (original === undefined) delete process.env.BLOB_READ_WRITE_TOKEN
   else process.env.BLOB_READ_WRITE_TOKEN = original
-  delete process.env.BLOB_PUBLIC_BASE_URL
+  // Restored because one test below flips it to 'prod' to check the key prefix, and a leaked
+  // 'prod' would make later suites believe they are running against production.
+  if (originalEnv === undefined) delete process.env.MELANITE_ENV
+  else process.env.MELANITE_ENV = originalEnv
 })
 
 function configured() {
@@ -103,18 +107,34 @@ describe('the key', () => {
 
     expect(result.ok).toBe(true)
     const [key, , options] = put.mock.calls[0]
-    expect(key).toBe(`equipment/${CHECK_ID}.png`)
+    // Ends with the id and carries no name, email or booking reference. The environment prefix
+    // is asserted separately — what matters here is what the key does NOT contain.
+    expect(key).toContain(CHECK_ID)
+    expect(key.endsWith(`${CHECK_ID}.png`)).toBe(true)
     // The key already carries a uuid, so a random suffix would mean the pathname recorded and the
     // pathname saved under diverge — and the photo becomes unreachable.
     expect(options.addRandomSuffix).toBe(false)
   })
 
-  it('resolves to a URL at read time, not at write time', async () => {
-    // The reason the column stores a key. Moving to signed URLs later changes this function and
-    // migrates nothing.
-    expect(equipmentPhotoUrl('equipment/x.jpg')).toBe('equipment/x.jpg')
+  it('points at our own route, not the blob store', async () => {
+    // The store is private, so a direct URL would 403 — and routing through the app is what lets
+    // a read be authorised at all. It also means there is no public base URL to configure, and
+    // so no failure mode where uploads succeed while every thumbnail silently breaks.
+    expect(equipmentPhotoUrl(CHECK_ID)).toBe(`/api/equipment/photo/${CHECK_ID}`)
+    expect(equipmentPhotoUrl(CHECK_ID)).not.toContain('blob.vercel-storage.com')
+  })
 
-    process.env.BLOB_PUBLIC_BASE_URL = 'https://blob.example.com/'
-    expect(equipmentPhotoUrl('equipment/x.jpg')).toBe('https://blob.example.com/equipment/x.jpg')
+  it('files dev uploads apart from real ones', async () => {
+    // One store serves production and appdev. Without the prefix a test photo and a photograph
+    // of the actual machine are indistinguishable uuids in the same bucket.
+    configured()
+    process.env.MELANITE_ENV = 'dev'
+    await putEquipmentPhoto(CHECK_ID, file('image/jpeg', 1_000))
+    expect(put.mock.calls[0][0]).toBe(`equipment/dev/${CHECK_ID}.jpg`)
+
+    put.mockClear()
+    process.env.MELANITE_ENV = 'prod'
+    await putEquipmentPhoto(CHECK_ID, file('image/jpeg', 1_000))
+    expect(put.mock.calls[0][0]).toBe(`equipment/${CHECK_ID}.jpg`)
   })
 })

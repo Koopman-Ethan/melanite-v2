@@ -5,6 +5,10 @@ import { eq, sql } from 'drizzle-orm'
 import { canBook, bookingBlockedReasons } from '@/lib/auth/dal'
 import type { SessionUser } from '@/lib/auth/session'
 import { providerServices, providers } from '@/lib/db/schema'
+import {
+  EQUIPMENT_POLICY_VERSION,
+  hasAcceptedEquipmentPolicy,
+} from '@/lib/equipment-policy'
 
 import { describeDatabase, requireEnv } from '../lib/env-guard'
 import { db } from './db'
@@ -71,6 +75,7 @@ const PROVIDER_COLUMNS = {
   medicalDirectorStatus: providers.medicalDirectorStatus,
   licenseExpiry: providers.licenseExpiry,
   revenueModel: providers.revenueModel,
+  equipmentPolicyAckVersion: providers.equipmentPolicyAckVersion,
   requiresPasswordReset: providers.requiresPasswordReset,
   hasPassword: sql<boolean>`${providers.passwordHash} is not null`,
 }
@@ -131,6 +136,20 @@ const CHECKS: Check[] = [
       return bookingBlockedReasons(user)
         .map((g) => g.gate)
         .join(', ')
+    },
+  },
+  {
+    label: 'the e2e provider has accepted the equipment policy',
+    because:
+      'the booking form is behind the policy interstitial, so the journey spec renders the agreement instead and then fails on a missing time slot — an error about availability, again, for something that is not about availability',
+    run: async () => {
+      const email = process.env.E2E_PROVIDER_EMAIL
+      if (!email) return 'E2E_PROVIDER_EMAIL is not set'
+      const row = await byEmail(email)
+      if (!row) return `${email} has no provider row`
+      return hasAcceptedEquipmentPolicy(row.equipmentPolicyAckVersion)
+        ? true
+        : `accepted '${row.equipmentPolicyAckVersion ?? 'nothing'}', current is '${EQUIPMENT_POLICY_VERSION}'`
     },
   },
   {

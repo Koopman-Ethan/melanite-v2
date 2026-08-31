@@ -31,16 +31,16 @@ const when = (d: Date) =>
 
 const daysAgo = (d: Date) => Math.floor((Date.now() - d.getTime()) / 86_400_000)
 
-function Photo({ storageKey, alt }: { storageKey: string; alt: string }) {
+function Photo({ checkId, alt }: { checkId: string; alt: string }) {
   // A plain <img>, not next/image. Running these through the optimiser would mean adding a
   // remote pattern for the blob host and caching optimised copies of operational photographs in
   // a second place — more surface for images whose whole point is that they live in exactly one
   // known location. They are thumbnails of a machine; the LCP argument does not apply.
   return (
-    <a href={equipmentPhotoUrl(storageKey)} target="_blank" rel="noreferrer" className="shrink-0">
+    <a href={equipmentPhotoUrl(checkId)} target="_blank" rel="noreferrer" className="shrink-0">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
-        src={equipmentPhotoUrl(storageKey)}
+        src={equipmentPhotoUrl(checkId)}
         alt={alt}
         loading="lazy"
         className="size-24 rounded-field border border-line object-cover"
@@ -75,7 +75,7 @@ export default async function EquipmentPage() {
           <ul className="mt-3 space-y-3">
             {flagged.map((f) => (
               <li key={f.id} className="flex gap-3 rounded-card border border-line bg-surface p-3">
-                <Photo storageKey={f.storageKey} alt={`Laser, reported by ${f.providerName}`} />
+                <Photo checkId={f.id} alt={`Laser, reported by ${f.providerName}`} />
                 <div className="min-w-0">
                   <p className="text-sm font-medium">{f.providerName}</p>
                   <p className="mt-0.5 text-xs text-ink-muted">
@@ -147,7 +147,7 @@ export default async function EquipmentPage() {
           <ul className="grid gap-3 sm:grid-cols-2">
             {recent.map((c) => (
               <li key={c.id} className="flex gap-3 rounded-card border border-line bg-surface p-3">
-                <Photo storageKey={c.storageKey} alt={`Laser, ${when(c.recordedAt)}`} />
+                <Photo checkId={c.id} alt={`Laser, ${when(c.recordedAt)}`} />
                 <div className="min-w-0">
                   <p className="text-sm">{c.providerName}</p>
                   <p className="mt-0.5 text-xs text-ink-muted">
