@@ -88,6 +88,17 @@ export default async function AdminHome() {
       </Link>
 
       <Link
+        href="/app/admin/equipment"
+        className="block rounded-card border border-line bg-surface p-6 transition-colors hover:border-line-strong"
+      >
+        <div className="text-xs uppercase tracking-wide text-ink-muted">Equipment</div>
+        <div className="mt-1.5 text-sm text-ink-secondary">
+          The laser, photographed by whoever had it — and the sessions nobody accounted for
+        </div>
+        <div className="mt-4 text-sm text-gold">Check the laser →</div>
+      </Link>
+
+      <Link
         href="/app/admin/queue"
         className="block rounded-card border border-line bg-surface p-6 transition-colors hover:border-line-strong"
       >

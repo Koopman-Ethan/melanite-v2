@@ -3,7 +3,14 @@ import 'server-only'
 import { eq } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
-import { bookings, providerServices, providers, roomBookings, services } from '@/lib/db/schema'
+import {
+  bookings,
+  equipmentChecks,
+  providerServices,
+  providers,
+  roomBookings,
+  services,
+} from '@/lib/db/schema'
 import {
   MELANITE_NOTIFY_EMAIL,
   ROOM_SLOT_LABELS,
@@ -12,6 +19,7 @@ import {
   bookingAccessRestoredEmail,
   bookingPaymentSummary,
   deskBookingEmail,
+  deskEquipmentFlaggedEmail,
   deskProviderAccessEmail,
   deskRoomRentalEmail,
   roomDateLabel,
@@ -216,5 +224,41 @@ export async function notifyBookingAccessChanged(
     })
   } catch (err) {
     console.error(`[email] booking access ${next} alert failed for provider`, providerId, err)
+  }
+}
+
+/** A provider has flagged a problem with the laser.
+ *
+ *  Goes only to Melanite. The provider already knows — they are the one holding the phone — and
+ *  the point of this message is that somebody who is NOT in the room finds out the same day. */
+export async function notifyEquipmentFlagged(checkId: string): Promise<void> {
+  try {
+    const [row] = await db
+      .select({
+        kind: equipmentChecks.kind,
+        recordedAt: equipmentChecks.recordedAt,
+        note: equipmentChecks.note,
+        firstName: providers.firstName,
+        lastName: providers.lastName,
+      })
+      .from(equipmentChecks)
+      .innerJoin(providers, eq(equipmentChecks.providerId, providers.id))
+      .where(eq(equipmentChecks.id, checkId))
+      .limit(1)
+
+    if (!row) return
+
+    await sendEmail({
+      to: MELANITE_NOTIFY_EMAIL,
+      ...deskEquipmentFlaggedEmail({
+        providerName: `${row.firstName} ${row.lastName}`,
+        kind: row.kind,
+        when: appointmentWhen(row.recordedAt),
+        note: row.note,
+        url: `${await appOrigin()}/app/admin/equipment`,
+      }),
+    })
+  } catch (err) {
+    console.error('[email] equipment flag alert failed for check', checkId, err)
   }
 }

@@ -58,6 +58,7 @@ function asSessionUser(row: {
     lastName: '',
     roomRentalEnabled: true,
     requiresPasswordReset: false,
+    equipmentPolicyAckVersion: null,
   } as SessionUser
 }
 

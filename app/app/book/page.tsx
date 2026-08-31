@@ -10,7 +10,10 @@ import {
   getMonthAvailability,
 } from '@/lib/db/queries/availability'
 
+import { hasAcceptedEquipmentPolicy } from '@/lib/equipment-policy'
+
 import { BookPanel } from './book-panel'
+import { EquipmentAgreement } from './equipment-agreement'
 
 export const metadata: Metadata = { title: 'Book laser time · Melanite' }
 export const dynamic = 'force-dynamic'
@@ -35,6 +38,20 @@ export default async function BookPage({
         {/* A real apostrophe, not &rsquo; — this is a string prop, not JSX text, so an HTML
             entity would render literally. */}
         <BookingGates gates={bookingBlockedReasons(user)} heading="Booking isn’t available yet" />
+      </main>
+    )
+  }
+
+  // Asked once, after the clinical gates and before the form. Ordering matters: somebody who
+  // cannot book at all should be told that, not handed a policy about a machine they are not
+  // getting near.
+  if (!hasAcceptedEquipmentPolicy(user.equipmentPolicyAckVersion)) {
+    return (
+      <main className="mx-auto w-full max-w-2xl px-6 py-10 space-y-6">
+        <header>
+          <h1 className="text-2xl font-semibold">Book laser time</h1>
+        </header>
+        <EquipmentAgreement />
       </main>
     )
   }

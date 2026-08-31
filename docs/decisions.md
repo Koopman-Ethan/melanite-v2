@@ -1524,3 +1524,73 @@ worth doing before the roster grows.
 
 `E2E_PROVIDER_EMAIL`, `E2E_ADMIN_EMAIL`, `E2E_PROVIDER_PASSWORD` and `E2E_ADMIN_PASSWORD` now
 have to exist as repository secrets, or the new step fails.
+
+### Photographing the laser — 2026-08-31
+
+One laser, several providers who do not work alongside each other, and no record of what state the
+machine was in when it changed hands. Keoni wanted before-and-after photographs so a problem could
+be tied to a session.
+
+**Framing it as a chain of custody rather than a photo gallery decided most of the design.** The
+value is an unbroken sequence, so a GAP is the thing worth surfacing, and a record that can be
+faked is worth less than no record at all.
+
+**Software cannot enforce this, and pretending otherwise would build the wrong thing.** There is
+no interlock on a laser. Same honest limit `lib/room-procedures.ts` already states about
+declarations: it records intent, and no amount of software changes that.
+
+**The question that reshaped it, asked during planning:** if a provider misses their after-photo,
+how would they take it once somebody else has used the machine? They could not — and a photo taken
+then shows a state they did not leave it in. **Asking for a check retroactively would manufacture
+false evidence in the one record whose entire value is being trustworthy.** So nothing here ever
+asks for a check after its moment has passed, and a missing check stays missing. That killed the
+first proposal, which had an outstanding check gating the next booking.
+
+**Which leaves the before-photo as the spine.** The NEXT provider's arrival photograph IS the
+after-photo of the previous session — nothing happens to the machine in between — so consecutive
+arrivals bracket each use on their own. The after-photo only earns its place when nobody follows,
+so it is asked for only when the booking is the last use of the day or the gap exceeds
+`UNATTENDED_GAP_MINUTES`. Fewer asks, and the ones that happen are not redundant.
+
+The threshold lives in **one** place (`afterNeededGiven`) with two ways of feeding it: the
+dashboard has the whole day loaded, the appointments list gets the next use from a correlated
+subquery because it cannot hold a day in memory. Two sources for "who follows me", one definition
+of how long a gap has to be — which is the half that would otherwise drift.
+
+**The consequence is the absence itself.** A session with no arrival photo is permanently recorded
+as unaccounted for, with a name against it, and Keoni acts on patterns through `bookingEnabled` as
+she does today. Nothing blocks anybody mid-clinic with a client on the table.
+
+**The copy matters more than any rule here**, because none of it is enforceable. A provider who
+reads this as surveillance will skip it; one who reads it as their own alibi will not. The
+agreement says so in its second sentence.
+
+**This is the first binary the codebase has handled.** `documents.storageKey` had already decided
+the shape — opaque key in Postgres, URL resolved at read time — but nothing was ever built:
+no storage SDK, no upload route, no `<img>` anywhere in the app. Vercel Blob, wrapped like
+`lib/email.ts` wraps Resend, refusing honestly when unconfigured rather than throwing.
+
+**Photos are downscaled in the browser before upload** — 1600px, ~200–400KB. A treatment room on a
+phone signal is the worst upload the app will ever attempt, and a scratch is perfectly legible at
+that size. It also keeps the request inside the server action body limit that a raw phone photo
+would blow straight through.
+
+**Validation happens BEFORE anything is stored.** v1's endpoint called `storage.create_attachment`
+and only then checked MIME and size, so every refused file had already been written — a 50MB
+upload was rejected and kept. The tests assert the ordering, not just the rules: the mocked `put`
+must never have been called on a refusal.
+
+**Equipment only, and designed against drift.** Once a camera button exists in a laser clinic
+somebody will eventually point it at a client's skin, which is PHI and a different compliance
+posture entirely. `lib/blob.ts` says plainly what would have to change first — private blobs with
+signed URLs, an authorisation check on read, consent, retention, and a considered answer on HIPAA.
+Keys carry a check id and nothing about a person, because storage keys end up in URLs and logs.
+
+**Found by running it, not by reasoning:** the exceptions page opened with sixteen unbracketed
+sessions — every booking that predated the feature, none of which anybody could have photographed.
+`EQUIPMENT_LOG_STARTED_AT` bounds it, because an exceptions list full of things nobody could have
+affected is one people stop opening, which is the failure mode the admin home already warns about.
+
+**Not done:** retention. Photographs accumulate at a handful a day, which is trivial for years and
+still a decision being made by inaction. Room renters are also out of scope — a room rental
+explicitly does not book the laser — though they are in the room with it.
