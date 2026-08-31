@@ -78,6 +78,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   // Order matters — children first. Runs even if a test threw.
+  await db.execute(sql`DELETE FROM equipment_checks WHERE note = ${TAG}`)
   await db.execute(sql`DELETE FROM ledger_entries WHERE note = ${TAG}`)
   await db.execute(sql`DELETE FROM room_bookings WHERE provider_id = ${providerId}::uuid`)
   await db.execute(sql`DELETE FROM checkout_links WHERE token LIKE ${`${TAG}%`}`)
@@ -289,6 +290,84 @@ describe('ledger check constraints', () => {
     ).rows
 
     expect(Number(n)).toBe(2)
+  })
+})
+
+describe('equipment checks', () => {
+  /** A booking to hang photographs off. Cancelled deliberately — nothing here should care, and a
+   *  cancelled fixture cannot collide with a real appointment on the laser. */
+  async function aBooking(): Promise<string> {
+    const start = new Date(Date.UTC(2095, 0, 4, 17))
+    const [row] = (
+      await db.execute<{ id: string }>(sql`
+        INSERT INTO bookings
+          (provider_id, provider_service_id, client_name, original_price, price,
+           payment_source, duration_mins, start_time, end_time, status)
+        VALUES (${providerId}::uuid, ${providerServiceId}::uuid, ${TAG}, '100.00', '100.00',
+                'comped', 60, ${start.toISOString()}::timestamptz,
+                ${new Date(start.getTime() + 3_600_000).toISOString()}::timestamptz, 'cancelled')
+        RETURNING id
+      `)
+    ).rows
+    return row.id
+  }
+
+  it('accepts SEVERAL photos of the same end of the same session', async () => {
+    // Two angles of one scratch is an ordinary thing to want, and "was this session bracketed?"
+    // is an EXISTS rather than a count. A unique index on (booking, kind) would look tidy and
+    // would quietly refuse the second photograph of a problem — which is the one that shows it.
+    const bookingId = await aBooking()
+
+    for (const key of ['equipment/zz-a.jpg', 'equipment/zz-b.jpg']) {
+      await db.execute(sql`
+        INSERT INTO equipment_checks (booking_id, provider_id, kind, storage_key, note)
+        VALUES (${bookingId}::uuid, ${providerId}::uuid, 'before', ${key}, ${TAG})
+      `)
+    }
+
+    const [row] = (
+      await db.execute<{ n: number }>(
+        sql`SELECT count(*)::int AS n FROM equipment_checks WHERE booking_id = ${bookingId}::uuid`,
+      )
+    ).rows
+
+    expect(row.n).toBe(2)
+  })
+
+  it('refuses a photo against a booking that does not exist', async () => {
+    // The record is an attribution. One pointing at no appointment attributes nothing, and the
+    // FK is what stops a bad id becoming a row nobody can interpret.
+    await rejects(
+      sql`
+        INSERT INTO equipment_checks (booking_id, provider_id, kind, storage_key, note)
+        VALUES (gen_random_uuid(), ${providerId}::uuid, 'before', 'equipment/zz-orphan.jpg', ${TAG})
+      `,
+      'equipment_checks_booking_id_bookings_id_fk',
+    )
+  })
+
+  it('will not let a provider or a booking be deleted out from under a photo', async () => {
+    // Asserted against the catalog rather than by attempting a delete. A delete is refused by
+    // `bookings`' own RESTRICT first, so trying it proves nothing about THIS constraint — the
+    // rejection arrives under another name and the test would pass or fail for the wrong reason.
+    //
+    // What matters is that neither is 'c'. Cascade here would mean deleting a provider silently
+    // erases the record of what state they left a shared machine in, which is the one thing this
+    // table exists to remember.
+    const rows = (
+      await db.execute<{ conname: string; confdeltype: string }>(sql`
+        SELECT conname, confdeltype FROM pg_constraint
+        WHERE conrelid = 'equipment_checks'::regclass AND contype = 'f'
+        ORDER BY conname
+      `)
+    ).rows
+
+    expect(rows.map((r) => r.conname)).toEqual([
+      'equipment_checks_booking_id_bookings_id_fk',
+      'equipment_checks_provider_id_providers_id_fk',
+    ])
+    // 'r' is RESTRICT; 'c' would be CASCADE.
+    expect(rows.every((r) => r.confdeltype === 'r')).toBe(true)
   })
 })
 

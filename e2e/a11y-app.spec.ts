@@ -38,6 +38,7 @@ const PROVIDER_PAGES = [
 const ADMIN_PAGES = [
   { path: '/app/admin', name: 'admin home' },
   { path: '/app/admin/calendar', name: 'admin calendar' },
+  { path: '/app/admin/equipment', name: 'admin equipment' },
   { path: '/app/admin/queue', name: 'admin queue' },
   { path: '/app/admin/revenue', name: 'admin revenue' },
   { path: '/app/admin/tools', name: 'admin tools' },

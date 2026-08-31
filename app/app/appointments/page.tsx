@@ -12,9 +12,11 @@ import {
   type Appointment,
   type AppointmentStatus,
 } from '@/lib/db/queries/appointments'
+import { afterNeededGiven, checkWindowOpen } from '@/lib/equipment-checks'
 import { appOrigin } from '@/lib/stripe/config'
 
 import { AppointmentActions } from './appointment-actions'
+import { EquipmentCheck } from './equipment-check'
 import { BookedBanner } from './booked-banner'
 import { Filters } from './filters'
 
@@ -127,8 +129,48 @@ function AppointmentCard({ appointment }: { appointment: Appointment }) {
 
       <div className="mt-4">
         <AppointmentActions appointment={appointment} />
+        <EquipmentChecks appointment={appointment} />
       </div>
     </li>
+  )
+}
+
+/** The laser photographs for one appointment.
+ *
+ *  Only rendered inside the window around the session — a prompt sitting on an appointment three
+ *  weeks out is noise, and an appointment from last month cannot be photographed truthfully any
+ *  more. Cancelled and no-show bookings never touched the machine, so they get nothing.
+ *
+ *  The "after" prompt is deliberately absent when somebody follows soon: their arrival photo
+ *  already records the state this session left the laser in, and asking for a second photograph
+ *  of the same moment is how a prompt becomes something people click past. */
+function EquipmentChecks({ appointment }: { appointment: Appointment }) {
+  if (appointment.status === 'cancelled' || appointment.status === 'no_show') return null
+
+  const slot = {
+    id: appointment.id,
+    startTime: appointment.startTime,
+    endTime: appointment.endTime,
+  }
+  if (!checkWindowOpen(slot)) return null
+
+  const finished = appointment.endTime <= new Date()
+
+  return (
+    <div className="mt-3 border-t border-line pt-3">
+      <EquipmentCheck
+        bookingId={appointment.id}
+        kind="before"
+        done={appointment.hasBeforeCheck}
+      />
+      {finished && afterNeededGiven(appointment.endTime, appointment.nextLaserUseAt) && (
+        <EquipmentCheck
+          bookingId={appointment.id}
+          kind="after"
+          done={appointment.hasAfterCheck}
+        />
+      )}
+    </div>
   )
 }
 

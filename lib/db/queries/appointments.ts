@@ -6,6 +6,7 @@ import { db } from '@/lib/db'
 import {
   bookings,
   checkoutLinks,
+  equipmentChecks,
   packageRedemptions,
   prepaidRedemptions,
   providerServices,
@@ -57,6 +58,16 @@ export interface Appointment {
    *  flag above does — cancelling one of these as an ordinary booking would keep the
    *  client's money and give them nothing. */
   isPrepaidRedemption: boolean
+  /** Whether the laser was photographed around this session. Selected here rather than fetched
+   *  per card, because the appointments list is the one place a provider is already looking on
+   *  the day they need to do it. */
+  hasBeforeCheck: boolean
+  hasAfterCheck: boolean
+  /** When the laser is next used after this session ends, by ANY provider. Null when nothing
+   *  follows. Feeds `afterNeededGiven` — the whole point being that another provider's arrival
+   *  photo brackets this session, so it is a question about the machine and not about one
+   *  person's calendar. */
+  nextLaserUseAt: Date | null
 }
 
 /** Month boundaries computed in America/Denver. A booking at 7pm Mountain on the 31st is
@@ -117,6 +128,22 @@ export async function getAppointments(
         where ${prepaidRedemptions}.booking_id = ${bookings}.id
           and ${prepaidRedemptions}.voided_at is null
       )`,
+      hasBeforeCheck: sql<boolean>`exists (
+        select 1 from ${equipmentChecks}
+        where ${equipmentChecks}.booking_id = ${bookings}.id
+          and ${equipmentChecks}.kind = 'before'
+      )`,
+      hasAfterCheck: sql<boolean>`exists (
+        select 1 from ${equipmentChecks}
+        where ${equipmentChecks}.booking_id = ${bookings}.id
+          and ${equipmentChecks}.kind = 'after'
+      )`,
+      nextLaserUseAt: sql<Date | null>`(
+        select min(n.start_time) from bookings n
+        where n.status in ('upcoming', 'completed')
+          and n.id <> ${bookings}.id
+          and n.start_time >= ${bookings}.end_time
+      )`,
     })
     .from(bookings)
     .innerJoin(providerServices, eq(bookings.providerServiceId, providerServices.id))
@@ -175,6 +202,22 @@ async function getAppointmentsById(providerId: string, bookingId: string) {
         select 1 from ${prepaidRedemptions}
         where ${prepaidRedemptions}.booking_id = ${bookings}.id
           and ${prepaidRedemptions}.voided_at is null
+      )`,
+      hasBeforeCheck: sql<boolean>`exists (
+        select 1 from ${equipmentChecks}
+        where ${equipmentChecks}.booking_id = ${bookings}.id
+          and ${equipmentChecks}.kind = 'before'
+      )`,
+      hasAfterCheck: sql<boolean>`exists (
+        select 1 from ${equipmentChecks}
+        where ${equipmentChecks}.booking_id = ${bookings}.id
+          and ${equipmentChecks}.kind = 'after'
+      )`,
+      nextLaserUseAt: sql<Date | null>`(
+        select min(n.start_time) from bookings n
+        where n.status in ('upcoming', 'completed')
+          and n.id <> ${bookings}.id
+          and n.start_time >= ${bookings}.end_time
       )`,
     })
     .from(bookings)

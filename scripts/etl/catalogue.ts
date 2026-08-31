@@ -37,10 +37,15 @@ const LHR = 'Laser hair removal'
  *  Those are `suggested` and `max` — NOT both the default, which would block 90 minutes of
  *  laser for every back and cost most of a treatment slot a day.
  *
- *  Three she did not cover are marked. They come from the bracket the old sizes put them in, so
- *  they can be corrected without re-deriving which ones were guessed. */
+ *  The ones she did not cover are marked. They come from the bracket the old sizes put them in,
+ *  so they can be corrected without re-deriving which ones were guessed.
+ *
+ *  Chin was added 2026-08-28, after that list, at the client's request. It was proposed on the
+ *  upper lip bracket — comparable area, same laser time — and Keoni confirmed 15/15/30 the same
+ *  day, so it counts as hers rather than a guess. */
 const AREAS: [name: string, suggested: number, min: number, max: number, fromKeoni: boolean][] = [
   ['Upper Lip', 15, 15, 30, true],
+  ['Chin', 15, 15, 30, true], // added 2026-08-28, confirmed by Keoni the same day
   ['Full Face', 15, 15, 30, true],
   ['Underarms', 15, 15, 30, true],
   ['Half Arms', 30, 15, 60, false], // proposed: old Medium bracket, with half leg

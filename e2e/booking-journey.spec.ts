@@ -46,6 +46,14 @@ test.describe('booking to payment link', () => {
       'the seeded provider is blocked by a booking gate — check medical director and licence',
     ).toHaveCount(0)
 
+    // The equipment policy stands in the same place and renders the same h1 above it, so it
+    // fails identically: no slots, and an error about availability. Named separately because the
+    // fix is different — run dev-e2e-credentials, not a look at the gates.
+    await expect(
+      page.getByRole('heading', { name: 'Photographing the laser' }),
+      'the seeded provider has not accepted the equipment policy — run npm run dev:e2e-credentials',
+    ).toHaveCount(0)
+
     // Pick the first open time.
     const slot = page.locator('button', { hasText: /^\d{1,2}:\d{2} (AM|PM)$/ }).first()
     await expect(slot).toBeVisible()

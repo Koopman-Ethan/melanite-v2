@@ -988,3 +988,47 @@ export function deskProviderAccessEmail(input: {
     ),
   }
 }
+
+/** Tells Melanite a provider has flagged something wrong with the laser.
+ *
+ *  The difference between finding a damaged machine today and finding it weeks later in a folder
+ *  of photographs. The provider is standing in front of it when they send this; Keoni is not. */
+export function deskEquipmentFlaggedEmail(input: {
+  providerName: string
+  kind: 'before' | 'after'
+  when: string
+  note: string | null
+  url: string
+}): Omit<EmailMessage, 'to'> {
+  const moment =
+    input.kind === 'before'
+      ? 'when they arrived, before their appointment'
+      : 'after their appointment, on the way out'
+
+  // Their words, or an honest admission that there are none. "No note" is information: it means
+  // look at the photograph, because nobody has told you what you are looking for.
+  const said = input.note
+    ? `They said: "${input.note}"`
+    : 'They left no note, so the photo is the whole message.'
+
+  return {
+    subject: `Laser flagged by ${input.providerName}`,
+    text: [
+      `${input.providerName} has flagged a problem with the laser.`,
+      '',
+      `Noticed ${moment} — ${input.when}.`,
+      '',
+      said,
+      '',
+      'See the photo:',
+      input.url,
+    ].join('\n'),
+    html: wrap(
+      'A provider flagged the laser',
+      p(`<strong>${input.providerName}</strong> has flagged a problem with the laser.`) +
+        p(`Noticed ${moment} — ${input.when}.`) +
+        p(said),
+      { label: 'See the photo', url: input.url },
+    ),
+  }
+}
