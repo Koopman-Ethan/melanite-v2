@@ -1596,6 +1596,33 @@ the shape — opaque key in Postgres, URL resolved at read time — but nothing 
 no storage SDK, no upload route, no `<img>` anywhere in the app. Vercel Blob, wrapped like
 `lib/email.ts` wraps Resend, refusing honestly when unconfigured rather than throwing.
 
+**The store is PRIVATE, which turned out better than planned.** This was designed expecting
+public-with-unguessable-URLs, and said so: acceptable only because the subject is a machine.
+Vercel offers private stores, so photos are now served through
+`/api/equipment/photo/[checkId]` — which means a read is AUTHORISED rather than "whoever ended
+up with the link". Two of the four things `lib/blob.ts` lists as prerequisites for ever holding
+anything more sensitive are now done; the remaining two, retention and a real answer on HIPAA,
+are not.
+
+It also removed a configuration failure mode: there is no public base URL to set, and therefore
+no state where uploads succeed while every thumbnail silently breaks.
+
+**Two things only a real upload could have found**, both wrong in ways that type-checked and
+tested clean:
+
+- `put` was called with `access: 'public'` on the theory that the per-object setting was a
+  separate knob from the store's. It is not — "Cannot use public access on a private store" —
+  and a code comment asserted the opposite, which is worse than no comment.
+- The read used `head()` plus a plain `fetch` of the returned URL. On a private store that
+  fetch is refused, so every thumbnail 404'd while the upload had plainly succeeded. `get()`
+  reads with the token and is the right call.
+
+**One store serves production and appdev**, because two would mean two variables of the same
+name and a per-environment lookup that is easy to get subtly wrong. Two consequences handled:
+deletes are refused outside production, so a failed dev write can never remove a photograph of
+the real machine; and keys carry an environment prefix, so a test upload sits visibly apart from
+the genuine article instead of being an indistinguishable uuid beside it.
+
 **Photos are downscaled in the browser before upload** — 1600px, ~200–400KB. A treatment room on a
 phone signal is the worst upload the app will ever attempt, and a scratch is perfectly legible at
 that size. It also keeps the request inside the server action body limit that a raw phone photo
@@ -1616,6 +1643,14 @@ Keys carry a check id and nothing about a person, because storage keys end up in
 sessions — every booking that predated the feature, none of which anybody could have photographed.
 `EQUIPMENT_LOG_STARTED_AT` bounds it, because an exceptions list full of things nobody could have
 affected is one people stop opening, which is the failure mode the admin home already warns about.
+
+**The agreement had to become dev fixture state.** It stands in front of the booking form and
+renders the same `<h1>` above itself, so a provider who has not accepted it reaches no time
+slots — and the suite failed with "element not found" for the slot picker, an error about
+availability for something that is not about availability. Exactly the trap the booking gates
+had, found the same way and fixed the same way: `dev-e2e-credentials.ts` accepts it,
+`dev-usable.ts` asserts it, and the journey spec now names it rather than failing eight lines
+later.
 
 **Not done:** retention. Photographs accumulate at a handful a day, which is trivial for years and
 still a decision being made by inaction. Room renters are also out of scope — a room rental
