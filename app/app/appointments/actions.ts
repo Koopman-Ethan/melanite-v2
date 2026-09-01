@@ -408,7 +408,19 @@ export async function markNoShow(
 }
 
 /** Mark a past appointment as completed. v1 had no such endpoint — bookings simply stayed
- *  `upcoming` forever, which is a large part of why stale appointments accumulate. */
+ *  `upcoming` forever, which is a large part of why stale appointments accumulate.
+ *
+ *  IT RECORDS THAT THE TREATMENT HAPPENED. Nothing more, and deliberately so.
+ *
+ *  It used to do more than that by accident: `getCheckoutByToken` refused to let anything that
+ *  was not `upcoming` be paid, so pressing this on an unpaid appointment quietly locked the
+ *  client out of paying — by link and by the emailed link alike — and the page told them to
+ *  contact their provider, who had just caused it. A provider pressing "Completed" is saying
+ *  she did the work, which is the moment the money is MOST owed, not least.
+ *
+ *  Availability, earnings and the calendar all treat `upcoming` and `completed` the same. That
+ *  is the intended shape: this is a record, and nothing should hang consequences off it without
+ *  saying so here. */
 export async function markCompleted(bookingId: string): Promise<ActionState> {
   const user = await requireProvider()
 

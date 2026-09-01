@@ -131,12 +131,22 @@ export async function getBookingCheckout(token: string): Promise<BookingCheckout
         ? 'cancelled'
         : row.expiresAt < new Date()
           ? 'expired'
-          : // A link can be live while the appointment behind it is not — cancelled from the
-            // provider's side, or already past. Paying then would take money for nothing.
-            // A house appointment is Melanite's own: the charge stays on the platform
-            // account, so there is no Connect account to be missing and nothing to check.
-            row.bookingStatus !== 'upcoming' ||
-              (row.providerRevenueModel !== 'house' && !row.providerStripeAccount)
+          : // Cancelled and no-show cannot be paid HERE: nothing was delivered, and a no-show is
+            // settled through the fee path rather than the service price. Completed emphatically
+            // can — the treatment happened, which is exactly when the money is owed.
+            //
+            // This used to refuse anything that was not `upcoming`, on the reasoning that paying
+            // for an appointment already past "would take money for nothing". True of a
+            // cancellation and precisely backwards for a completed one: a provider who pressed
+            // Completed before her client paid locked that client out of paying at all, by link
+            // and by the emailed link alike, and the page told them to contact their provider —
+            // who had just caused it. One real $70 treatment sat unpaid that way.
+            //
+            // A house appointment is Melanite's own: the charge stays on the platform account,
+            // so there is no Connect account to be missing and nothing to check.
+            row.bookingStatus === 'cancelled' ||
+            row.bookingStatus === 'no_show' ||
+            (row.providerRevenueModel !== 'house' && !row.providerStripeAccount)
             ? 'unpayable'
             : 'payable'
 
