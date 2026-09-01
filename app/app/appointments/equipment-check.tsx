@@ -15,9 +15,14 @@ import { recordEquipmentCheck, type CheckState } from './equipment-actions'
 /** Longest edge after downscaling.
  *
  *  A phone photo is 3–5MB and a treatment room is the worst signal the app will ever see. At
- *  1600px a scratch, a warning light or a depleted consumable is perfectly legible and the file
- *  lands around 200–400KB — the difference between an upload that finishes while they put the
- *  phone down and one they cancel.
+ *  1600px a scratch, a warning light or a depleted consumable is perfectly legible.
+ *
+ *  Measured on a real iPhone photo through this path on 1 September: 1200x1600, and 671KB and
+ *  714KB for the two checks. This comment previously guessed 200–400KB, which was optimistic by
+ *  about half — worth stating as measurement rather than estimate, since the number is the whole
+ *  argument for downscaling at all. Still roughly a fifth of the original, which is the
+ *  difference between an upload that finishes while they put the phone down and one they
+ *  cancel.
  *
  *  It also keeps the request inside the server action body limit, which a raw phone photo would
  *  blow straight through. */
