@@ -22,6 +22,10 @@ import { recordEquipmentCheck, type CheckState } from './equipment-actions'
  *  It also keeps the request inside the server action body limit, which a raw phone photo would
  *  blow straight through. */
 const MAX_EDGE = 1600
+
+/** What `lib/blob.ts` will actually take. Kept here only to decide whether a file can skip the
+ *  canvas — the authoritative check is on the server. */
+const SERVER_ACCEPTS = new Set(['image/jpeg', 'image/png', 'image/webp'])
 const QUALITY = 0.82
 
 /** Redraws the photo smaller, in the browser, before it is ever sent.
@@ -34,7 +38,11 @@ async function downscale(file: File): Promise<File> {
   try {
     const bitmap = await createImageBitmap(file)
     const scale = Math.min(1, MAX_EDGE / Math.max(bitmap.width, bitmap.height))
-    if (scale === 1 && file.size < 1_000_000) return file
+    // Small AND already a type the server takes. The second half matters: an iPhone hands back
+    // HEIC from the photo library, which is often under a megabyte and which the server refuses.
+    // Returning it untouched would turn a good photo into "Photos only — JPEG, PNG or WebP".
+    // Redrawing it through the canvas is what makes it a JPEG.
+    if (scale === 1 && file.size < 1_000_000 && SERVER_ACCEPTS.has(file.type)) return file
 
     const canvas = document.createElement('canvas')
     canvas.width = Math.round(bitmap.width * scale)
@@ -81,9 +89,17 @@ export function EquipmentCheck({
     setFileName(file.name)
 
     const smaller = await downscale(file)
-    const box = new DataTransfer()
-    box.items.add(smaller)
-    if (fileRef.current) fileRef.current.files = box.files
+
+    // Putting the shrunken file back into the input is what makes the form submit it. Wrapped
+    // because DataTransfer is the one API here a phone might not have, and failing it must leave
+    // the ORIGINAL photo sitting in the input — a slow upload beats a dead button.
+    try {
+      const box = new DataTransfer()
+      box.items.add(smaller)
+      if (fileRef.current) fileRef.current.files = box.files
+    } catch {
+      /* keep whatever the picker put there */
+    }
   }
 
   if (done && !state.success) {
@@ -128,7 +144,13 @@ export function EquipmentCheck({
           id={`photo-${bookingId}-${kind}`}
           name="photo"
           type="file"
-          accept="image/jpeg,image/png,image/webp"
+          // `image/*`, NOT the three types the server accepts. An explicit MIME list here is the
+          // difference between a control that opens and one that does nothing at all when tapped:
+          // phones match `accept` against their own idea of a file's type, and an entry they do
+          // not recognise — `image/webp` on older iOS — can leave the picker with nothing it is
+          // willing to offer, so it silently declines to appear. The server still enforces the
+          // real allowlist, which is where it belongs.
+          accept="image/*"
           // Opens the rear camera straight away on a phone rather than a file browser. Ignored on
           // desktop, which falls back to picking a file.
           capture="environment"
