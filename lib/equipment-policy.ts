@@ -17,7 +17,7 @@
 // provider who understands that is a provider who photographs the machine when they arrive.
 
 /** Bump when the WORDING changes in a way somebody should re-read. Providers are asked again. */
-export const EQUIPMENT_POLICY_VERSION = '2026-08-31.v1'
+export const EQUIPMENT_POLICY_VERSION = '2026-09-01.v1'
 
 /** When providers were first asked to do this.
  *
@@ -35,7 +35,7 @@ export const EQUIPMENT_POLICY_TITLE = 'Photographing the laser'
 /** Shown once, before a provider books their next appointment. Written to be read in about
  *  twenty seconds by somebody who wants to get on with booking. */
 export const EQUIPMENT_POLICY_POINTS: readonly string[] = [
-  'Photograph the laser when you arrive, before you start treating. It takes a few seconds from your phone.',
+  'Photographing the laser is expected of everyone who uses it — it comes with sharing one machine between separate practices. Do it when you arrive, before you start treating. It takes a few seconds from your phone.',
   'This is mostly for your protection. If the machine is already marked when you get it, your photo is what shows it was not you.',
   'When nobody is booked after you, photograph it again before you leave. If someone follows you the same day, their arrival photo covers it and we will not ask.',
   'If something looks wrong — damage, a warning light, a consumable running out — flag it on the photo. That reaches Melanite the same day rather than sitting in a folder.',
@@ -43,9 +43,14 @@ export const EQUIPMENT_POLICY_POINTS: readonly string[] = [
 ] as const
 
 /** Said out loud rather than implied, because a provider who thinks they are being blocked will
- *  look for a way around it and a provider who knows the record is simply incomplete will not. */
+ *  look for a way around it and a provider who knows the record is simply incomplete will not.
+ *
+ *  It also states that Melanite can see the difference. Every other line here is written as the
+ *  provider's own interest, which is true and is what gets the photographs taken — but it left
+ *  the owner nothing to point at when raising a pattern with somebody. Saying it plainly is
+ *  fairer than letting a provider discover it from a conversation she did not expect. */
 export const EQUIPMENT_POLICY_CONSEQUENCE =
-  'Nothing stops you working if you forget — you will never be locked out mid-clinic. But a session with no arrival photo cannot be tied to a condition either way, so if something is found afterwards there is nothing showing it was not yours.'
+  'Nothing stops you working if you forget — you will never be locked out mid-clinic. Melanite can see which sessions were photographed and which were not. And a session with no arrival photo cannot be tied to a condition either way, so if something is found afterwards there is nothing showing it was not yours.'
 
 /** Has this provider accepted the CURRENT wording?
  *
