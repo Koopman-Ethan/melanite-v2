@@ -7,7 +7,12 @@ import { cn } from '@/lib/cn'
 import { licenseStatus, type LicenseStatus } from '@/lib/license'
 import { requiresMedicalDirection, supervisedLabels } from '@/lib/room-procedures'
 
-import { setPracticeType, setProviderAccess, type ToggleState } from './actions'
+import {
+  setMedicalDirectorConfirmed,
+  setPracticeType,
+  setProviderAccess,
+  type ToggleState,
+} from './actions'
 
 export interface RosterView {
   id: string
@@ -27,6 +32,18 @@ export interface RosterView {
   declared: boolean
   stripeConnected: boolean
   payoutsEnabled: boolean
+  /** What the provider filed about her own director, on the `own` path. Null when she has filed
+   *  nothing, and on the Melanite plan where the director is Melanite's. */
+  director: {
+    name: string
+    credentials: string | null
+    npi: string | null
+    licenseNumber: string | null
+    licenseState: string | null
+    licenseExpiry: string | null
+    contactEmail: string | null
+    contactPhone: string | null
+  } | null
 }
 
 /** A readiness signal, stated in words as well as colour. */
@@ -106,6 +123,14 @@ export function Roster({
     start(async () => {
       applyOptimistic({ id: providerId, field, value })
       setState(await setProviderAccess({ providerId, field, value }))
+    })
+
+  // Not optimistic either, and for a sharper reason than `move`: this is the clinical gate. A
+  // toggle that slid to "confirmed" and then failed on the server would leave Melanite believing
+  // she had accepted a supervision arrangement she had not.
+  const confirmDirector = (providerId: string, confirmed: boolean) =>
+    start(async () => {
+      setState(await setMedicalDirectorConfirmed({ providerId, confirmed }))
     })
 
   // Not optimistic. Moving somebody to the laser can send their account back into setup, and a
@@ -188,6 +213,37 @@ export function Roster({
                   }
                 />
 
+                {/* Everything she filed about her director, so the decision below can be made
+                    from the roster rather than by opening a database. A name and a licence are
+                    what make "she has a director" checkable against a state register. */}
+                {provider.director && (
+                  <div className="basis-full rounded-field border border-line bg-overlay p-3">
+                    <p className="text-xs text-ink-secondary">
+                      {provider.director.name}
+                      {provider.director.credentials && (
+                        <span className="text-ink-muted">, {provider.director.credentials}</span>
+                      )}
+                    </p>
+                    <p className="mt-1 text-[11px] text-ink-faint tabular-nums">
+                      {[
+                        provider.director.npi && `NPI ${provider.director.npi}`,
+                        provider.director.licenseNumber &&
+                          `License ${provider.director.licenseNumber}${
+                            provider.director.licenseState
+                              ? ` (${provider.director.licenseState})`
+                              : ''
+                          }`,
+                        provider.director.licenseExpiry &&
+                          `expires ${provider.director.licenseExpiry}`,
+                        provider.director.contactEmail,
+                        provider.director.contactPhone,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ') || 'No other details given.'}
+                    </p>
+                  </div>
+                )}
+
                 {/* What they said they would be doing in that room. Melanite cannot see inside
                     it, so this declaration is the only basis for the toggle below — and a
                     toggle whose reason is invisible is one that gets flipped back on. */}
@@ -236,6 +292,18 @@ export function Roster({
                   label="Can rent the room"
                   onChange={(next) => flip(provider.id, 'roomRentalEnabled', next)}
                 />
+
+                {/* Own-director path only. On the Melanite plan this column belongs to Stripe,
+                    and a hand-set value would be overwritten at the next billing event while
+                    meanwhile asserting a subscription nobody is paying for. */}
+                {provider.medicalDirectorType === 'own' && (
+                  <Toggle
+                    on={provider.medicalDirectorStatus === 'active'}
+                    disabled={!provider.director}
+                    label="Director confirmed"
+                    onChange={(next) => confirmDirector(provider.id, next)}
+                  />
+                )}
 
                 {/* People change what they do. This exists so that never means a database
                     edit — the reason the column was added rather than inferred. */}

@@ -36,6 +36,13 @@ export async function createSession(
     ipAddress: meta.ipAddress ?? null,
   })
 
+  // Stamped HERE rather than in the sign-in form, because a session beginning is what "signed
+  // in" means — and the form is not the only way one begins. A provider who accepts an invite
+  // goes straight from onboarding into the app with a session and never touches the login page,
+  // so she read as "never signed in" on her own account page and to Melanite, while plainly
+  // being logged in. Every caller of this function now records it, including any added later.
+  await db.update(providers).set({ lastLoginAt: new Date() }).where(eq(providers.id, providerId))
+
   const store = await cookies()
   store.set(SESSION_COOKIE, token, {
     httpOnly: true,
