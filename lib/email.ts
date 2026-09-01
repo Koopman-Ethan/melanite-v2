@@ -988,3 +988,68 @@ export function deskProviderAccessEmail(input: {
     ),
   }
 }
+
+/** A provider has filed her own medical director, and Melanite has to decide whether it stands.
+ *
+ *  Deliberately NOT written as "approved" or "rejected" — nothing has been decided by anyone yet,
+ *  and the email exists precisely because the decision is a person's. It carries enough to start
+ *  checking: a name, an NPI and a licence are what turn "she says she has a director" into
+ *  something verifiable against a state register. */
+export function deskMedicalDirectorEmail(input: {
+  providerName: string
+  directorName: string
+  directorCredentials: string | null
+  npi: string | null
+  licenseNumber: string | null
+  licenseState: string | null
+  licenseExpiry: string | null
+  contactEmail: string | null
+  contactPhone: string | null
+  changed: boolean
+  stillBlocked: boolean
+  url: string
+}): Omit<EmailMessage, 'to'> {
+  const director = input.directorCredentials
+    ? `${input.directorName}, ${input.directorCredentials}`
+    : input.directorName
+
+  const detail = [
+    input.npi ? `NPI ${input.npi}` : null,
+    input.licenseNumber
+      ? `License ${input.licenseNumber}${input.licenseState ? ` (${input.licenseState})` : ''}`
+      : null,
+    input.licenseExpiry ? `Expires ${input.licenseExpiry}` : null,
+    input.contactEmail,
+    input.contactPhone,
+  ].filter(Boolean) as string[]
+
+  const consequence = input.stillBlocked
+    ? 'She cannot book laser time until you confirm this and open her booking access.'
+    : 'She is already booking — this is a change to details you have previously accepted, not a new arrangement.'
+
+  return {
+    subject: input.changed
+      ? `Medical director updated: ${input.providerName}`
+      : `Medical director filed: ${input.providerName}`,
+    text: [
+      input.changed
+        ? `${input.providerName} has changed her medical director details.`
+        : `${input.providerName} has filed her own medical director.`,
+      '',
+      director,
+      ...detail,
+      '',
+      consequence,
+      '',
+      'Providers:',
+      input.url,
+    ].join('\n'),
+    html: wrap(
+      input.changed ? 'A medical director changed' : 'A medical director was filed',
+      p(`<strong>${input.providerName}</strong>`) +
+        p(`${director}${detail.length ? `<br>${detail.join('<br>')}` : ''}`) +
+        p(consequence),
+      { label: 'Open the provider roster', url: input.url },
+    ),
+  }
+}

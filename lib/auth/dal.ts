@@ -121,8 +121,15 @@ export function bookingBlockedReasons(user: SessionUser): BlockedGate[] {
   }
 
   if (user.medicalDirectorStatus !== 'active') {
-    const message =
-      user.medicalDirectorStatus === 'past_due'
+    // Filed but not yet confirmed is its own situation. Without this branch a provider who has
+    // just entered her director is told to go and set one up — back to the form she filled in a
+    // minute ago — which reads as the submission having failed.
+    const awaitingMelanite =
+      user.medicalDirectorStatus === 'none' && user.hasMedicalDirectorOnFile
+
+    const message = awaitingMelanite
+      ? 'Melanite is confirming your medical director. Booking opens once they have.'
+      : user.medicalDirectorStatus === 'past_due'
         ? 'Your medical director subscription is past due. Update your billing to resume booking.'
         : user.medicalDirectorStatus === 'inactive'
           ? 'Your medical director coverage is inactive.'
@@ -132,8 +139,9 @@ export function bookingBlockedReasons(user: SessionUser): BlockedGate[] {
       gate: 'medical_director',
       message,
       href: '/app/membership',
-      action:
-        user.medicalDirectorStatus === 'past_due'
+      action: awaitingMelanite
+        ? 'Check what you filed'
+        : user.medicalDirectorStatus === 'past_due'
           ? 'Update billing'
           : 'Set up your medical director',
     })

@@ -24,6 +24,7 @@ const base: SessionUser = {
   bookingEnabled: true,
   roomRentalEnabled: true,
   medicalDirectorStatus: 'active',
+  hasMedicalDirectorOnFile: false,
   // A licence on file and in date. It used to be null here, and the suite still passed —
   // because a null expiry cleared the licence gate rather than closing it. A fixture that
   // silently exercised the hole is part of why it survived this long.
@@ -151,6 +152,40 @@ describe('bookingBlockedReasons', () => {
     const [pastDue] = bookingBlockedReasons(user({ medicalDirectorStatus: 'past_due' }))
     const [none] = bookingBlockedReasons(user({ medicalDirectorStatus: 'none' }))
     expect(pastDue.message).not.toBe(none.message)
+  })
+})
+
+describe('a medical director that has been filed but not confirmed', () => {
+  // Filing does not open the gate — that is deliberate. But the message must stop telling her to
+  // do the thing she has just done, or the only signal she gets is that it did not work.
+  it('tells a provider who has filed nothing to set one up', () => {
+    const reasons = bookingBlockedReasons({
+      ...base,
+      medicalDirectorStatus: 'none',
+      hasMedicalDirectorOnFile: false,
+    })
+    const gate = reasons.find((r) => r.gate === 'medical_director')
+    expect(gate?.message).toMatch(/need a medical director on file/i)
+    expect(gate?.action).toMatch(/set up/i)
+  })
+
+  it('tells a provider who HAS filed one that Melanite is confirming it', () => {
+    const reasons = bookingBlockedReasons({
+      ...base,
+      medicalDirectorStatus: 'none',
+      hasMedicalDirectorOnFile: true,
+    })
+    const gate = reasons.find((r) => r.gate === 'medical_director')
+    expect(gate?.message).toMatch(/Melanite is confirming/i)
+    expect(gate?.message, 'she was told to set up what she already filed').not.toMatch(/need a medical director on file/i)
+  })
+
+  it('still blocks her either way', () => {
+    for (const filed of [true, false]) {
+      expect(
+        canBook({ ...base, medicalDirectorStatus: 'none', hasMedicalDirectorOnFile: filed }),
+      ).toBe(false)
+    }
   })
 })
 

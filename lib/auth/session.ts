@@ -2,11 +2,11 @@ import 'server-only'
 
 import { createHash, randomBytes } from 'node:crypto'
 
-import { and, eq, gt, lt, ne } from 'drizzle-orm'
+import { and, eq, gt, lt, ne, sql } from 'drizzle-orm'
 import { cookies } from 'next/headers'
 
 import { db } from '@/lib/db'
-import { providers, sessions } from '@/lib/db/schema'
+import { medicalDirectorCredentials, providers, sessions } from '@/lib/db/schema'
 
 export const SESSION_COOKIE = 'melanite_session'
 
@@ -36,6 +36,13 @@ export async function createSession(
     ipAddress: meta.ipAddress ?? null,
   })
 
+  // Stamped HERE rather than in the sign-in form, because a session beginning is what "signed
+  // in" means — and the form is not the only way one begins. A provider who accepts an invite
+  // goes straight from onboarding into the app with a session and never touches the login page,
+  // so she read as "never signed in" on her own account page and to Melanite, while plainly
+  // being logged in. Every caller of this function now records it, including any added later.
+  await db.update(providers).set({ lastLoginAt: new Date() }).where(eq(providers.id, providerId))
+
   const store = await cookies()
   store.set(SESSION_COOKIE, token, {
     httpOnly: true,
@@ -63,6 +70,8 @@ export interface SessionUser {
    *  it independently of laser access. */
   roomRentalEnabled: boolean
   medicalDirectorStatus: (typeof providers.$inferSelect)['medicalDirectorStatus']
+  /** She has filed director details. Independent of the status gate — see the query. */
+  hasMedicalDirectorOnFile: boolean
   /** `YYYY-MM-DD`, or null when the provider has none on file. A lapsed license blocks
    *  booking — v1's LICENSE_EXPIRED gate, which is easy to miss because it lives in the
    *  create endpoint rather than alongside the other two gates. */
@@ -88,11 +97,20 @@ export async function getSessionUser(): Promise<SessionUser | null> {
       bookingEnabled: providers.bookingEnabled,
       roomRentalEnabled: providers.roomRentalEnabled,
       medicalDirectorStatus: providers.medicalDirectorStatus,
+      // Whether she has FILED a director, which the status column cannot express: filing does
+      // not activate the gate, so "none" covers both the provider who has done nothing and the
+      // one waiting on Melanite. Telling the second to go and set one up sends her back to a
+      // form she has already filled in.
+      hasMedicalDirectorOnFile: sql<boolean>`${medicalDirectorCredentials.providerId} is not null`,
       licenseExpiry: providers.licenseExpiry,
       requiresPasswordReset: providers.requiresPasswordReset,
     })
     .from(sessions)
     .innerJoin(providers, eq(sessions.providerId, providers.id))
+    .leftJoin(
+      medicalDirectorCredentials,
+      eq(medicalDirectorCredentials.providerId, providers.id),
+    )
     .where(and(eq(sessions.tokenHash, hashToken(token)), gt(sessions.expiresAt, new Date())))
     .limit(1)
 
