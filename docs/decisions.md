@@ -1524,3 +1524,38 @@ worth doing before the roster grows.
 
 `E2E_PROVIDER_EMAIL`, `E2E_ADMIN_EMAIL`, `E2E_PROVIDER_PASSWORD` and `E2E_ADMIN_PASSWORD` now
 have to exist as repository secrets, or the new step fails.
+
+### Marking an appointment completed stopped the client paying — 2026-08-31
+
+A provider reported that a client could not pay: the payment page said *"This can't be paid right
+now. The appointment may have been cancelled or already taken place."* She asked for the link to
+be resent, and the resent link did exactly the same thing, because the link was never the problem.
+
+`getCheckoutByToken` refused anything whose booking was not `upcoming`, reasoning that paying for
+an appointment already past "would take money for nothing". That is true of a CANCELLED
+appointment and precisely backwards for a COMPLETED one: **a provider pressing "Completed" is
+saying she did the work, which is the moment the money is most owed, not least.** Three statuses
+that mean entirely different things had been collapsed into "not upcoming".
+
+So the sequence was: treat the client, press Completed, and thereby lock her out of paying — by
+link and by the emailed link alike — on a page telling her to contact the provider who had just
+caused it. One real $70 treatment sat unpaid that way.
+
+**It also corrects something recorded here days earlier.** `markCompleted` was described as
+carrying "zero downstream consequence" and therefore probably never clicked. Wrong on both counts:
+it silently made an unpaid appointment unpayable, and the provider who uses it is exactly the one
+who hit this. Availability, earnings and the calendar genuinely do ignore the distinction — the
+consequence was hiding in the checkout query, which nobody thinks of as part of that button.
+
+Now: `cancelled` and `no_show` stay unpayable — nothing was delivered, and a no-show is settled
+through the fee path at the cancellation rate rather than by charging the service price.
+`completed` is payable. `markCompleted` says in its docblock that it records the treatment
+happening and nothing else, and that anything hanging a consequence off it should say so there.
+
+Tested in all three directions, because a fix that opens the door too wide is the same class of
+bug: completed reaches a working payment page, cancelled and no-show still do not.
+
+**Worth generalising.** This was invisible for the same reason the licence hole was: a condition
+that reads sensibly, is wrong for one branch of an enum, and fails by refusing rather than by
+erroring. Nothing crashed, no test went red, and the only signal was a client who could not pay
+and a provider who assumed the link had expired.
