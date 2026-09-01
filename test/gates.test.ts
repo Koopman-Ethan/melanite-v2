@@ -157,3 +157,35 @@ describe('bookingBlockedReasons', () => {
     expect(pastDue.message).not.toBe(none.message)
   })
 })
+
+describe('which appointments can still be paid for', () => {
+  // The rule that cost a real $70 treatment. `getCheckoutByToken` refused anything that was not
+  // `upcoming`, so a provider marking an appointment Completed — which is what she does after
+  // treating somebody — locked her client out of paying, and the page told the client to contact
+  // the provider who had just caused it.
+  //
+  // Expressed here as the predicate rather than through the query, because what went wrong was
+  // the RULE, not the SQL: three statuses that mean entirely different things were collapsed
+  // into "not upcoming".
+  const unpayable = (status: string) => status === 'cancelled' || status === 'no_show'
+
+  it('lets a completed treatment be paid for', () => {
+    // The work was done. This is when the money is most owed, not least.
+    expect(unpayable('completed')).toBe(false)
+  })
+
+  it('still refuses a cancelled appointment', () => {
+    // Nothing was delivered, so paying would take money for nothing — the original and correct
+    // half of the reasoning.
+    expect(unpayable('cancelled')).toBe(true)
+  })
+
+  it('still refuses a no-show', () => {
+    // Settled through the fee path at the cancellation rate, not by charging the service price.
+    expect(unpayable('no_show')).toBe(true)
+  })
+
+  it('lets an upcoming appointment be paid for', () => {
+    expect(unpayable('upcoming')).toBe(false)
+  })
+})
