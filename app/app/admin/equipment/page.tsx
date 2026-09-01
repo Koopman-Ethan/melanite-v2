@@ -29,7 +29,17 @@ const when = (d: Date) =>
     timeZone: 'America/Denver',
   })
 
-const daysAgo = (d: Date) => Math.floor((Date.now() - d.getTime()) / 86_400_000)
+/** "today" / "yesterday" / "3 days ago", never "0d ago".
+ *
+ *  Follows `admin/queue`, which already says "since today" rather than a zero. A session from
+ *  last night rendering as "0d ago" reads as a bug on a page whose entire job is to be trusted at
+ *  a glance — and this list is the one Keoni is meant to act on. */
+function agoLabel(d: Date): string {
+  const days = Math.floor((Date.now() - d.getTime()) / 86_400_000)
+  if (days <= 0) return 'today'
+  if (days === 1) return 'yesterday'
+  return `${days} days ago`
+}
 
 function Photo({ checkId, alt }: { checkId: string; alt: string }) {
   // A plain <img>, not next/image. Running these through the optimiser would mean adding a
@@ -117,7 +127,7 @@ export default async function EquipmentPage() {
                   {s.serviceName} · {when(s.startTime)}
                 </span>
                 <span className="text-xs text-ink-faint tabular-nums">
-                  {daysAgo(s.startTime)}d ago
+                  {agoLabel(s.startTime)}
                   {s.hasAfter && ' · has a leaving photo'}
                 </span>
               </li>
