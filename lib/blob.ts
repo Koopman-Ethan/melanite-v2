@@ -196,23 +196,53 @@ export async function readEquipmentPhoto(
   }
 }
 
-/** Removes a stored photo. Used when the database write fails after the upload succeeded —
- *  otherwise a refused check leaves an orphan nobody can find, since the only pointer to it was
- *  the row that never landed. */
-export async function deleteEquipmentPhoto(storageKey: string): Promise<void> {
-  if (!blobConfigured()) return
+/** Does this key belong to the environment asking to delete it?
+ *
+ *  The load-bearing guard in this module. Dev's database is a COPY of production, so a check row
+ *  on appdev points at the production photograph — the real one, of the real machine. An
+ *  environment-blind delete button would let a test click on appdev destroy it, and blobs do not
+ *  come back.
+ *
+ *  Prefix ownership, not an environment flag: production owns `equipment/` except the dev subtree,
+ *  and everything else owns `equipment/dev/`. Each can only ever reach its own. */
+export function ownsStorageKey(storageKey: string): boolean {
+  const isDevKey = storageKey.startsWith('equipment/dev/')
+  return process.env.MELANITE_ENV === 'prod' ? !isDevKey : isDevKey
+}
 
-  // NEVER outside production. One store serves both environments, so a failed write during a dev
-  // test would otherwise delete a photograph of the real machine — the only destructive path in
-  // this feature, and not one worth leaving open for the sake of tidying up test rows.
-  if (process.env.MELANITE_ENV !== 'prod') {
-    console.warn('[blob] not deleting', storageKey, '— deletes are production-only')
-    return
+export type DeleteResult =
+  | { ok: true }
+  | { ok: false; reason: 'not-configured' | 'foreign' | 'failed'; detail: string }
+
+/** Destroys the bytes. Permanent — there is no undo and no copy.
+ *
+ *  Used for two things: cleaning up an object whose database row failed to write, and Melanite
+ *  removing a photograph that should not have been taken. Never for saving space; at roughly half
+ *  a gigabyte a year that is not a problem worth a delete button.
+ *
+ *  The CHECK ROW is never removed by this — see `equipmentChecks.photoDeletedAt`. Deleting the row
+ *  would turn a provider who photographed the laser into one who did not. */
+export async function deleteEquipmentPhoto(storageKey: string): Promise<DeleteResult> {
+  if (!blobConfigured()) {
+    return { ok: false, reason: 'not-configured', detail: 'Photo storage is not set up here.' }
+  }
+
+  if (!ownsStorageKey(storageKey)) {
+    // Refused rather than thrown, and logged loudly: this means a row is pointing at another
+    // environment's object, which on appdev is normal and expected after a copy-down.
+    console.warn('[blob] refusing to delete', storageKey, '— it belongs to another environment')
+    return {
+      ok: false,
+      reason: 'foreign',
+      detail: 'That photo belongs to a different environment and cannot be deleted from here.',
+    }
   }
 
   try {
     await del(storageKey)
+    return { ok: true }
   } catch (err) {
-    console.error('[blob] could not remove orphaned photo', storageKey, err)
+    console.error('[blob] could not remove photo', storageKey, err)
+    return { ok: false, reason: 'failed', detail: 'The photo could not be removed. Try again.' }
   }
 }

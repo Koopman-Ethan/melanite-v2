@@ -28,6 +28,9 @@ export interface EquipmentPhoto {
   note: string | null
   needsAttention: boolean
   providerName: string
+  /** Set when Melanite destroyed the photograph. The check itself still counts — see
+   *  `equipmentChecks.photoDeletedAt` for why the row outlives the file. */
+  photoDeletedAt: Date | null
 }
 
 /** Every photograph taken around one appointment, oldest first. */
@@ -40,6 +43,7 @@ export async function getChecksForBooking(bookingId: string): Promise<EquipmentP
       storageKey: equipmentChecks.storageKey,
       note: equipmentChecks.note,
       needsAttention: equipmentChecks.needsAttention,
+      photoDeletedAt: equipmentChecks.photoDeletedAt,
       providerName: sql<string>`${providers.firstName} || ' ' || ${providers.lastName}`,
     })
     .from(equipmentChecks)
@@ -149,6 +153,7 @@ export interface FlaggedCheck {
   providerName: string
   startTime: Date
   serviceName: string
+  photoDeletedAt: Date | null
 }
 
 /** Somebody said something is wrong. The top of Keoni's page. */
@@ -161,6 +166,7 @@ export async function getFlaggedChecks(): Promise<FlaggedCheck[]> {
       recordedAt: equipmentChecks.recordedAt,
       storageKey: equipmentChecks.storageKey,
       note: equipmentChecks.note,
+      photoDeletedAt: equipmentChecks.photoDeletedAt,
       providerName: sql<string>`${providers.firstName} || ' ' || ${providers.lastName}`,
       startTime: bookings.startTime,
       serviceName: services.name,
@@ -248,6 +254,7 @@ export async function getRecentChecks(limit = 40): Promise<RecentCheck[]> {
       storageKey: equipmentChecks.storageKey,
       note: equipmentChecks.note,
       needsAttention: equipmentChecks.needsAttention,
+      photoDeletedAt: equipmentChecks.photoDeletedAt,
       providerName: sql<string>`${providers.firstName} || ' ' || ${providers.lastName}`,
       startTime: bookings.startTime,
     })

@@ -721,6 +721,20 @@ export const equipmentChecks = pgTable('equipment_checks', {
   /** They are reporting a problem, not just filing a photograph. Emails Melanite immediately —
    *  the difference between finding a broken laser today and finding it in an archive later. */
   needsAttention: boolean().notNull().default(false),
+
+  /** The photograph was destroyed, but the CHECK still happened.
+   *
+   *  The row is deliberately kept. Every query that asks "was this session accounted for?" asks
+   *  whether a check row exists, so deleting the row outright would silently turn a provider who
+   *  complied into one who did not — rewriting history as a side effect of tidying up. The bytes
+   *  go permanently; the fact that she photographed the laser does not.
+   *
+   *  Exists for removing what should never have been stored — a client caught in frame is health
+   *  information sitting in a store built for a machine — not for saving space. At roughly half a
+   *  gigabyte a year, space is not the problem. */
+  photoDeletedAt: timestamp({ withTimezone: true }),
+  photoDeletedBy: uuid().references(() => providers.id, { onDelete: 'restrict' }),
+  photoDeletedReason: text(),
 }, (t) => [
   index().on(t.bookingId, t.kind),
   index().on(t.providerId, t.recordedAt.desc()),

@@ -364,6 +364,10 @@ describe('equipment checks', () => {
 
     expect(rows.map((r) => r.conname)).toEqual([
       'equipment_checks_booking_id_bookings_id_fk',
+      // Who destroyed the photograph, when Melanite removes one. RESTRICT for the same reason as
+      // the others: the row is a record of what happened to a shared machine, and deleting an
+      // account should never quietly take part of that record with it.
+      'equipment_checks_photo_deleted_by_providers_id_fk',
       'equipment_checks_provider_id_providers_id_fk',
     ])
     // 'r' is RESTRICT; 'c' would be CASCADE.

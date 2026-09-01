@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { blobConfigured, equipmentPhotoUrl, putEquipmentPhoto } from '@/lib/blob'
+import {
+  blobConfigured,
+  deleteEquipmentPhoto,
+  equipmentPhotoUrl,
+  ownsStorageKey,
+  putEquipmentPhoto,
+} from '@/lib/blob'
 
 // What is allowed into the photo store, and — the part that matters — WHEN it is checked.
 //
@@ -14,9 +20,10 @@ import { blobConfigured, equipmentPhotoUrl, putEquipmentPhoto } from '@/lib/blob
 // the spy sees a call it should never have received.
 
 const put = vi.hoisted(() => vi.fn())
+const del = vi.hoisted(() => vi.fn())
 vi.mock('@vercel/blob', () => ({
   put,
-  del: vi.fn(),
+  del,
 }))
 
 /** The shape `putEquipmentPhoto` actually consumes — a real File is not needed. */
@@ -155,5 +162,54 @@ describe('the key', () => {
     process.env.MELANITE_ENV = 'prod'
     await putEquipmentPhoto(CHECK_ID, file('image/jpeg', 1_000))
     expect(put.mock.calls[0][0]).toBe(`equipment/${CHECK_ID}.jpg`)
+  })
+})
+
+describe('which photos an environment may destroy', () => {
+  // The one irreversible action in the feature, and the one place a mistake cannot be walked
+  // back. Dev's database is a COPY of production, so a check row on appdev points at the
+  // production photograph — of the real machine. An environment-blind delete would let a test
+  // click on appdev destroy it.
+  const originalEnv = process.env.MELANITE_ENV
+
+  afterEach(() => {
+    process.env.MELANITE_ENV = originalEnv
+    del.mockClear()
+  })
+
+  it('lets production destroy production photos', () => {
+    process.env.MELANITE_ENV = 'prod'
+    expect(ownsStorageKey('equipment/abc.jpg')).toBe(true)
+  })
+
+  it('does NOT let production reach into the dev subtree', () => {
+    process.env.MELANITE_ENV = 'prod'
+    expect(ownsStorageKey('equipment/dev/abc.jpg')).toBe(false)
+  })
+
+  it('lets dev destroy its own photos', () => {
+    process.env.MELANITE_ENV = 'dev'
+    expect(ownsStorageKey('equipment/dev/abc.jpg')).toBe(true)
+  })
+
+  it('does NOT let dev destroy a production photo', () => {
+    // The scenario that matters: appdev, showing a row copied down from production, whose
+    // storage key names a real photograph of the real laser.
+    process.env.MELANITE_ENV = 'dev'
+    expect(
+      ownsStorageKey('equipment/abc.jpg'),
+      'appdev was allowed to delete a production photograph',
+    ).toBe(false)
+  })
+
+  it('refuses a foreign key without calling the store at all', async () => {
+    process.env.MELANITE_ENV = 'dev'
+    process.env.BLOB_READ_WRITE_TOKEN = 'vercel_blob_rw_test'
+
+    const result = await deleteEquipmentPhoto('equipment/abc.jpg')
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.reason).toBe('foreign')
+    expect(del, 'a delete was attempted against another environment').not.toHaveBeenCalled()
   })
 })

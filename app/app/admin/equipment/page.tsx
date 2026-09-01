@@ -2,6 +2,8 @@ import type { Metadata } from 'next'
 
 import { requireAdmin } from '@/lib/auth/dal'
 import { equipmentPhotoUrl } from '@/lib/blob'
+
+import { RemovePhoto } from './remove-photo'
 import {
   getFlaggedChecks,
   getRecentChecks,
@@ -41,7 +43,27 @@ function agoLabel(d: Date): string {
   return `${days} days ago`
 }
 
-function Photo({ checkId, alt }: { checkId: string; alt: string }) {
+function Photo({
+  checkId,
+  alt,
+  deletedAt,
+}: {
+  checkId: string
+  alt: string
+  deletedAt?: Date | null
+}) {
+  // A removed photograph is shown as removed rather than omitted. An empty space where an image
+  // used to be reads as a bug; saying it was deleted, and that the check still counts, is the
+  // whole reason the row outlives the file.
+  if (deletedAt) {
+    return (
+      <div className="flex size-24 shrink-0 flex-col items-center justify-center gap-1 rounded-field border border-dashed border-line px-2 text-center">
+        <span className="text-[10px] leading-tight text-ink-faint">Photo removed</span>
+        <span className="text-[10px] leading-tight text-ink-disabled">{when(deletedAt)}</span>
+      </div>
+    )
+  }
+
   // A plain <img>, not next/image. Running these through the optimiser would mean adding a
   // remote pattern for the blob host and caching optimised copies of operational photographs in
   // a second place — more surface for images whose whole point is that they live in exactly one
@@ -85,7 +107,11 @@ export default async function EquipmentPage() {
           <ul className="mt-3 space-y-3">
             {flagged.map((f) => (
               <li key={f.id} className="flex gap-3 rounded-card border border-line bg-surface p-3">
-                <Photo checkId={f.id} alt={`Laser, reported by ${f.providerName}`} />
+                <Photo
+                  checkId={f.id}
+                  alt={`Laser, reported by ${f.providerName}`}
+                  deletedAt={f.photoDeletedAt}
+                />
                 <div className="min-w-0">
                   <p className="text-sm font-medium">{f.providerName}</p>
                   <p className="mt-0.5 text-xs text-ink-muted">
@@ -157,7 +183,11 @@ export default async function EquipmentPage() {
           <ul className="grid gap-3 sm:grid-cols-2">
             {recent.map((c) => (
               <li key={c.id} className="flex gap-3 rounded-card border border-line bg-surface p-3">
-                <Photo checkId={c.id} alt={`Laser, ${when(c.recordedAt)}`} />
+                <Photo
+                  checkId={c.id}
+                  alt={`Laser, ${when(c.recordedAt)}`}
+                  deletedAt={c.photoDeletedAt}
+                />
                 <div className="min-w-0">
                   <p className="text-sm">{c.providerName}</p>
                   <p className="mt-0.5 text-xs text-ink-muted">
@@ -168,6 +198,15 @@ export default async function EquipmentPage() {
                   )}
                   {c.needsAttention && (
                     <p className="mt-1 text-xs text-critical">Flagged as a problem</p>
+                  )}
+                  {c.photoDeletedAt ? (
+                    <p className="mt-1 text-xs text-ink-faint">
+                      Photo removed by Melanite. The session is still accounted for.
+                    </p>
+                  ) : (
+                    <div className="mt-1.5">
+                      <RemovePhoto checkId={c.id} />
+                    </div>
                   )}
                 </div>
               </li>
