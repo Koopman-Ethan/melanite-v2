@@ -151,9 +151,16 @@ export function EquipmentCheck({
           // willing to offer, so it silently declines to appear. The server still enforces the
           // real allowlist, which is where it belongs.
           accept="image/*"
-          // Opens the rear camera straight away on a phone rather than a file browser. Ignored on
-          // desktop, which falls back to picking a file.
-          capture="environment"
+          // NO `capture`. It looks like the right attribute for this feature — it opens the rear
+          // camera directly and saves a tap — but it fails CLOSED. `capture` tells the browser
+          // camera-or-nothing, so any browser that will not hand over the camera offers no
+          // fallback and the control does nothing at all when tapped. Brave on iOS does exactly
+          // this, which is what a provider testing on her own phone actually hit.
+          //
+          // Without it, iOS offers Photo Library / Take Photo / Choose File. The camera is still
+          // one tap away, and every other browser has somewhere to go. One extra tap is a trade
+          // worth making against a button that silently does nothing on a phone we do not control
+          // — and we control none of them: providers bring their own."
           required
           onChange={onPick}
           className="mt-2 block w-full text-xs text-ink-muted file:mr-3 file:min-h-11 file:rounded-control file:border file:border-line-control file:bg-transparent file:px-3 file:text-xs file:font-bold file:text-ink-secondary"

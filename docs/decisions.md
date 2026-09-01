@@ -1735,3 +1735,36 @@ bug: completed reaches a working payment page, cancelled and no-show still do no
 that reads sensibly, is wrong for one branch of an enum, and fails by refusing rather than by
 erroring. Nothing crashed, no test went red, and the only signal was a client who could not pay
 and a provider who assumed the link had expired.
+
+### The camera button did nothing, and `capture` was why — 2026-09-01
+
+The equipment photo control was tested on a real phone for the first time and did nothing at all
+when tapped. No camera, no file picker, no error. The button that opened the form worked, so the
+page was alive; only the file input was inert.
+
+Two rounds of fixing it on a hypothesis were wrong, which is the part worth recording. The first
+guess was the `accept` list — it named the three MIME types the server takes, and an entry a phone
+does not recognise can leave the picker with nothing to offer. That was a real bug and worth
+fixing, but it was not this one. Only after driving the deployed page with Playwright — signed in,
+on an iPhone profile — was it clear the markup was correct, the input visible and enabled, and a
+file chooser genuinely firing on click. The DOM was never the problem.
+
+The missing fact was the browser: **Brave on iOS**. Asking for it two messages earlier would have
+saved both rounds.
+
+`capture="environment"` fails CLOSED. It tells the browser camera-or-nothing, so a browser that
+will not hand over the camera has no fallback to offer and the control does nothing — silently,
+with no error to see. It is the attribute that looks purpose-built for this feature and is the
+reason the feature did not work.
+
+Removed. `accept="image/*"` alone makes iOS offer Photo Library / Take Photo / Choose File, so the
+camera is still one tap away and every browser has somewhere to go. The cost is one extra tap; the
+benefit is that it works on phones we do not control, and we control none of them — providers
+bring their own, and Keoni cannot tell them which browser to use.
+
+The general rule this is an instance of: an attribute that removes a step by removing the
+alternatives is only as reliable as the capability it demands. Prefer the version that degrades.
+
+It also says something about the verification plan. This was listed as needing a manual phone test
+precisely because nothing else could catch it, and that was right — 523 passing tests, a correct
+DOM and a firing file chooser under emulation all agreed the feature worked.
