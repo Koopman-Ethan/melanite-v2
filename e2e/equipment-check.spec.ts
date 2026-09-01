@@ -102,15 +102,34 @@ test.describe('equipment checks', () => {
  *  Done in the database because the alternative is booking into a slot that is open right now,
  *  which depends on laser hours and on whatever else is booked today — a test that fails at 8pm
  *  for reasons that have nothing to do with photographs.
+ *
+ *  Deliberately NOT "now". The check window stays open for twelve hours after an appointment
+ *  ends, so a session that finished last night still qualifies — and parking there avoids
+ *  fighting every other spec for the single laser timeline. Moving to now collided with the
+ *  booking journey under parallel workers, which surfaced as an exclusion-constraint violation
+ *  in a photo test.
+ *
+ *  It shifts further back on collision rather than failing, because the laser is shared and real
+ *  dev data occupies real hours.
  */
 async function moveIntoWindow(bookingId: string): Promise<void> {
   const { neon } = await import('@neondatabase/serverless')
   const sql = neon(process.env.DATABASE_URL!)
-  await sql.query(
-    `UPDATE bookings
-        SET start_time = now() - interval '15 minutes',
-            end_time   = now() + interval '45 minutes'
-      WHERE id = $1`,
-    [bookingId],
-  )
+
+  for (let hoursBack = 10; hoursBack <= 11; hoursBack += 0.25) {
+    try {
+      await sql.query(
+        `UPDATE bookings
+            SET start_time = now() - ($2 || ' hours')::interval,
+                end_time   = now() - ($2 || ' hours')::interval + interval '30 minutes'
+          WHERE id = $1`,
+        [bookingId, String(hoursBack)],
+      )
+      return
+    } catch (err) {
+      if (!String(err).includes('bookings_no_overlap')) throw err
+    }
+  }
+
+  throw new Error('could not find a free slot on the laser to park the fixture booking')
 }

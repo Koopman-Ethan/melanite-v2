@@ -70,7 +70,15 @@ test.describe('booking to payment link', () => {
     await expect(page.getByText(`Booked for ${clientName}`)).toBeVisible()
 
     // The link must be present and copyable, whether or not the email went out.
-    const link = page.locator('code', { hasText: '/pay/' })
+    //
+    // Scoped to the just-booked banner. Every unpaid appointment now shows its own link on the
+    // card — so a provider can send it again days later — which means a bare 'code' locator
+    // matches every one of them and the strict-mode violation says nothing useful.
+    const banner = page
+      .locator('div')
+      .filter({ hasText: `Booked for ${clientName}` })
+      .last()
+    const link = banner.locator('code', { hasText: '/pay/' })
     await expect(link).toBeVisible()
 
     const url = (await link.textContent())?.trim() ?? ''
@@ -79,9 +87,11 @@ test.describe('booking to payment link', () => {
     // Copying must SAY it copied. A button that looks identical before and after leaves
     // somebody clicking it twice and pasting somewhere else to check whether it worked.
     // Untested until now, and the packages page had a version with no feedback at all.
+    // Scoped to the banner for the same reason as the link above: every unpaid card carries its
+    // own copy button now.
     await page.context().grantPermissions(['clipboard-write'])
-    await page.getByRole('button', { name: 'Copy link' }).click()
-    await expect(page.getByRole('button', { name: 'Copied' })).toBeVisible()
+    await banner.getByRole('button', { name: 'Copy link' }).click()
+    await expect(banner.getByRole('button', { name: 'Copied' })).toBeVisible()
 
     // And the appointment itself is on the list.
     await expect(page.getByText(clientName).first()).toBeVisible()

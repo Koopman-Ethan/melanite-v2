@@ -63,10 +63,26 @@ export interface Appointment {
    *  the day they need to do it. */
   hasBeforeCheck: boolean
   hasAfterCheck: boolean
+  /** The client's payment link, so a provider can send it again.
+   *
+   *  It used to be shown once, in the banner immediately after booking, and was unreachable
+   *  after that — no card showed it and nothing resent it. A client asking "can you send that
+   *  again?" had no answer, which is most of the reason a completed appointment can sit unpaid.
+   *
+   *  The token is a bearer credential for that client's payment page. Safe here only because
+   *  every query in this file is already scoped to the signed-in provider's own bookings. */
+  checkoutToken: string | null
+  checkoutStatus: (typeof checkoutLinks.status.enumValues)[number] | null
+  checkoutExpiresAt: Date | null
   /** When the laser is next used after this session ends, by ANY provider. Null when nothing
    *  follows. Feeds `afterNeededGiven` — the whole point being that another provider's arrival
    *  photo brackets this session, so it is a question about the machine and not about one
-   *  person's calendar. */
+   *  person's calendar.
+   *
+   *  A real Date, and it takes work to keep it one: this comes from a raw `sql` fragment, and
+   *  those bypass Drizzle's type mapping entirely — the driver returns a timestamp STRING and
+   *  the `sql<Date>` annotation is simply a lie the compiler believes. Same family as the
+   *  `money()` columns coming back as strings. It is converted below. */
   nextLaserUseAt: Date | null
 }
 
@@ -82,13 +98,14 @@ export async function getAppointments(
   filters: AppointmentFilters = {},
 ): Promise<Appointment[]> {
   const where: SQL[] = [eq(bookings.providerId, providerId)]
+  // Assembled below and mapped through `asAppointment` — see the note on `nextLaserUseAt`.
   if (filters.status) where.push(eq(bookings.status, filters.status))
   if (filters.providerServiceId) {
     where.push(eq(bookings.providerServiceId, filters.providerServiceId))
   }
   if (filters.month) where.push(monthFilter(filters.month))
 
-  return db
+  const rows = await db
     .select({
       id: bookings.id,
       clientName: bookings.clientName,
@@ -144,12 +161,37 @@ export async function getAppointments(
           and n.id <> ${bookings}.id
           and n.start_time >= ${bookings}.end_time
       )`,
+      checkoutToken: checkoutLinks.token,
+      checkoutStatus: checkoutLinks.status,
+      checkoutExpiresAt: checkoutLinks.expiresAt,
     })
     .from(bookings)
     .innerJoin(providerServices, eq(bookings.providerServiceId, providerServices.id))
     .innerJoin(services, eq(providerServices.serviceId, services.id))
+    // Left, not inner: an externally-paid or comped booking never had a link, and inner-joining
+    // would drop those rows from the provider's own appointment list entirely.
+    .leftJoin(checkoutLinks, eq(checkoutLinks.bookingId, bookings.id))
     .where(and(...where))
     .orderBy(desc(bookings.startTime))
+
+  return rows.map(asAppointment)
+}
+
+/** Converts what the driver actually returned into what the type claims.
+ *
+ *  Only `nextLaserUseAt` needs it. Real columns go through Drizzle's mapping and arrive as
+ *  Dates; a raw `sql` fragment does not, so this one arrives as a string and every caller that
+ *  treats it as a Date throws — which took down the entire appointments list for any booking
+ *  that had another one after it, meaning most of them. */
+function asAppointment(row: RawAppointment): Appointment {
+  return {
+    ...row,
+    nextLaserUseAt: row.nextLaserUseAt ? new Date(row.nextLaserUseAt) : null,
+  }
+}
+
+type RawAppointment = Omit<Appointment, 'nextLaserUseAt'> & {
+  nextLaserUseAt: string | Date | null
 }
 
 /** One booking, scoped to its owner. Ownership is part of the query rather than a check
@@ -162,8 +204,8 @@ export async function getAppointment(
   return row ?? null
 }
 
-async function getAppointmentsById(providerId: string, bookingId: string) {
-  return db
+async function getAppointmentsById(providerId: string, bookingId: string): Promise<Appointment[]> {
+  const rows = await db
     .select({
       id: bookings.id,
       clientName: bookings.clientName,
@@ -219,12 +261,18 @@ async function getAppointmentsById(providerId: string, bookingId: string) {
           and n.id <> ${bookings}.id
           and n.start_time >= ${bookings}.end_time
       )`,
+      checkoutToken: checkoutLinks.token,
+      checkoutStatus: checkoutLinks.status,
+      checkoutExpiresAt: checkoutLinks.expiresAt,
     })
     .from(bookings)
     .innerJoin(providerServices, eq(bookings.providerServiceId, providerServices.id))
     .innerJoin(services, eq(providerServices.serviceId, services.id))
+    .leftJoin(checkoutLinks, eq(checkoutLinks.bookingId, bookings.id))
     .where(and(eq(bookings.id, bookingId), eq(bookings.providerId, providerId)))
     .limit(1)
+
+  return rows.map(asAppointment)
 }
 
 /** Services this provider offers, for the filter dropdown. */

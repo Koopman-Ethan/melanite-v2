@@ -158,3 +158,25 @@ describe('the policy acknowledgement', () => {
     expect(hasAcceptedEquipmentPolicy('')).toBe(false)
   })
 })
+
+describe('what the driver actually returns', () => {
+  // The bug this pins took down the entire appointments list, and type-checked cleanly.
+  //
+  // `nextLaserUseAt` comes from a raw `sql` fragment, and those bypass Drizzle's type mapping —
+  // the driver hands back a timestamp STRING while the `sql<Date>` annotation says otherwise.
+  // Every booking with another one after it on the laser then threw
+  // "nextStart.getTime is not a function", which is most bookings.
+  //
+  // Same family as `money()` columns arriving as strings. Asserted here because the compiler
+  // cannot: it believes whatever the annotation claims.
+  it('survives a next-use value that arrived as a string', () => {
+    const endTime = new Date('2026-09-14T16:00:00Z')
+    const asString = '2026-09-14T17:00:00Z'
+
+    // What the raw fragment really produces, before conversion.
+    expect(() => afterNeededGiven(endTime, asString as unknown as Date)).toThrow()
+
+    // And what the query is now required to hand over instead.
+    expect(afterNeededGiven(endTime, new Date(asString))).toBe(false)
+  })
+})

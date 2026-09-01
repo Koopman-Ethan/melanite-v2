@@ -17,6 +17,7 @@ import { appOrigin } from '@/lib/stripe/config'
 
 import { AppointmentActions } from './appointment-actions'
 import { EquipmentCheck } from './equipment-check'
+import { PaymentLink } from './payment-link'
 import { BookedBanner } from './booked-banner'
 import { Filters } from './filters'
 
@@ -62,7 +63,7 @@ const timeLabel = (d: Date) =>
     timeZone: 'America/Denver',
   })
 
-function AppointmentCard({ appointment }: { appointment: Appointment }) {
+function AppointmentCard({ appointment, origin }: { appointment: Appointment; origin: string }) {
   const discounted = appointment.discountType !== 'none' && Number(appointment.discountValue) > 0
 
   return (
@@ -129,6 +130,15 @@ function AppointmentCard({ appointment }: { appointment: Appointment }) {
 
       <div className="mt-4">
         <AppointmentActions appointment={appointment} />
+        {appointment.checkoutToken && appointment.checkoutStatus && appointment.checkoutExpiresAt && (
+          <PaymentLink
+            bookingId={appointment.id}
+            url={`${origin}/pay/${appointment.checkoutToken}`}
+            status={appointment.checkoutStatus}
+            expiresAt={appointment.checkoutExpiresAt}
+            hasEmail={Boolean(appointment.clientEmail)}
+          />
+        )}
         <EquipmentChecks appointment={appointment} />
       </div>
     </li>
@@ -185,6 +195,9 @@ async function AppointmentList({
   month?: string
   service?: string
 }) {
+  // Resolved once per list rather than per card — it reads request headers, and a card is not
+  // the place to be doing that.
+  const origin = await appOrigin()
   const appointments = await getAppointments(providerId, {
     status,
     month,
@@ -202,7 +215,7 @@ async function AppointmentList({
   return (
     <ul className="space-y-3">
       {appointments.map((a) => (
-        <AppointmentCard key={a.id} appointment={a} />
+        <AppointmentCard key={a.id} appointment={a} origin={origin} />
       ))}
     </ul>
   )

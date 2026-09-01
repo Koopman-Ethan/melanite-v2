@@ -1655,3 +1655,48 @@ later.
 **Not done:** retention. Photographs accumulate at a handful a day, which is trivial for years and
 still a decision being made by inaction. Room renters are also out of scope — a room rental
 explicitly does not book the laser — though they are in the room with it.
+
+### A payment link nobody could send again — 2026-08-31
+
+The link was shown once, in the banner immediately after booking, and was unreachable afterwards:
+no card displayed it, nothing resent it, and `getBookingLink` was called from that one place.
+A client saying "can you send that again?" had no answer.
+
+Found by looking at real data rather than by reasoning about it. One provider had a **completed
+$70 appointment sitting unpaid** with a live link she could not reach, and a **$60 one whose link
+had expired four days earlier** — resending that one would have delivered a page saying "expired".
+
+It is a half-finished fix, not an oversight in design. `docs/decisions.md` already records the
+original bug as a link "created and shown to nobody"; the banner solved the moment of booking and
+left every day after it untouched. Packages and prepaid balances both kept a persistent link with
+a copy button — bookings were the one flow that did not.
+
+**Resending does not rotate the token.** A client still holding the first message must not find it
+dead because somebody pressed resend, and the common case is a link never seen rather than one
+compromised.
+
+**Reissuing is offered only when the link has EXPIRED**, and rotates the existing row —
+`checkout_links` is unique on `booking_id`, so one appointment has one link and a client can
+never be shown two payment pages for one treatment. Rotating a live token would silently kill a
+link somebody may be about to use, which is a worse failure than the one being fixed.
+
+**Both report what actually happened.** A resend to an address the mailer refuses says so and
+tells the provider to copy it instead, rather than claiming a send — the same honesty the booking
+banner already applies.
+
+**The bug this uncovered is the one worth remembering.** `nextLaserUseAt` — added for the
+equipment work — comes from a raw `sql` fragment, and those bypass Drizzle's type mapping
+entirely: the driver returns a timestamp STRING while `sql<Date>` tells the compiler otherwise.
+Every booking with another one after it on the laser threw
+`nextStart.getTime is not a function`, which took down the whole appointments list for most
+providers. It type-checked, and the unit tests passed, because the annotation is simply believed.
+Same family as `money()` columns arriving as strings. The rows are converted at the query
+boundary now, and a test pins it by asserting the string form throws.
+
+**Three existing assertions had to be scoped rather than deleted.** The journey spec looked for
+"the payment link" and "the copy button" on a page that now has one per unpaid appointment, so
+both matched five elements. They now scope to the just-booked banner, which is what they always
+meant. And the equipment spec parked its fixture booking at "now", which fought the journey spec
+for the single laser timeline under parallel workers and surfaced as an exclusion-constraint
+violation inside a photo test; it now parks ten hours back, still inside the twelve-hour check
+window, and shifts further on collision.
