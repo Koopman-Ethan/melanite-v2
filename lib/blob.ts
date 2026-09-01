@@ -56,7 +56,11 @@ export interface StoredBlob {
 }
 
 export type BlobRefusal =
-  | { ok: false; reason: 'not-configured' | 'type' | 'size' | 'empty'; detail: string }
+  | {
+      ok: false
+      reason: 'not-configured' | 'type' | 'size' | 'empty' | 'upload-failed'
+      detail: string
+    }
 
 export type BlobResult = { ok: true; blob: StoredBlob } | BlobRefusal
 
@@ -110,16 +114,31 @@ export async function putEquipmentPhoto(
 
   const key = `${keyPrefix()}${checkId}.${EXTENSIONS[file.type]}`
 
-  const stored = await put(key, await file.arrayBuffer(), {
-    // Must match the store. An earlier version of this passed 'public' on the theory that the
-    // per-object setting was a separate knob from the store's; it is not, and the SDK refuses
-    // outright: "Cannot use public access on a private store."
-    access: 'private',
-    contentType: file.type,
-    // The key already contains a uuid, so the store must not add its own suffix — otherwise the
-    // pathname we record and the pathname it saved under diverge, and the photo is unreachable.
-    addRandomSuffix: false,
-  })
+  // Wrapped, because everything else in this function reports a refusal by RETURNING one and the
+  // caller renders `detail` to the provider. An escaping throw would be the one failure mode that
+  // reaches her as a crashed page instead of a sentence — and it is also the likeliest one, since
+  // this runs on a phone in a treatment room where the signal is bad and the store can rate-limit
+  // or time out. A photo that failed to send is a retry, not an incident.
+  let stored: Awaited<ReturnType<typeof put>>
+  try {
+    stored = await put(key, await file.arrayBuffer(), {
+      // Must match the store. An earlier version of this passed 'public' on the theory that the
+      // per-object setting was a separate knob from the store's; it is not, and the SDK refuses
+      // outright: "Cannot use public access on a private store."
+      access: 'private',
+      contentType: file.type,
+      // The key already contains a uuid, so the store must not add its own suffix — otherwise the
+      // pathname we record and the pathname it saved under diverge, and the photo is unreachable.
+      addRandomSuffix: false,
+    })
+  } catch (err) {
+    console.error('[blob] upload failed for', key, err)
+    return {
+      ok: false,
+      reason: 'upload-failed',
+      detail: 'That photo did not upload — check your signal and try again.',
+    }
+  }
 
   return {
     ok: true,

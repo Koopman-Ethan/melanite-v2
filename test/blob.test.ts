@@ -96,6 +96,25 @@ describe('what gets in', () => {
     expect(put).not.toHaveBeenCalled()
     expect(blobConfigured()).toBe(false)
   })
+
+  it('says so plainly when the STORE fails, rather than throwing', async () => {
+    // The other half of that contract, and the likelier half. Validation refusals were already
+    // returned; the `put` call itself was not wrapped, so a network drop, a rate limit or an
+    // expired token escaped as a throw from a function whose whole job is to return a refusal.
+    //
+    // This is the failure a provider is most likely to meet, because the photo is taken on a
+    // phone in a treatment room. It has to read as "try again", not as a crashed page.
+    configured()
+    put.mockRejectedValueOnce(new Error('fetch failed'))
+
+    const result = await putEquipmentPhoto(CHECK_ID, file('image/jpeg', 320_000))
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.reason).toBe('upload-failed')
+      expect(result.detail).toMatch(/try again/i)
+    }
+  })
 })
 
 describe('the key', () => {
