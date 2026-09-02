@@ -213,7 +213,14 @@ export async function getOwedByProvider(): Promise<OwedByProvider[]> {
       providerName: sql<string>`${providers.firstName} || ' ' || ${providers.lastName}`,
       appointments: sql<number>`count(*)::int`,
       collected: sql<string>`coalesce(sum(${bookings.price}), 0)`,
-      owed: sql<string>`coalesce(sum(${bookings.price}) * ${platformSettings.providerSharePct}, 0)`,
+      // `1 - providerSharePct`, because what Melanite is owed is MELANITE's share. The provider
+      // keeps `providerSharePct`; `lib/money.ts` defines the cut as `gross * (1 - share)` and
+      // this must not disagree with it.
+      //
+      // This read `* providerSharePct` until 2026-09-02 — the provider's half, not Melanite's.
+      // Invisible for as long as the rate sat at the default 0.500, where the two are equal,
+      // and wrong on this page the moment it moved. The test moves it on purpose.
+      owed: sql<string>`coalesce(sum(${bookings.price}) * (1 - ${platformSettings.providerSharePct}), 0)`,
       oldestDays: sql<number>`coalesce(floor(extract(epoch from now() - min(${bookings.startTime})) / 86400), 0)::int`,
     })
     .from(bookings)

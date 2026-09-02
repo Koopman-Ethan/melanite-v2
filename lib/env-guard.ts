@@ -30,6 +30,23 @@ export function currentEnv(): MelaniteEnv | null {
   return null
 }
 
+/**
+ * True only on the production deployment.
+ *
+ * Reads an ABSENT `MELANITE_ENV` as "not production" — deliberately the opposite of
+ * `requireEnv` below, which refuses it. Both readings are correct for what they guard, and
+ * the difference is load-bearing: the variable is absent on Vercel Preview on purpose, so
+ * appdev must behave as non-production rather than be refused outright.
+ *
+ * Gate things that are unsafe IN production with this. Gate things that are unsafe ANYWHERE
+ * UNSTATED — anything that writes to a database it did not name — with `requireEnv`.
+ *
+ * This is the same reading `resolveRecipient` uses to decide whether mail may leave.
+ */
+export function isProduction(): boolean {
+  return currentEnv() === 'prod'
+}
+
 /** A human-readable host, for messages. Never the credentials. */
 export function describeDatabase(): string {
   return /@([^/?]+)/.exec(process.env.DATABASE_URL ?? '')?.[1] ?? 'an unknown host'
