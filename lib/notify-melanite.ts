@@ -263,7 +263,7 @@ export async function notifyMedicalDirectorSubmitted(
 
     if (!row) return
 
-    const origin = appOrigin()
+    const origin = await appOrigin()
 
     await sendEmail({
       to: MELANITE_NOTIFY_EMAIL,
