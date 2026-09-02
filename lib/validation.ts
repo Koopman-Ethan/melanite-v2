@@ -189,6 +189,57 @@ export function todayInDenver(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(new Date())
 }
 
+/** The Denver calendar date and hour at a given instant.
+ *
+ *  Both read from ONE `formatToParts` call rather than two formatters: separate calls can
+ *  straddle an hour boundary and return a date and an hour that never coexisted.
+ *
+ *  `hourCycle: 'h23'` because the en-US default renders midnight as hour 24, which would make
+ *  every midnight compare as later than closing time. */
+export function denverParts(at: Date): { date: string; hour: number } {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Denver',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(at)
+
+  const part = (type: string) => parts.find((p) => p.type === type)?.value ?? ''
+
+  return {
+    date: `${part('year')}-${part('month')}-${part('day')}`,
+    hour: Number(part('hour')),
+  }
+}
+
+/** The calendar day before a YYYY-MM-DD.
+ *
+ *  Parsed at UTC noon, so neither a DST shift nor a server west of Greenwich can push the
+ *  arithmetic onto the wrong day. The repo has no date library, on purpose. */
+export function previousDay(date: string): string {
+  const d = new Date(`${date}T12:00:00Z`)
+  d.setUTCDate(d.getUTCDate() - 1)
+  return d.toISOString().slice(0, 10)
+}
+
+/**
+ * Which Denver business day an evening-digest run is reporting on.
+ *
+ * Not simply "today". The job is scheduled twice — 02:00 and 03:00 UTC — because cron has no
+ * concept of DST and 8pm Denver is one or the other depending on the season. Whichever run
+ * lands before closing time is therefore reporting on the day that ended the night before.
+ *
+ * Asking "which day just ended" rather than gating on the hour also means a delayed run still
+ * sends the right day instead of silently skipping the night, which matters because a missing
+ * digest is meant to mean the job is broken.
+ */
+export function digestDayFor(at: Date, closeHour: number): string {
+  const { date, hour } = denverParts(at)
+  return hour >= closeHour ? date : previousDay(date)
+}
+
 /**
  * A date that must not be in the past.
  *

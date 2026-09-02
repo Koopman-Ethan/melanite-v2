@@ -28,6 +28,22 @@ import { denverInstant, getLaserHours, type LaserHours } from './availability'
 
 const OCCUPYING_STATUSES = new Set(['upcoming', 'completed'])
 
+/** Has this booking been paid for, as far as Melanite is concerned?
+ *
+ *  There is no "reimbursed" column anywhere in this schema, and deliberately so: recording the
+ *  payment IS the act of saying collected. So the answer is whether a purchase row exists.
+ *
+ *  ONE definition, shared with the evening digest. The calendar and the email must agree about
+ *  "Groupon, still owed" versus "Groupon, collected", and two copies of this expression is
+ *  exactly how the same appointment ends up reading differently on two screens.
+ *
+ *  `entry_type` is filtered because a refund is not a payment. */
+export const BOOKING_HAS_PURCHASE = sql<boolean>`exists (
+  select 1 from ledger_entries l
+  where l.subject_type = 'booking' and l.subject_id = ${bookings.id}
+    and l.entry_type = 'purchase'
+)`
+
 export interface CalendarBooking {
   id: string
   /** Denver calendar day, `YYYY-MM-DD`. */
@@ -223,11 +239,7 @@ export async function getCalendarWeek(weekStart: string): Promise<CalendarWeek> 
       status: bookings.status,
       paymentSource: bookings.paymentSource,
       externalMethod: bookings.externalMethod,
-      reconciled: sql<boolean>`exists (
-        select 1 from ledger_entries l
-        where l.subject_type = 'booking' and l.subject_id = bookings.id
-          and l.entry_type = 'purchase'
-      )`,
+      reconciled: BOOKING_HAS_PURCHASE,
       providerId: providers.id,
       firstName: providers.firstName,
       lastName: providers.lastName,

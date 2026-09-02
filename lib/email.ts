@@ -736,6 +736,167 @@ export function bookingPaymentSummary(input: {
   }
 }
 
+/** Escapes text interpolated into an email's HTML.
+ *
+ *  Added for the evening digest, which puts every client and provider name on the calendar
+ *  into one message — so the odds of meeting a `Smith & Jones` stop being negligible. The
+ *  older templates in this file interpolate names unescaped; that is a separate change with
+ *  its own review, deliberately not retrofitted here. */
+function esc(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+const usd = (value: string | number) =>
+  Number(value).toLocaleString('en-US', { style: 'currency', currency: 'USD' })
+
+/** Just the clock time, in Denver.
+ *
+ *  Not `appointmentWhen`: the digest's heading already names the day, so repeating the full
+ *  date on all seven rows is noise. The zone is still stated explicitly, for exactly the
+ *  reason `appointmentWhen` states it — never the server's. */
+export function denverTimeLabel(at: Date): string {
+  return at.toLocaleString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone: 'America/Denver',
+  })
+}
+
+export interface DigestEmailRow {
+  /** `denverTimeLabel(startTime)`. */
+  when: string
+  clientName: string
+  serviceName: string
+  providerName: string
+  /** `bookingPaymentSummary(...)` — the one sentence about what happens about money. */
+  paying: string
+  /** Melanite's half, when somebody has to go and get it. Null when there is nothing to chase. */
+  toCollect: string | null
+  isHouse: boolean
+  status: string
+}
+
+/**
+ * The evening reckoning, sent after the suite closes.
+ *
+ * The order is the argument. What somebody still has to DO goes first, because everything
+ * else on this page is a record of money that has already settled — the same reasoning the
+ * revenue page states above its own "to collect" block.
+ *
+ * Sent even on an empty evening. A digest that only arrives when there is news makes a broken
+ * job indistinguishable from a quiet Tuesday, and the whole point of this email is that its
+ * absence should be alarming.
+ */
+export function eveningDigestEmail(input: {
+  /** `roomDateLabel(day)` — "Tuesday, September 2". */
+  dayLabel: string
+  rows: DigestEmailRow[]
+  cancelled: number
+  grossTotal: string
+  toCollectTotal: string
+  toCollectCount: number
+  url: string
+}): Omit<EmailMessage, 'to'> {
+  const { dayLabel, rows, cancelled, grossTotal, toCollectTotal, toCollectCount, url } = input
+  const owed = rows.filter((r) => r.toCollect !== null)
+  const appts = `${rows.length} ${rows.length === 1 ? 'appointment' : 'appointments'}`
+
+  // The count and the money come before the date: on a phone lock screen that is the only
+  // part she reads, and it is what decides whether the email needs opening at all.
+  const subject =
+    rows.length === 0
+      ? `No appointments · ${dayLabel}`
+      : toCollectCount > 0
+        ? `${toCollectCount} to collect (${usd(toCollectTotal)}) · ${dayLabel}`
+        : `Nothing to collect · ${appts} · ${dayLabel}`
+
+  const cancelledLine =
+    cancelled > 0
+      ? `${cancelled} cancelled, not listed.`
+      : ''
+
+  // ---- plain text -------------------------------------------------------
+  const textLines: string[] = [dayLabel, '']
+
+  if (rows.length === 0) {
+    textLines.push('No appointments today. Nothing to chase.', '')
+  } else {
+    if (owed.length > 0) {
+      textLines.push(`TO COLLECT — ${usd(toCollectTotal)}`, '')
+      for (const r of owed) {
+        textLines.push(`  ${r.providerName} — ${usd(r.toCollect!)}  (${r.when}, ${r.clientName})`)
+      }
+      textLines.push('')
+    }
+
+    textLines.push(`THE DAY — ${appts}, ${usd(grossTotal)} charged`, '')
+    for (const r of rows) {
+      textLines.push(`  ${r.when}  ${r.serviceName}`)
+      textLines.push(`    Client:   ${r.clientName}`)
+      textLines.push(`    Provider: ${r.providerName}${r.isHouse ? ' (Melanite)' : ''}`)
+      textLines.push(`    ${r.paying}`)
+      if (r.status === 'upcoming') {
+        textLines.push('    Still marked upcoming — nobody closed this out.')
+      }
+      textLines.push('')
+    }
+  }
+
+  if (cancelledLine) textLines.push(cancelledLine, '')
+  textLines.push('See the revenue page:', url)
+
+  // ---- html -------------------------------------------------------------
+  const row = (r: DigestEmailRow) =>
+    `<div style="padding:12px 0;border-bottom:1px solid #eee">
+       <div style="font-size:13px;color:#666">${esc(r.when)}</div>
+       <div style="font-weight:600">${esc(r.serviceName)}</div>
+       <div style="font-size:13px;color:#444;margin-top:2px">
+         ${esc(r.clientName)} · ${esc(r.providerName)}${r.isHouse ? ' (Melanite)' : ''}
+       </div>
+       <div style="font-size:13px;margin-top:4px">${esc(r.paying)}</div>
+       ${
+         r.status === 'upcoming'
+           ? `<div style="font-size:12px;color:#B8965A;margin-top:4px">Still marked upcoming — nobody closed this out.</div>`
+           : ''
+       }
+     </div>`
+
+  const body =
+    rows.length === 0
+      ? p('No appointments today. Nothing to chase.')
+      : (owed.length > 0
+          ? p(`<strong>To collect — ${usd(toCollectTotal)}</strong>`) +
+            owed
+              .map(
+                (r) =>
+                  `<div style="padding:8px 0;font-size:14px">
+                     <strong>${esc(r.providerName)}</strong> — ${usd(r.toCollect!)}
+                     <span style="color:#666">(${esc(r.when)}, ${esc(r.clientName)})</span>
+                   </div>`,
+              )
+              .join('') +
+            p(
+              '<span style="font-size:13px;color:#666">Recording the payment under Tools clears these.</span>',
+            )
+          : p('<strong>Nothing to collect today.</strong>')) +
+        p(`<strong>The day</strong> — ${appts}, ${usd(grossTotal)} charged`) +
+        rows.map(row).join('')
+
+  const footer = cancelledLine
+    ? p(`<span style="font-size:13px;color:#666">${cancelledLine}</span>`)
+    : ''
+
+  return {
+    subject,
+    text: textLines.join('\n'),
+    html: wrap(dayLabel, body + footer, { label: 'Open the revenue page', url }),
+  }
+}
+
 /** Tells Melanite that an appointment appeared on, or left, the calendar.
  *
  *  One template for both events rather than two nearly identical ones: every field is the same
