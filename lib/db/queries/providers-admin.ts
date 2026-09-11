@@ -3,7 +3,7 @@ import 'server-only'
 import { asc, eq, ne } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
-import { platformSettings, providers } from '@/lib/db/schema'
+import { medicalDirectorCredentials, platformSettings, providers } from '@/lib/db/schema'
 
 // The provider roster, for the two people who administer it.
 //
@@ -32,6 +32,20 @@ export interface RosterRow {
   declared: boolean
   stripeConnected: boolean
   payoutsEnabled: boolean
+  /** The own-director path only. Present once the provider has filed her director, which is
+   *  what Melanite has to verify before opening the gate — a name and a licence number are the
+   *  difference between "she says she has one" and something checkable against a state
+   *  register. Null on the Melanite plan, where the director is Melanite's own. */
+  director: {
+    name: string
+    credentials: string | null
+    npi: string | null
+    licenseNumber: string | null
+    licenseState: string | null
+    licenseExpiry: string | null
+    contactEmail: string | null
+    contactPhone: string | null
+  } | null
 }
 
 export interface Roster {
@@ -63,8 +77,22 @@ export async function getRoster(): Promise<Roster> {
         roomProceduresDeclaredAt: providers.roomProceduresDeclaredAt,
         stripeAccountId: providers.stripeAccountId,
         payoutsEnabled: providers.stripeOnboardingComplete,
+        directorName: medicalDirectorCredentials.name,
+        directorCredentials: medicalDirectorCredentials.credentials,
+        directorNpi: medicalDirectorCredentials.npi,
+        directorLicenseNumber: medicalDirectorCredentials.licenseNumber,
+        directorLicenseState: medicalDirectorCredentials.licenseState,
+        directorLicenseExpiry: medicalDirectorCredentials.licenseExpiry,
+        directorContactEmail: medicalDirectorCredentials.contactEmail,
+        directorContactPhone: medicalDirectorCredentials.contactPhone,
       })
       .from(providers)
+      // LEFT, not inner: almost nobody has one, and an inner join would quietly empty the
+      // roster of every provider on the Melanite plan.
+      .leftJoin(
+        medicalDirectorCredentials,
+        eq(medicalDirectorCredentials.providerId, providers.id),
+      )
       // Inactive accounts are excluded: they cannot sign in at all, so their toggles are
       // decoration. Deactivating is a different action from revoking booking access.
       .where(ne(providers.status, 'inactive'))
@@ -77,14 +105,42 @@ export async function getRoster(): Promise<Roster> {
   ])
 
   return {
-    rows: rows.map(({ stripeAccountId, roomProceduresDeclaredAt, ...rest }) => ({
+    rows: rows.map(
+      ({
+        stripeAccountId,
+        roomProceduresDeclaredAt,
+        directorName,
+        directorCredentials,
+        directorNpi,
+        directorLicenseNumber,
+        directorLicenseState,
+        directorLicenseExpiry,
+        directorContactEmail,
+        directorContactPhone,
+        ...rest
+      }) => ({
       ...rest,
       stripeConnected: Boolean(stripeAccountId),
+      // Collapsed to one nullable object rather than eight nullable columns, so the roster can
+      // ask "has she filed one?" instead of guessing from whichever field it happened to check.
+      director: directorName
+        ? {
+            name: directorName,
+            credentials: directorCredentials,
+            npi: directorNpi,
+            licenseNumber: directorLicenseNumber,
+            licenseState: directorLicenseState,
+            licenseExpiry: directorLicenseExpiry,
+            contactEmail: directorContactEmail,
+            contactPhone: directorContactPhone,
+          }
+        : null,
       // The timestamp itself is not shown; what the roster needs is the DIFFERENCE between
       // "told us they do nothing supervised" and "was never asked", which an empty array alone
       // cannot express. Both look like `[]`.
       declared: roomProceduresDeclaredAt !== null,
-    })),
+      }),
+    ),
     roomRentalGloballyOn: settings?.roomRentalEnabled ?? false,
   }
 }

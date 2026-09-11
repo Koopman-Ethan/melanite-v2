@@ -6,6 +6,7 @@ import { db } from '@/lib/db'
 import {
   bookings,
   equipmentChecks,
+  medicalDirectorCredentials,
   providerServices,
   providers,
   roomBookings,
@@ -20,6 +21,7 @@ import {
   bookingPaymentSummary,
   deskBookingEmail,
   deskEquipmentFlaggedEmail,
+  deskMedicalDirectorEmail,
   deskProviderAccessEmail,
   deskRoomRentalEmail,
   roomDateLabel,
@@ -260,5 +262,68 @@ export async function notifyEquipmentFlagged(checkId: string): Promise<void> {
     })
   } catch (err) {
     console.error('[email] equipment flag alert failed for check', checkId, err)
+  }
+}
+
+/** A provider filed or changed her own medical director.
+ *
+ *  Best effort, like everything else here: she has done her part, and an email that fails must
+ *  never tell her otherwise. The cost of it failing is that Melanite finds out on the roster
+ *  instead, which is where the details live anyway.
+ */
+export async function notifyMedicalDirectorSubmitted(
+  providerId: string,
+  options: { changed: boolean },
+): Promise<void> {
+  try {
+    const [row] = await db
+      .select({
+        firstName: providers.firstName,
+        lastName: providers.lastName,
+        status: providers.medicalDirectorStatus,
+        bookingEnabled: providers.bookingEnabled,
+        directorName: medicalDirectorCredentials.name,
+        directorCredentials: medicalDirectorCredentials.credentials,
+        npi: medicalDirectorCredentials.npi,
+        licenseNumber: medicalDirectorCredentials.licenseNumber,
+        licenseState: medicalDirectorCredentials.licenseState,
+        licenseExpiry: medicalDirectorCredentials.licenseExpiry,
+        contactEmail: medicalDirectorCredentials.contactEmail,
+        contactPhone: medicalDirectorCredentials.contactPhone,
+      })
+      .from(providers)
+      .innerJoin(
+        medicalDirectorCredentials,
+        eq(medicalDirectorCredentials.providerId, providers.id),
+      )
+      .where(eq(providers.id, providerId))
+      .limit(1)
+
+    if (!row) return
+
+    const origin = await appOrigin()
+
+    await sendEmail({
+      to: MELANITE_NOTIFY_EMAIL,
+      ...deskMedicalDirectorEmail({
+        providerName: `${row.firstName} ${row.lastName}`,
+        directorName: row.directorName,
+        directorCredentials: row.directorCredentials,
+        npi: row.npi,
+        licenseNumber: row.licenseNumber,
+        licenseState: row.licenseState,
+        licenseExpiry: row.licenseExpiry,
+        contactEmail: row.contactEmail,
+        contactPhone: row.contactPhone,
+        changed: options.changed,
+        // Both gates, not just the director one — "she still cannot book" is only true if
+        // something is actually still shut, and telling Melanite to act when nothing is needed
+        // is how these emails become noise.
+        stillBlocked: row.status !== 'active' || !row.bookingEnabled,
+        url: `${origin}/app/admin/providers`,
+      }),
+    })
+  } catch (err) {
+    console.error('[email] medical director alert failed for provider', providerId, err)
   }
 }

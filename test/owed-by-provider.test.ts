@@ -178,3 +178,27 @@ describe('Melanite does not invoice itself', () => {
     expect(await owedNow()).toBeCloseTo(before + 150, 2)
   })
 })
+
+describe('whose half is it', () => {
+  it('owes Melanite its own share, not the provider share, when the split is uneven', async () => {
+    // Every other test in this file runs at the default 0.500, where Melanite's half and the
+    // provider's half are the same number — so an inverted formula passes all of them. This
+    // query multiplied by `provider_share_pct` until 2026-09-02, which is the PROVIDER's share.
+    // Moving the rate is the only way to tell the two apart.
+    await sql.query(`UPDATE platform_settings SET provider_share_pct = '0.600' WHERE id = 1`)
+
+    try {
+      // Measured after the rate change: it revalues every outstanding booking, so a `before`
+      // taken at 0.500 would not be comparable.
+      const before = await owedNow()
+      await external('cash', '200.00', 20)
+
+      // The provider keeps 60%, so Melanite is owed $80. The old formula said $120.
+      expect(await owedNow()).toBeCloseTo(before + 80, 2)
+    } finally {
+      // Restored in a finally: this is the singleton row every split in the system reads, and
+      // leaving it at 0.600 would silently repay every provider wrongly until somebody noticed.
+      await sql.query(`UPDATE platform_settings SET provider_share_pct = '0.500' WHERE id = 1`)
+    }
+  })
+})

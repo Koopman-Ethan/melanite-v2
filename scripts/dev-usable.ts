@@ -63,6 +63,7 @@ function asSessionUser(row: {
     roomRentalEnabled: true,
     requiresPasswordReset: false,
     equipmentPolicyAckVersion: null,
+    hasMedicalDirectorOnFile: false,
   } as SessionUser
 }
 

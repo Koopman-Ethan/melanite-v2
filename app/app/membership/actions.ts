@@ -1,10 +1,12 @@
 'use server'
 
 import { and, eq } from 'drizzle-orm'
+import { revalidatePath } from 'next/cache'
 
 import { requireProvider } from '@/lib/auth/dal'
 import { db } from '@/lib/db'
-import { memberships, providers } from '@/lib/db/schema'
+import { medicalDirectorCredentials, memberships, providers } from '@/lib/db/schema'
+import { notifyMedicalDirectorSubmitted } from '@/lib/notify-melanite'
 import { isOnboarding } from '@/lib/onboarding'
 import { friendlyStripeError, stripePost } from '@/lib/stripe/client'
 import {
@@ -14,6 +16,7 @@ import {
   medicalDirectorPriceId,
   modeMismatch,
 } from '@/lib/stripe/config'
+import { DATE_ONLY, emailError, futureDateError, isValidPhone, nameError } from '@/lib/validation'
 
 export interface StripeRedirect {
   url?: string
@@ -235,4 +238,136 @@ export async function startEpicutisSubscription(): Promise<StripeRedirect> {
     },
     `epicutis-subscribe:${user.id}`,
   )
+}
+
+export interface DirectorState {
+  error?: string
+  success?: string
+}
+
+/**
+ * A provider records her own medical director.
+ *
+ * THIS DID NOT EXIST, and the gap was invisible because nobody had used the path. Every provider
+ * until now took the Melanite plan, where Stripe drives the gate and the page has a real button.
+ * The own-director path could DISPLAY an arrangement and never create one: no form, no action, no
+ * admin screen, and `medical_director_credentials` empty in production. Meanwhile the booking gate
+ * told her "You need a medical director on file before booking" and linked her here — a
+ * call-to-action pointing at a page where the thing could not be done.
+ *
+ * IT DOES NOT OPEN THE GATE. Saving details is the provider stating who supervises her; deciding
+ * that the arrangement is real is Melanite's, and it is a clinical judgement about a person's
+ * licence, not a form validation. `medicalDirectorStatus` therefore stays where it is and Melanite
+ * is told there is something to review. A provider who could activate her own clinical gate by
+ * typing a name into a box would make the gate decorative.
+ *
+ * Editing while ACTIVE does not close the gate either. Dropping a working provider back to blocked
+ * because she corrected a phone number would be a surprise lockout mid-clinic — Melanite is told
+ * instead, and can act.
+ */
+export async function saveMedicalDirector(
+  _prev: DirectorState,
+  formData: FormData,
+): Promise<DirectorState> {
+  const user = await requireProvider()
+
+  const [provider] = await db
+    .select({
+      type: providers.medicalDirectorType,
+      status: providers.medicalDirectorStatus,
+    })
+    .from(providers)
+    .where(eq(providers.id, user.id))
+    .limit(1)
+
+  // Only the own-director path. On the Melanite plan the director is Melanite's, and letting a
+  // provider type a different name over it would leave the record disagreeing with who is
+  // actually supervising her.
+  if (provider?.type !== 'own') {
+    return { error: 'Your directorship is provided by Melanite, so there is nothing to enter.' }
+  }
+
+  const name = String(formData.get('name') ?? '').trim()
+  const credentials = String(formData.get('credentials') ?? '').trim() || null
+  const npi = String(formData.get('npi') ?? '').trim() || null
+  const licenseNumber = String(formData.get('licenseNumber') ?? '').trim() || null
+  const licenseState = String(formData.get('licenseState') ?? '').trim() || null
+  const licenseExpiryRaw = String(formData.get('licenseExpiry') ?? '').trim()
+  const contactEmail = String(formData.get('contactEmail') ?? '').trim() || null
+  const contactPhone = String(formData.get('contactPhone') ?? '').trim() || null
+
+  const nameProblem = nameError(name, 'Your medical director’s name')
+  if (nameProblem) return { error: nameProblem }
+
+  // NPI is ten digits. Checked because a wrong one is worse than a blank one: it looks like a
+  // verified fact and sends whoever checks it to a different clinician entirely.
+  if (npi && !/^\d{10}$/.test(npi)) {
+    return { error: 'An NPI is ten digits. Leave it blank if you don’t have it to hand.' }
+  }
+
+  if (contactEmail) {
+    const emailProblem = emailError(contactEmail)
+    if (emailProblem) return { error: emailProblem }
+  }
+
+  if (contactPhone && !isValidPhone(contactPhone)) {
+    return { error: 'That phone number doesn’t look right — 10 digits, or leave it blank.' }
+  }
+
+  if (licenseExpiryRaw) {
+    if (!DATE_ONLY.test(licenseExpiryRaw)) {
+      return { error: 'The license expiry must be a valid date.' }
+    }
+    // Same rule the provider's own licence gets on the account page. A director whose licence
+    // has lapsed is not supervising anybody, and saving it quietly would hide that.
+    const expired = futureDateError(licenseExpiryRaw, { label: 'a license expiry date' })
+    if (expired) {
+      return {
+        error:
+          expired === 'That date has already passed.'
+            ? 'That license has already expired. Melanite cannot accept a lapsed director.'
+            : expired,
+      }
+    }
+  }
+
+  const existing = await db
+    .select({ providerId: medicalDirectorCredentials.providerId })
+    .from(medicalDirectorCredentials)
+    .where(eq(medicalDirectorCredentials.providerId, user.id))
+    .limit(1)
+
+  const values = {
+    name,
+    credentials,
+    npi,
+    licenseNumber,
+    licenseState,
+    licenseExpiry: licenseExpiryRaw || null,
+    contactEmail,
+    contactPhone,
+  }
+
+  if (existing.length > 0) {
+    await db
+      .update(medicalDirectorCredentials)
+      .set(values)
+      .where(eq(medicalDirectorCredentials.providerId, user.id))
+  } else {
+    await db.insert(medicalDirectorCredentials).values({ providerId: user.id, ...values })
+  }
+
+  // Best effort, after the record exists — the same contract every other notification here has.
+  // A provider who has done her part must never be told it failed because an email did not send.
+  await notifyMedicalDirectorSubmitted(user.id, { changed: existing.length > 0 })
+
+  revalidatePath('/app/membership')
+  revalidatePath('/app/admin/providers')
+
+  return {
+    success:
+      provider.status === 'active'
+        ? 'Saved. Melanite has been told your director details changed.'
+        : 'Saved. Melanite will review this and open booking once it is confirmed.',
+  }
 }

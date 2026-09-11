@@ -1,8 +1,11 @@
 import type { Metadata } from 'next'
 
 import { requireAdmin } from '@/lib/auth/dal'
+import { isProduction } from '@/lib/env-guard'
 import { GROWTH_HUB } from '@/lib/product-names'
 import { getAdminRevenue } from '@/lib/db/queries/revenue'
+
+import { DigestButton } from './digest-button'
 
 export const metadata: Metadata = { title: 'Revenue · Melanite Admin' }
 
@@ -334,6 +337,26 @@ export default async function AdminRevenuePage() {
           </table>
         </div>
       </section>
+
+      {/* Not rendered in production, where the Vercel cron sends the real one at closing time.
+          Vercel Cron only ever fires against the production deployment, so without this there
+          is nowhere to see the digest before it reaches Keoni. The action re-checks the
+          environment itself — hiding a button is presentation, not a control. */}
+      {!isProduction() && (
+        <section className="space-y-3 rounded-card border border-dashed border-line p-5">
+          <div>
+            <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">
+              Evening digest
+            </h2>
+            <p className="mt-1 text-xs text-ink-faint">
+              In production this is emailed automatically after the suite closes. This button is
+              here so it can be read before it goes to anybody — outside production the message is
+              redirected to <code>EMAIL_REDIRECT_TO</code>, never to Melanite.
+            </p>
+          </div>
+          <DigestButton />
+        </section>
+      )}
     </main>
   )
 }

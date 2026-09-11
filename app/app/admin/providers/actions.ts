@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 
 import { requireAdmin } from '@/lib/auth/dal'
+import { notifyBookingAccessChanged } from '@/lib/notify-melanite'
 import { db } from '@/lib/db'
 import { providers } from '@/lib/db/schema'
 
@@ -154,5 +155,65 @@ export async function setPracticeType(input: {
     success: needsSetup
       ? `${who} moved to laser. They'll be asked to connect Stripe and pick services next time they sign in.`
       : `${who} moved to laser.`,
+  }
+}
+
+/**
+ * Confirms — or withdraws — a provider's OWN medical director.
+ *
+ * The gate this moves is `medicalDirectorStatus`, and it is deliberately restricted to providers
+ * on the `own` path. On the Melanite plan that column is Stripe's: it is written by the
+ * subscription webhooks, so a hand-set value would be silently overwritten at the next billing
+ * event and would meanwhile assert a subscription that does not exist.
+ *
+ * Nothing about filing details opens this. A provider stating who supervises her is not the same
+ * as Melanite accepting the arrangement, and the acceptance is a judgement about a real person's
+ * licence — made here, by a human, after reading what she filed.
+ *
+ * `bookingEnabled` is untouched and remains the second, independent gate.
+ */
+export async function setMedicalDirectorConfirmed(input: {
+  providerId: string
+  confirmed: boolean
+}): Promise<ToggleState> {
+  await requireAdmin()
+
+  const [provider] = await db
+    .select({
+      id: providers.id,
+      firstName: providers.firstName,
+      type: providers.medicalDirectorType,
+      status: providers.medicalDirectorStatus,
+    })
+    .from(providers)
+    .where(eq(providers.id, input.providerId))
+    .limit(1)
+
+  if (!provider) return { error: 'That provider is not here any more.' }
+
+  if (provider.type !== 'own') {
+    return {
+      error:
+        'This provider is on the Melanite plan, where the subscription decides this. Changing it here would be overwritten by Stripe.',
+    }
+  }
+
+  const next = input.confirmed ? 'active' : 'inactive'
+  if (provider.status === next) return { success: 'Already set.' }
+
+  await db
+    .update(providers)
+    .set({ medicalDirectorStatus: next })
+    .where(eq(providers.id, provider.id))
+
+  // The provider is told; Melanite is not, because the admin standing here is the person who
+  // just did it. Same reasoning as the direct-payment tool.
+  await notifyBookingAccessChanged(provider.id, next, { tellMelanite: false })
+
+  revalidatePath('/app/admin/providers')
+  return {
+    success: input.confirmed
+      ? `${provider.firstName}'s medical director is confirmed.`
+      : `${provider.firstName}'s medical director is no longer accepted.`,
   }
 }

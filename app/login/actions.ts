@@ -59,8 +59,6 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
     ipAddress: headerList.get('x-forwarded-for')?.split(',')[0]?.trim() ?? null,
   })
 
-  await db.update(providers).set({ lastLoginAt: new Date() }).where(eq(providers.id, provider.id))
-
   // Relative AND real. Checking only that it is relative stops an open redirect and nothing
   // else — a relative path to a page that does not exist passes, and lands the person on a 404
   // immediately after a successful sign-in, which reads as "it won't let me in".
