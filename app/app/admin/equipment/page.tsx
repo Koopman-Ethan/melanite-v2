@@ -5,6 +5,11 @@ import { equipmentPhotoUrl } from '@/lib/blob'
 
 import { RemovePhoto } from './remove-photo'
 import {
+  getCloseoutIssues,
+  getSessionsWithoutCloseout,
+  getSkippedItemCounts,
+} from '@/lib/db/queries/end-of-use'
+import {
   getFlaggedChecks,
   getRecentChecks,
   getUnbracketedSessions,
@@ -84,18 +89,23 @@ function Photo({
 export default async function EquipmentPage() {
   await requireAdmin()
 
-  const [flagged, unbracketed, recent] = await Promise.all([
+  const [flagged, unbracketed, recent, closeoutIssues, unclosed, skipped] =
+    await Promise.all([
     getFlaggedChecks(),
     getUnbracketedSessions(),
     getRecentChecks(),
-  ])
+    getCloseoutIssues(),
+    getSessionsWithoutCloseout(),
+    getSkippedItemCounts(),
+    ])
 
   return (
     <main className="mx-auto w-full max-w-4xl px-6 py-10 space-y-6">
       <header>
-        <h1 className="text-2xl font-semibold">Equipment</h1>
+        <h1 className="text-2xl font-semibold">Equipment &amp; close-outs</h1>
         <p className="mt-1 text-sm text-ink-muted">
-          The laser, photographed by whoever had it. Problems and unaccounted sessions first.
+          The laser, photographed by whoever had it, and how they said they left the room. Problems
+          and unaccounted sessions first.
         </p>
       </header>
 
@@ -162,12 +172,99 @@ export default async function EquipmentPage() {
         </section>
       )}
 
-      {flagged.length === 0 && unbracketed.length === 0 && (
-        <div className="rounded-card border border-dashed border-line p-8 text-center">
-          <p className="text-sm text-ink-muted">
-            Nothing reported, and every recent session was photographed on arrival.
+      {closeoutIssues.length > 0 && (
+        <section className="rounded-card border border-critical/40 bg-critical/10 p-5">
+          <h2 className="text-sm font-medium">
+            {closeoutIssues.length}{' '}
+            {closeoutIssues.length === 1 ? 'device issue' : 'device issues'} reported on a close-out
+          </h2>
+          {/* Shown beside the flagged photographs rather than in some other page, because a
+              provider can report the same fault either way and a surface that shows only one
+              teaches Keoni that it shows everything. */}
+          <p className="mt-1 text-xs text-ink-secondary">
+            Reported on the checklist rather than on a photo. The two are the same question.
           </p>
-        </div>
+          <ul className="mt-3 space-y-2">
+            {closeoutIssues.map((c) => (
+              <li key={c.id} className="rounded-card border border-line bg-surface p-3">
+                <p className="text-sm font-medium">{c.providerName}</p>
+                <p className="mt-0.5 text-xs text-ink-muted">
+                  {c.serviceName} · {when(c.startTime)}
+                </p>
+                <p className="mt-1.5 text-sm text-ink-secondary italic">“{c.deviceIssueNote}”</p>
+                <p className="mt-1 text-xs text-ink-faint tabular-nums">
+                  Closed out {c.itemsDone} of {c.itemCount}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {unclosed.length > 0 && (
+        <section className="rounded-card border border-warning/40 bg-warning/10 p-5">
+          <h2 className="text-sm font-medium">
+            {unclosed.length} {unclosed.length === 1 ? 'session' : 'sessions'} left without a
+            close-out
+          </h2>
+          <p className="mt-1 text-xs text-ink-secondary">
+            The laser was used and nobody said how they left the room. Like the photos, this
+            cannot be filled in now — a check-off today would describe a room other people have
+            used since. It is a record, not a task.
+          </p>
+          <ul className="mt-3 space-y-2">
+            {unclosed.map((s) => (
+              <li
+                key={s.bookingId}
+                className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-card border border-line bg-surface px-3 py-2"
+              >
+                <span className="text-sm">{s.providerName}</span>
+                <span className="text-xs text-ink-muted">
+                  {s.serviceName} · {when(s.startTime)}
+                </span>
+                <span className="text-xs text-ink-faint tabular-nums">
+                  {agoLabel(s.startTime)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {flagged.length === 0 &&
+        unbracketed.length === 0 &&
+        closeoutIssues.length === 0 &&
+        unclosed.length === 0 && (
+          <div className="rounded-card border border-dashed border-line p-8 text-center">
+            <p className="text-sm text-ink-muted">
+              Nothing reported, every recent session was photographed on arrival, and every one was
+              closed out.
+            </p>
+          </div>
+        )}
+
+      {/* Quiet, and last of the exception blocks. This is the question the paper form could never
+          answer — not "who forgot" but "which step is the one people skip", which is a thing about
+          the process rather than about a person. */}
+      {skipped.length > 0 && (
+        <section className="space-y-2">
+          <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">
+            Where it slips
+          </h2>
+          <ul className="space-y-1">
+            {skipped.slice(0, 5).map((item) => (
+              <li
+                key={item.key}
+                className="flex flex-wrap items-baseline justify-between gap-x-4 rounded-card border border-line px-3 py-2"
+              >
+                <span className="text-xs text-ink-secondary">{item.label}</span>
+                <span className="text-xs text-ink-faint tabular-nums">
+                  not ticked {item.times}&times;
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       <section className="space-y-3">

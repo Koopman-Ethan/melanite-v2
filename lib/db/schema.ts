@@ -743,6 +743,82 @@ export const equipmentChecks = pgTable('equipment_checks', {
   index().on(t.needsAttention).where(sql`${t.needsAttention}`),
 ])
 
+/** One provider's account of how they left the suite, for one session.
+ *
+ *  The photographs beside this record the STATE of the machine. This records the WORK — cleaning,
+ *  restocking, storing the handpieces, inspecting the eyewear — which no photograph shows and
+ *  which was previously only knowable by Keoni asking.
+ *
+ *  ONE ROW PER BOOKING, written once and never amended. The row is the signature: a provider
+ *  signs what they did at the moment they did it, and an attestation that can be edited afterwards
+ *  is worth materially less than one that cannot. The trade is real — somebody who signs at 22 of
+ *  25 and then finishes the last three cannot say so — and it is the right way round for a record
+ *  whose only value is being believed.
+ *
+ *  NOTHING IS STORED THAT CAN BE DERIVED. There is no `complete` column: a row with
+ *  `cardinality(completed_items) = item_count` is complete and one short of it is partial, and no
+ *  booking with a row at all is "not started". A status column would be one more thing that can
+ *  disagree with the facts, which is the rule `/app/admin/queue` and the equipment page already
+ *  follow. */
+export const endOfUseChecklists = pgTable('end_of_use_checklists', {
+  id: uuid().primaryKey().defaultRandom(),
+  bookingId: uuid()
+    .notNull()
+    .references(() => bookings.id, { onDelete: 'restrict' }),
+  /** Denormalised from the booking, for the reason `equipment_checks.provider_id` is: attribution
+   *  is the whole point of the record and has to survive a booking being reassigned. */
+  providerId: uuid()
+    .notNull()
+    .references(() => providers.id, { onDelete: 'restrict' }),
+  /** SERVER time. This is the "Date/Time" written beside the signature on the paper form, and a
+   *  time the signer could choose would not be worth recording. */
+  recordedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  /** `END_OF_USE_VERSION` as it stood when they signed. A later rewording cannot silently change
+   *  what this person attested to. */
+  version: text().notNull(),
+  /** Stable item keys from `lib/end-of-use.ts`.
+   *
+   *  An array rather than twenty-five boolean columns. The list is POLICY, which this codebase
+   *  deliberately keeps in code and versioned, so a column per item would make every wording
+   *  change a migration. It also makes the question Keoni actually has — WHICH step gets skipped,
+   *  across everybody — one `unnest` rather than twenty-five `count`s. */
+  completedItems: text().array().notNull(),
+  /** How many items were on the list they were shown.
+   *
+   *  Stored rather than looked up, so "22 of 25" stays computable after that version has left the
+   *  codebase. A close-out signed as complete must keep reading as complete when a
+   *  twenty-sixth item is added later, because it WAS complete against the list that existed. */
+  itemCount: integer().notNull(),
+  /** The document's mutually-exclusive pair. A boolean because there are exactly two answers and
+   *  one of them is required — there is no "unanswered" state, since a row only exists because
+   *  somebody signed it. */
+  deviceIssue: boolean().notNull(),
+  deviceIssueNote: text(),
+  /** Anything else worth saying — a supply shortage, something odd. Deliberately not for clinical
+   *  detail; the form says so where somebody is typing. */
+  note: text(),
+}, (t) => [
+  // One per booking. A second row would let somebody quietly replace what they declared.
+  uniqueIndex().on(t.bookingId),
+  index().on(t.providerId, t.recordedAt.desc()),
+  // Partial, for the same reason as `equipment_checks.needs_attention`: reported faults are a
+  // handful among every close-out ever filed, and the only rows queried on their own.
+  index().on(t.deviceIssue).where(sql`${t.deviceIssue}`),
+  // A reported issue that names nothing is a message nobody can act on, and a description filed
+  // against "no issues" is one nobody will read. Enforced here as well as in the action because
+  // this is the pair the whole same-day path depends on.
+  // `coalesce`, and it is load-bearing. Written as `length(btrim(note)) > 0` this evaluates to
+  // NULL for a reported issue with no note — and a CHECK constraint PASSES on NULL, so the one
+  // guarantee the same-day path depends on was silently not enforced. Caught by the test that
+  // asserts the insert is refused; it was not.
+  check(
+    'end_of_use_device_issue_note',
+    sql`(${t.deviceIssue} and coalesce(length(btrim(${t.deviceIssueNote})), 0) > 0)
+        or (not ${t.deviceIssue} and ${t.deviceIssueNote} is null)`,
+  ),
+  check('end_of_use_item_count', sql`cardinality(${t.completedItems}) <= ${t.itemCount}`),
+])
+
 // ---------------------------------------------------------------------------
 // Packages
 // ---------------------------------------------------------------------------

@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
 import { webhookEvents } from '@/lib/db/schema'
+import { labelsFor, missingKeys } from '@/lib/end-of-use'
 import { getDigestDay, toCollectCents } from '@/lib/db/queries/daily-digest'
 import { getLaserHours } from '@/lib/db/queries/availability'
 import {
@@ -116,6 +117,13 @@ export async function runEveningDigest(
       toCollect: cents > 0 ? toMoney(cents) : null,
       isHouse: a.isHouse,
       status: a.status,
+      // A no-show never touched the room, so there is nothing to account for and flagging it as
+      // un-closed-out would be the digest inventing a failure.
+      closeoutExpected: a.status !== 'no_show',
+      closeout: a.closeout,
+      // Resolved to labels HERE rather than in the template, so `lib/email.ts` stays free of
+      // policy imports and takes strings like every other builder in it.
+      missingLabels: a.closeout ? labelsFor(missingKeys(a.closeout.completedItems)) : [],
     }
   })
 

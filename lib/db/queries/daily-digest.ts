@@ -7,6 +7,7 @@ import { splitClientPayment, toCents } from '@/lib/money'
 import { PROVIDER_ALREADY_HOLDS } from '@/lib/payments/direction'
 import {
   bookings,
+  endOfUseChecklists,
   platformSettings,
   providerServices,
   providers,
@@ -46,6 +47,42 @@ export interface DigestAppointment {
   /** The method on the purchase row, when there is one: how it was ACTUALLY paid, which can
    *  differ from what the booking predicted. Null until somebody records it. */
   recordedMethod: string | null
+  /** How the suite was signed off after this session, or null if nobody did.
+   *
+   *  A left join rather than a correlated subquery: `end_of_use_checklists` is unique on
+   *  `booking_id`, so unlike the ledger it cannot duplicate the appointment. */
+  closeout: {
+    itemsDone: number
+    itemCount: number
+    deviceIssue: boolean
+    /** The raw keys, so the caller can name what was skipped without a second query. */
+    completedItems: string[]
+  } | null
+}
+
+/** Folds the three left-joined close-out columns into one object, so callers have a single thing
+ *  to check rather than three that can disagree. `itemCount` is NOT NULL on the table, so a
+ *  non-null value is what proves a row exists. */
+function asDigestAppointment(row: RawDigestAppointment): DigestAppointment {
+  const { closeoutItems, closeoutItemCount, closeoutDeviceIssue, ...rest } = row
+  return {
+    ...rest,
+    closeout:
+      closeoutItemCount === null
+        ? null
+        : {
+            itemsDone: closeoutItems?.length ?? 0,
+            itemCount: closeoutItemCount,
+            deviceIssue: closeoutDeviceIssue ?? false,
+            completedItems: closeoutItems ?? [],
+          },
+  }
+}
+
+type RawDigestAppointment = Omit<DigestAppointment, 'closeout'> & {
+  closeoutItems: string[] | null
+  closeoutItemCount: number | null
+  closeoutDeviceIssue: boolean | null
 }
 
 export interface DigestDay {
@@ -120,6 +157,9 @@ export async function getDigestDay(day: string): Promise<DigestDay> {
         reconciled: BOOKING_HAS_PURCHASE,
         // A correlated subquery rather than a join, so a booking with two ledger rows — a
         // purchase and a later refund — cannot duplicate the appointment in the email.
+        closeoutItems: endOfUseChecklists.completedItems,
+        closeoutItemCount: endOfUseChecklists.itemCount,
+        closeoutDeviceIssue: endOfUseChecklists.deviceIssue,
         recordedMethod: sql<string | null>`(
           select l.payment_method from ledger_entries l
           where l.subject_type = 'booking' and l.subject_id = ${bookings.id}
@@ -132,6 +172,7 @@ export async function getDigestDay(day: string): Promise<DigestDay> {
       .innerJoin(providers, eq(bookings.providerId, providers.id))
       .innerJoin(providerServices, eq(bookings.providerServiceId, providerServices.id))
       .innerJoin(services, eq(providerServices.serviceId, services.id))
+      .leftJoin(endOfUseChecklists, eq(endOfUseChecklists.bookingId, bookings.id))
       .where(and(within, ne(bookings.status, 'cancelled')))
       .orderBy(asc(bookings.startTime)),
 
@@ -149,7 +190,7 @@ export async function getDigestDay(day: string): Promise<DigestDay> {
 
   return {
     day,
-    appointments: rows,
+    appointments: rows.map(asDigestAppointment),
     cancelled: cancelled?.n ?? 0,
     providerSharePct: Number(settings?.pct ?? 0.5),
   }

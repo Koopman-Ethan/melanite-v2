@@ -6,6 +6,7 @@ import { db } from '@/lib/db'
 import {
   bookings,
   checkoutLinks,
+  endOfUseChecklists,
   equipmentChecks,
   packageRedemptions,
   prepaidRedemptions,
@@ -63,6 +64,12 @@ export interface Appointment {
    *  the day they need to do it. */
   hasBeforeCheck: boolean
   hasAfterCheck: boolean
+  /** How this session was signed off, or null if nobody has.
+   *
+   *  Assembled from three columns by `asAppointment` so callers get one thing to check rather
+   *  than three that can disagree. `itemCount` is the row's OWN denominator, not today's — a
+   *  close-out signed against a 25-item list keeps reading as complete after the list grows. */
+  closeout: { itemsDone: number; itemCount: number; deviceIssue: boolean } | null
   /** The client's payment link, so a provider can send it again.
    *
    *  It used to be shown once, in the banner immediately after booking, and was unreachable
@@ -164,6 +171,9 @@ export async function getAppointments(
       checkoutToken: checkoutLinks.token,
       checkoutStatus: checkoutLinks.status,
       checkoutExpiresAt: checkoutLinks.expiresAt,
+      closeoutItems: endOfUseChecklists.completedItems,
+      closeoutItemCount: endOfUseChecklists.itemCount,
+      closeoutDeviceIssue: endOfUseChecklists.deviceIssue,
     })
     .from(bookings)
     .innerJoin(providerServices, eq(bookings.providerServiceId, providerServices.id))
@@ -171,6 +181,11 @@ export async function getAppointments(
     // Left, not inner: an externally-paid or comped booking never had a link, and inner-joining
     // would drop those rows from the provider's own appointment list entirely.
     .leftJoin(checkoutLinks, eq(checkoutLinks.bookingId, bookings.id))
+    // Left, and safe to join rather than subquery: `end_of_use_checklists` is unique on
+    // `booking_id`, so this can add at most one row and cannot duplicate an appointment. Going
+    // through Drizzle's column mapping also keeps these arriving as real types, which the
+    // `nextLaserUseAt` note above explains the cost of getting wrong.
+    .leftJoin(endOfUseChecklists, eq(endOfUseChecklists.bookingId, bookings.id))
     .where(and(...where))
     .orderBy(desc(bookings.startTime))
 
@@ -184,14 +199,28 @@ export async function getAppointments(
  *  treats it as a Date throws — which took down the entire appointments list for any booking
  *  that had another one after it, meaning most of them. */
 function asAppointment(row: RawAppointment): Appointment {
+  const { closeoutItems, closeoutItemCount, closeoutDeviceIssue, ...rest } = row
   return {
-    ...row,
+    ...rest,
     nextLaserUseAt: row.nextLaserUseAt ? new Date(row.nextLaserUseAt) : null,
+    // The left join produces nulls across all three when no close-out exists. `itemCount` is the
+    // one that decides: it is NOT NULL on the table, so a non-null value means there is a row.
+    closeout:
+      closeoutItemCount === null
+        ? null
+        : {
+            itemsDone: closeoutItems?.length ?? 0,
+            itemCount: closeoutItemCount,
+            deviceIssue: closeoutDeviceIssue ?? false,
+          },
   }
 }
 
-type RawAppointment = Omit<Appointment, 'nextLaserUseAt'> & {
+type RawAppointment = Omit<Appointment, 'nextLaserUseAt' | 'closeout'> & {
   nextLaserUseAt: string | Date | null
+  closeoutItems: string[] | null
+  closeoutItemCount: number | null
+  closeoutDeviceIssue: boolean | null
 }
 
 /** One booking, scoped to its owner. Ownership is part of the query rather than a check
@@ -264,11 +293,19 @@ async function getAppointmentsById(providerId: string, bookingId: string): Promi
       checkoutToken: checkoutLinks.token,
       checkoutStatus: checkoutLinks.status,
       checkoutExpiresAt: checkoutLinks.expiresAt,
+      closeoutItems: endOfUseChecklists.completedItems,
+      closeoutItemCount: endOfUseChecklists.itemCount,
+      closeoutDeviceIssue: endOfUseChecklists.deviceIssue,
     })
     .from(bookings)
     .innerJoin(providerServices, eq(bookings.providerServiceId, providerServices.id))
     .innerJoin(services, eq(providerServices.serviceId, services.id))
     .leftJoin(checkoutLinks, eq(checkoutLinks.bookingId, bookings.id))
+    // Left, and safe to join rather than subquery: `end_of_use_checklists` is unique on
+    // `booking_id`, so this can add at most one row and cannot duplicate an appointment. Going
+    // through Drizzle's column mapping also keeps these arriving as real types, which the
+    // `nextLaserUseAt` note above explains the cost of getting wrong.
+    .leftJoin(endOfUseChecklists, eq(endOfUseChecklists.bookingId, bookings.id))
     .where(and(eq(bookings.id, bookingId), eq(bookings.providerId, providerId)))
     .limit(1)
 

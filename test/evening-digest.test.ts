@@ -109,6 +109,11 @@ describe('what the email says', () => {
     toCollect: '100.00',
     isHouse: false,
     status: 'completed',
+    // The default row is a fully closed-out session, so every existing assertion here keeps
+    // describing an uneventful day and the new callouts have to be opted into.
+    closeoutExpected: true,
+    closeout: { itemsDone: 25, itemCount: 25, deviceIssue: false },
+    missingLabels: [],
   }
 
   const build = (over: Partial<Parameters<typeof eveningDigestEmail>[0]> = {}) =>
@@ -178,6 +183,62 @@ describe('what the email says', () => {
     expect(mail.text).toContain('2 cancelled, not listed.')
     expect(mail.html).toContain('2 cancelled, not listed.')
   })
+  describe('the end-of-use close-out', () => {
+    it('names a session nobody signed off', () => {
+      const out = build({ rows: [{ ...row, closeout: null }] })
+      expect(out.text).toContain('No end-of-use check-off.')
+      expect(out.html).toContain('No end-of-use check-off.')
+    })
+
+    it('says nothing about a no-show', () => {
+      // Nobody touched the room, so there is nothing to account for. A digest that invents a
+      // failure for every cancellation is one Keoni learns to skim.
+      const out = build({
+        rows: [{ ...row, status: 'no_show', closeoutExpected: false, closeout: null }],
+      })
+      expect(out.text).not.toContain('No end-of-use check-off.')
+    })
+
+    it('shows the count and what was skipped when it was partial', () => {
+      const out = build({
+        rows: [
+          {
+            ...row,
+            closeout: { itemsDone: 22, itemCount: 25, deviceIssue: false },
+            missingLabels: ['Restock supplies used', 'Clean countertops and treatment trays', 'Remove all personal items'],
+          },
+        ],
+      })
+      expect(out.text).toContain('Closed out 22 of 25.')
+      expect(out.text).toContain('Restock supplies used')
+      // Capped at two, so eight appointments cannot push the "to collect" block off the screen.
+      expect(out.text).toContain('and 1 more')
+      expect(out.text).not.toContain('Remove all personal items')
+    })
+
+    it('says nothing at all when it was complete', () => {
+      const out = build()
+      expect(out.text).not.toContain('Closed out')
+      expect(out.text).not.toContain('No end-of-use check-off.')
+    })
+
+    it('flags a reported device issue', () => {
+      const out = build({
+        rows: [{ ...row, closeout: { itemsDone: 25, itemCount: 25, deviceIssue: true } }],
+      })
+      expect(out.text).toContain('Device issue reported.')
+      expect(out.html).toContain('Device issue reported.')
+    })
+
+    it('leaves the subject alone', () => {
+      // The subject means one thing — what has to be collected — and a close-out state leaking
+      // into it would break the scanning behaviour the whole email is built around.
+      const out = build({
+        rows: [{ ...row, closeout: null }],
+      })
+      expect(out.subject).toBe('1 to collect ($100.00) · Tuesday, September 1')
+    })
+  })
 })
 
 describe('the labels the digest is built from', () => {
@@ -189,4 +250,5 @@ describe('the labels the digest is built from', () => {
     // 20:00 UTC is 2:00 PM in Denver in September.
     expect(denverTimeLabel(new Date('2026-09-01T20:00:00Z'))).toBe('2:00 PM')
   })
+
 })

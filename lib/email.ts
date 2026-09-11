@@ -766,6 +766,15 @@ export function denverTimeLabel(at: Date): string {
   })
 }
 
+/** " Not done: A; B; and 3 more." — capped, because the point is that something was skipped and
+ *  the detail lives on the admin page. Leading space so callers can concatenate it directly. */
+function missingSummary(labels: string[]): string {
+  if (labels.length === 0) return ''
+  const shown = labels.slice(0, 2).join('; ')
+  const rest = labels.length > 2 ? `; and ${labels.length - 2} more` : ''
+  return ` Not done: ${shown}${rest}.`
+}
+
 export interface DigestEmailRow {
   /** `denverTimeLabel(startTime)`. */
   when: string
@@ -778,6 +787,14 @@ export interface DigestEmailRow {
   toCollect: string | null
   isHouse: boolean
   status: string
+  /** Was a close-out owed for this session at all? False for a no-show — nobody touched the room,
+   *  so there is nothing to account for and saying otherwise is noise. */
+  closeoutExpected: boolean
+  /** How the suite was signed off, or null if nobody did. */
+  closeout: { itemsDone: number; itemCount: number; deviceIssue: boolean } | null
+  /** What was not ticked, already resolved to labels by the caller — this module takes strings and
+   *  never imports policy, the same as every other template here. */
+  missingLabels: string[]
 }
 
 /**
@@ -842,6 +859,19 @@ export function eveningDigestEmail(input: {
       if (r.status === 'upcoming') {
         textLines.push('    Still marked upcoming — nobody closed this out.')
       }
+      // At most one line per row, plus at most one for a device fault. Eight appointments with
+      // three lines each would push the "to collect" block off the first screen, and that block
+      // is the reason this email is opened at all.
+      if (r.closeoutExpected && !r.closeout) {
+        textLines.push('    No end-of-use check-off.')
+      } else if (r.closeout && r.closeout.itemsDone < r.closeout.itemCount) {
+        textLines.push(
+          `    Closed out ${r.closeout.itemsDone} of ${r.closeout.itemCount}.${missingSummary(r.missingLabels)}`,
+        )
+      }
+      if (r.closeout?.deviceIssue) {
+        textLines.push('    Device issue reported.')
+      }
       textLines.push('')
     }
   }
@@ -861,6 +891,18 @@ export function eveningDigestEmail(input: {
        ${
          r.status === 'upcoming'
            ? `<div style="font-size:12px;color:#B8965A;margin-top:4px">Still marked upcoming — nobody closed this out.</div>`
+           : ''
+       }
+       ${
+         r.closeoutExpected && !r.closeout
+           ? `<div style="font-size:12px;color:#B8965A;margin-top:4px">No end-of-use check-off.</div>`
+           : r.closeout && r.closeout.itemsDone < r.closeout.itemCount
+             ? `<div style="font-size:12px;color:#B8965A;margin-top:4px">Closed out ${r.closeout.itemsDone} of ${r.closeout.itemCount}.${esc(missingSummary(r.missingLabels))}</div>`
+             : ''
+       }
+       ${
+         r.closeout?.deviceIssue
+           ? `<div style="font-size:12px;color:#C2554D;margin-top:4px">Device issue reported.</div>`
            : ''
        }
      </div>`

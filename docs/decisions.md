@@ -1807,3 +1807,90 @@ for the other.
 whether `BLOB_READ_WRITE_TOKEN` is set in the Vercel project. Missing blob storage fails soft —
 `putEquipmentPhoto` refuses with "storage is not set up in this environment" — so it costs the
 feature and not the site, which is why it is not a gate. Worth checking by hand at the same time.
+
+### The end-of-use checklist — 2026-09-11
+
+Keoni has been chasing people about whether the suite was left clean: handpieces stored, eyewear
+disinfected, bed wiped, supplies restocked. The photographs record the STATE of the machine. They
+say nothing about the WORK, which is the half she was having to ask about.
+
+Keoni's paper form — "Melanite Laser Suite — Provider End-of-Use Checklist" — already defines what
+is expected, so nothing here invents policy. It is the paper form, recorded.
+
+**Twenty-five items, not twenty-seven.** The document draws 27 boxes, but two of them are the
+either/or Device Issues pair, which is a radio here and not part of the tick denominator. The
+count shown to a provider has to be arithmetically true or the first person who counts stops
+believing the record.
+
+**After every appointment, which is NOT where the after-photo sits.** The after-photograph is
+skipped when somebody follows you closely, because their arrival photo records the same moment
+(`afterNeededGiven`). The cleaning is not redundant in the same way — it is owed to the person
+walking in next, not to the record. That asymmetry is the whole reason the two prompts have
+different cadences, and it sits in a comment next to them because it otherwise looks like a bug.
+
+**Partial submission is allowed, and that is the feature.** Requiring all 25 before the form will
+save produces a reflexive tick-through, and one signal — "all done" — that is false often enough
+to be worthless. Allowing partial produces per-item truth, which is what makes
+`getSkippedItemCounts` possible: *eyewear disinfection is missed on a third of sessions* is
+something to act on, where *Nicole did not submit the form* is not. The certification sentence
+swaps rather than the button locking: nobody signs a certification of work they did not do, and
+nobody is prevented from filing a truthful partial record.
+
+**No gate, for the reason already settled for the photographs.** Nothing blocks a booking and
+nobody is locked out mid-clinic. The consequence is the absence itself, recorded with a name
+against it and surfaced to Keoni, who acts on patterns through `bookingEnabled` as she does today.
+Nothing is ever asked for retroactively either — past the same twelve-hour window the photos use,
+a check-off would describe a room other people have used since.
+
+**Three things the tests found that review had not.**
+
+- The CHECK constraint enforcing "a reported issue must say what is wrong" did not enforce it.
+  Written as `length(btrim(note)) > 0` it evaluates to NULL when the note is null, and a CHECK
+  constraint PASSES on NULL. `coalesce(..., 0)` is load-bearing, and the guarantee the whole
+  same-day path rests on was absent until an integration test tried the insert and it succeeded.
+- `unnest(${keys}::text[])` does not work with a bare interpolation. Drizzle expands a JS array
+  into comma-separated parameters, which Postgres reads as a row constructor: "cannot cast type
+  record to text[]". `sql.param` sends the list as one value.
+- The exceptions query could not be tested against the wall clock at all. `END_OF_USE_STARTED_AT`
+  is the day the feature starts being asked for, so a fixture placed "26 hours ago" is before it
+  by design and the gap between that bound and the twelve-hour grace is only a couple of hours
+  wide. `getSessionsWithoutCloseout` takes an optional `now` for the same reason `isUnbracketed`
+  does, and the fixtures are anchored to the start date rather than to today.
+
+**"Save before-and-after photos" is about the CLIENT, not the laser.** It nearly shipped
+pre-ticked from `hasBeforeCheck`/`hasAfterCheck` on the grounds that the app already knows. It
+does not: those are photographs of the MACHINE, and this item is the client's treatment photos,
+which live in their chart and which `lib/blob.ts` forbids this app from holding. Deriving one from
+the other would assert something nobody told us, on the one record whose entire value is being
+trustworthy. What IS shown, read-only above that section, is whether the laser was photographed —
+a fact the app owns, stated rather than asked, because letting somebody tick it would let them
+contradict the record.
+
+**The item wrong on purpose.** September's wording says "Power down laser system" unconditionally
+where June's said "if last provider of the day". Offered after every appointment, that is wrong
+whenever somebody follows — and a redundant prompt is how people learn to dismiss the whole list.
+Full fidelity to the clinical document was chosen anyway, which is defensible; the hint under the
+item ("If somebody is booked after you, leave it in standby instead") is what stops it reading as
+an instruction to strand the next provider. If it becomes a real problem the fix is an
+`onlyWhenLastUse` flag on the item and `afterNeededGiven` at the call site — the keys are stable,
+so that is a change to a list and not a migration.
+
+**PHI is the standing risk.** The Documentation section says "Document any adverse events" and
+there are two free-text boxes beside it. Somebody will eventually type a client's name and a burn
+into `deviceIssueNote`, which then sits in Postgres and in an email — the same trap `lib/blob.ts`
+documents for photographs. The mitigation is copy at the point of typing and nothing stronger,
+which is an accepted limit rather than a solved problem.
+
+**Not done: a same-day email for a reported device issue.** The document lists device issues,
+adverse events and burns under "Immediate Reporting Required", and a close-out reporting one
+currently waits for the nightly digest. The existing photo flag already reaches Keoni the same
+day, and the form steers people to it, so the capability exists — but only if they use the photo
+rather than the checklist field. `notifyEndOfUseIssue`, modelled on `notifyEquipmentFlagged`,
+would be about twenty lines. It was offered and deliberately not taken for v1.
+
+**Also not done:** one row per booking, never amended, so a provider who signs at 22 of 25 and
+then finishes the last three cannot say so. That is the right way round for an attestation and it
+will generate exactly one confused message; if it generates more, the answer is an append-only
+second row that supersedes rather than replaces. Room renters are out of scope for the same reason
+they are out of scope for the photographs — a room rental does not book the laser — though they
+are in the room with it.
