@@ -1768,3 +1768,42 @@ alternatives is only as reliable as the capability it demands. Prefer the versio
 It also says something about the verification plan. This was listed as needing a manual phone test
 precisely because nothing else could catch it, and that was right — 523 passing tests, a correct
 DOM and a firing file chooser under emulation all agreed the feature worked.
+
+### The schema check became a fuse, not a smoke alarm — 2026-09-11
+
+`prod-schema-check.yml` ran on push to `main`. By then the deploy has happened, so the best it
+could ever do was shorten an outage it had already allowed. It now also runs on pull requests
+targeting `main`, where the same question — does production have the schema this code expects? —
+prevents the outage instead of reporting it.
+
+**What made this urgent rather than tidy.** The equipment-photo work adds `select 1 from
+equipment_checks` subqueries to `getAppointments` (`lib/db/queries/appointments.ts`). That is the
+provider's main page, and it is the same query shape, on the same page, that `prepaid_redemptions`
+had on 2026-08-19 when `/app/appointments` returned a server error for every provider for about
+ten hours. Merging the photo feature before applying `0028` and `0029` would have reproduced that
+incident almost exactly. The check that exists to catch it would have fired *after* the merge.
+
+**The ordering this makes mandatory: migrate production, then merge.** That is safe here because
+migrations are additive — `0028` creates `equipment_checks`, an enum and two nullable columns on
+`providers`; `0029` adds three nullable columns and an FK. A table production has but no deployed
+code reads yet costs nothing. The reverse is an outage. Where a migration is ever genuinely
+destructive, this ordering stops being free and the deploy needs a different plan.
+
+    MELANITE_ENV_FILE=.env.migration npm run db:migrate
+    MELANITE_ENV_FILE=.env.migration npm run db:verify
+
+`db:migrate`, never `db:migrate:kit` — the reason is in the header of `scripts/migrate.ts`.
+
+**The failure text now depends on when it is asked.** The same red X means "production is broken
+right now" after a push and "do not merge yet, nothing is broken" on a pull request. Telling a
+reviewer the site is down when they have merely opened a PR is how an alarm earns the habit of
+being ignored, and this check is only worth having if its output is believed.
+
+**Concurrency is now per-ref.** The group was global with `cancel-in-progress`, so a PR run could
+cancel the post-deploy run on `main` — the two answer different questions and neither substitutes
+for the other.
+
+**What this does not cover.** It reads production's schema, not its data, and it cannot know
+whether `BLOB_READ_WRITE_TOKEN` is set in the Vercel project. Missing blob storage fails soft —
+`putEquipmentPhoto` refuses with "storage is not set up in this environment" — so it costs the
+feature and not the site, which is why it is not a gate. Worth checking by hand at the same time.

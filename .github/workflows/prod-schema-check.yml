@@ -34,6 +34,24 @@ on:
   push:
     branches: [main]
 
+  # The moment BEFORE it matters. On push this workflow is a smoke alarm: it tells you the
+  # outage has already started. Here it is a fuse.
+  #
+  # 2026-08-19 was not caused by nobody knowing the rule. It was caused by the rule living in
+  # somebody's head on the night they were tired. A merge to main deploys code, and code that
+  # names a table production does not have takes down every page whose query mentions it —
+  # `getAppointments` runs `select 1 from equipment_checks` per row for the photo feature, the
+  # exact shape that `prepaid_redemptions` had when /app/appointments died for ten hours.
+  #
+  # So the question moves one step earlier: does production ALREADY have the schema this branch
+  # expects? If not, this fails and the merge is blocked until the migrations are applied.
+  #
+  # This makes "migrate first, then merge" mandatory rather than advised. That ordering is safe
+  # in this repo because migrations are additive — a table production has but no deployed code
+  # reads yet costs nothing, while the reverse is an outage.
+  pull_request:
+    branches: [main]
+
   schedule:
     # 10:10 UTC. Drift does not only arrive by push: a migration applied by hand can fail
     # halfway, and `scripts/migrate.ts` runs without a transaction precisely so that enum
@@ -47,7 +65,10 @@ on:
 
 # A queued run tells you nothing the newer one will not. Cancel it.
 concurrency:
-  group: prod-schema-check
+  # Per-ref, not global. A PR run and the post-deploy run on main answer different questions —
+  # "may I merge this?" and "is production broken right now?" — and a global group let the
+  # first cancel the second.
+  group: prod-schema-check-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -81,22 +102,41 @@ jobs:
       - name: Verify production schema matches the migrations on disk
         run: npm run db:verify
 
+      # The same failure means two different things depending on when it is asked, and telling
+      # a reviewer that production is "broken RIGHT NOW" when they have merely opened a pull
+      # request is how a useful alarm becomes one people learn to ignore.
       - name: What to do when this fails
         if: failure()
         run: |
-          echo "::error::Production's schema does not match the migrations on this commit."
-          echo ""
-          echo "Something in production is very likely broken RIGHT NOW — a missing table"
-          echo "takes down every page whose query mentions it, while pages that avoid it keep"
-          echo "working, so the app looks half-alive rather than down."
-          echo ""
-          echo "Apply the pending migrations from a machine with production credentials:"
-          echo ""
-          echo "  MELANITE_ENV_FILE=.env.migration npm run db:migrate"
-          echo "  MELANITE_ENV_FILE=.env.migration npm run db:verify"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "::error::Production is missing schema this branch expects. Do not merge yet."
+            echo ""
+            echo "NOTHING IS BROKEN YET. This ran before the merge, which is the point."
+            echo "Merging would deploy code naming tables or columns production does not have,"
+            echo "and every page whose query mentions one would start returning a server error."
+            echo ""
+            echo "Apply the pending migrations to production FIRST, then re-run this check:"
+            echo ""
+            echo "  MELANITE_ENV_FILE=.env.migration npm run db:migrate"
+            echo "  MELANITE_ENV_FILE=.env.migration npm run db:verify"
+            echo ""
+            echo "Applying them before the merge is safe: a table production has but no live"
+            echo "code reads yet costs nothing. The reverse is an outage."
+          else
+            echo "::error::Production's schema does not match the migrations on this commit."
+            echo ""
+            echo "Something in production is very likely broken RIGHT NOW — a missing table"
+            echo "takes down every page whose query mentions it, while pages that avoid it keep"
+            echo "working, so the app looks half-alive rather than down."
+            echo ""
+            echo "Apply the pending migrations from a machine with production credentials:"
+            echo ""
+            echo "  MELANITE_ENV_FILE=.env.migration npm run db:migrate"
+            echo "  MELANITE_ENV_FILE=.env.migration npm run db:verify"
+            echo ""
+            echo "No redeploy is needed afterwards: the code is already live and correct."
+          fi
           echo ""
           echo "Use db:migrate, NOT db:migrate:kit. drizzle-kit wraps the whole run in one"
           echo "transaction, and 'ALTER TYPE ... ADD VALUE' followed by a use of that value"
           echo "raises 55P04 there. scripts/migrate.ts sends statements one at a time."
-          echo ""
-          echo "No redeploy is needed afterwards: the code is already live and correct."
