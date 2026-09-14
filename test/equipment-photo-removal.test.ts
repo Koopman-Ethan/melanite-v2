@@ -22,9 +22,16 @@ let providerServiceId = ''
 let bookingId = ''
 const CLIENT = `ZZ PHOTO REMOVAL ${Date.now()}`
 
-/** Yesterday, so the booking has finished and is eligible for the gap list at all. */
-const startIso = new Date(Date.now() - 26 * 60 * 60_000).toISOString()
-const endIso = new Date(Date.now() - 25 * 60 * 60_000).toISOString()
+/** Yesterday, so the booking has finished and is eligible for the gap list at all.
+ *
+ *  A STARTING POINT, not a fixed time. The laser is one shared resource guarded by the
+ *  `bookings_no_overlap` exclusion constraint, and dev is rebuilt nightly from production — so
+ *  whether 26 hours ago happens to be free depends entirely on who was booked yesterday. It was
+ *  free until a refresh imported a real 15:30 appointment into exactly that hour, and the whole
+ *  file then failed in `beforeAll` with an error about an exclusion constraint.
+ *
+ *  `e2e/equipment-check.spec.ts` already solved this with a retry loop for the same reason. */
+const HOURS_BACK_START = 26
 
 async function gapListHasOurBooking(): Promise<boolean> {
   const sessions = await getUnbracketedSessions(7)
@@ -38,16 +45,33 @@ beforeAll(async () => {
   providerServiceId = rows[0].id
   providerId = rows[0].provider_id
 
-  const booking = (await sql.query(
-    `INSERT INTO bookings
-       (provider_id, provider_service_id, client_name, original_price, price, payment_source,
-        duration_mins, start_time, end_time, status)
-     VALUES ($1, $2, $3, '100.00', '100.00', 'checkout_link', 60, $4::timestamptz,
-             $5::timestamptz, 'completed')
-     RETURNING id`,
-    [providerId, providerServiceId, CLIENT, startIso, endIso],
-  )) as { id: string }[]
-  bookingId = booking[0].id
+  // Walk backwards an hour at a time until the laser is free. Every candidate stays inside the
+  // seven-day window `gapListHasOurBooking` asks for, so which one wins does not change what is
+  // being tested — only whether the fixture can exist at all.
+  let lastError: unknown
+  for (let back = HOURS_BACK_START; back < HOURS_BACK_START + 24; back += 1) {
+    const startIso = new Date(Date.now() - back * 60 * 60_000).toISOString()
+    const endIso = new Date(Date.now() - (back - 1) * 60 * 60_000).toISOString()
+    try {
+      const booking = (await sql.query(
+        `INSERT INTO bookings
+           (provider_id, provider_service_id, client_name, original_price, price, payment_source,
+            duration_mins, start_time, end_time, status)
+         VALUES ($1, $2, $3, '100.00', '100.00', 'checkout_link', 60, $4::timestamptz,
+                 $5::timestamptz, 'completed')
+         RETURNING id`,
+        [providerId, providerServiceId, CLIENT, startIso, endIso],
+      )) as { id: string }[]
+      bookingId = booking[0].id
+      break
+    } catch (err) {
+      // Only an overlap is worth retrying. Anything else is a real failure and must not be
+      // swallowed twenty-four times over.
+      if (!String(err).includes('bookings_no_overlap')) throw err
+      lastError = err
+    }
+  }
+  if (!bookingId) throw lastError ?? new Error('could not place the fixture booking')
 })
 
 afterAll(async () => {

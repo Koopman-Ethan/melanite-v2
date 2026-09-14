@@ -3,8 +3,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { isUniqueViolation } from '@/lib/db/errors'
 import {
   getCloseoutIssues,
+  getConditionalItemCounts,
   getSessionsWithoutCloseout,
-  getSkippedItemCounts,
 } from '@/lib/db/queries/end-of-use'
 import {
   END_OF_USE_ITEMS,
@@ -27,8 +27,10 @@ let providerId = ''
 let providerServiceId = ''
 let bookingId = ''
 let recentBookingId = ''
+let countedBookingId = ''
 const CLIENT = `ZZ CLOSEOUT ${Date.now()}`
 const RECENT_CLIENT = `ZZ CLOSEOUT RECENT ${Date.now()}`
+const COUNTED_CLIENT = `ZZ CLOSEOUT COUNTED ${Date.now()}`
 
 // Fixtures are placed relative to END_OF_USE_STARTED_AT, not to the wall clock, and the query is
 // asked with an explicit `now`. Anchoring to `Date.now()` cannot work: the start bound is the day
@@ -77,14 +79,19 @@ beforeAll(async () => {
 
   bookingId = await insertBooking(CLIENT, startIso, endIso)
   recentBookingId = await insertBooking(RECENT_CLIENT, recentStartIso, recentEndIso)
+  countedBookingId = await insertBooking(
+    COUNTED_CLIENT,
+    new Date(ANCHOR + 4 * 60 * 60_000).toISOString(),
+    new Date(ANCHOR + 5 * 60 * 60_000).toISOString(),
+  )
 })
 
 afterAll(async () => {
   await sql.query(`DELETE FROM end_of_use_checklists WHERE booking_id = any($1::uuid[])`, [
-    [bookingId, recentBookingId],
+    [bookingId, recentBookingId, countedBookingId],
   ])
   await sql.query(`DELETE FROM bookings WHERE client_name = any($1::text[])`, [
-    [CLIENT, RECENT_CLIENT],
+    [CLIENT, RECENT_CLIENT, COUNTED_CLIENT],
   ])
 })
 
@@ -110,7 +117,7 @@ describe('sessions nobody signed off', () => {
         bookingId,
         providerId,
         END_OF_USE_VERSION,
-        END_OF_USE_ITEMS.slice(0, 20).map((i) => i.key),
+        END_OF_USE_ITEMS.filter((i) => i.required).map((i) => i.key),
         END_OF_USE_ITEM_COUNT,
       ],
     )
@@ -177,21 +184,50 @@ describe('the constraints', () => {
   })
 })
 
-describe('which step gets skipped', () => {
-  it('counts the items our close-out left unticked', async () => {
-    // The `unnest` aggregate, which is the whole justification for storing an array rather than
-    // twenty-five columns. Our fixture ticked the first 20 of 25, so the last 5 are missing.
-    const skipped = await getSkippedItemCounts(SINCE_DAYS)
-    const byKey = new Map(skipped.map((s) => [s.key, s.times]))
+describe('what came up', () => {
+  it('counts the conditional items that WERE ticked, not the ones that were not', async () => {
+    // The `unnest` aggregate, and the justification for an array over twenty-five columns. It
+    // counts EVENTS — a shortage, damage found — because every required item is ticked on every
+    // stored row, so totalling omissions could only ever list the five conditionals and would
+    // render a quiet month as a page of failures.
+    const conditional = END_OF_USE_ITEMS.filter((i) => !i.required)
 
-    for (const item of END_OF_USE_ITEMS.slice(20)) {
-      expect(byKey.get(item.key) ?? 0, `${item.key} should be counted as skipped`).toBeGreaterThan(
-        0,
+    // Measured as a DELTA, not against zero. This runs on the shared dev database, which carries
+    // close-outs filed by hand during testing — asserting a global count would pass or fail on
+    // whatever somebody happened to tick last week.
+    const before = new Map(
+      (await getConditionalItemCounts(SINCE_DAYS)).map((c) => [c.key, c.times]),
+    )
+
+    // Tick one, and only that one moves.
+    await sql.query(
+      `INSERT INTO end_of_use_checklists
+         (booking_id, provider_id, version, completed_items, item_count, device_issue)
+       VALUES ($1, $2, $3, $4::text[], $5, false)`,
+      [
+        countedBookingId,
+        providerId,
+        END_OF_USE_VERSION,
+        [...END_OF_USE_ITEMS.filter((i) => i.required).map((i) => i.key), conditional[0].key],
+        END_OF_USE_ITEM_COUNT,
+      ],
+    )
+
+    const after = await getConditionalItemCounts(SINCE_DAYS)
+    const afterByKey = new Map(after.map((c) => [c.key, c.times]))
+
+    // The one we ticked went up by exactly one.
+    expect(afterByKey.get(conditional[0].key) ?? 0).toBe((before.get(conditional[0].key) ?? 0) + 1)
+
+    // The others did not move — the aggregate counts the item, not the row.
+    for (const item of conditional.slice(1)) {
+      expect(afterByKey.get(item.key) ?? 0, `${item.key} should not have moved`).toBe(
+        before.get(item.key) ?? 0,
       )
     }
+
     // And it resolves the key to the wording a provider actually saw.
-    const one = skipped.find((s) => s.key === END_OF_USE_ITEMS[24].key)
-    expect(one?.label).toBe(END_OF_USE_ITEMS[24].label)
+    expect(after.find((c) => c.key === conditional[0].key)?.label).toBe(conditional[0].label)
   })
 })
 

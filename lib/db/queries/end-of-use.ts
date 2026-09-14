@@ -166,35 +166,41 @@ export async function getSessionsWithoutCloseout(
     .orderBy(asc(bookings.startTime))
 }
 
-export interface SkippedItem {
+export interface ConditionalItemCount {
   key: string
   label: string
   times: number
 }
 
 /**
- * Which step actually gets skipped, across everybody.
+ * How often each CONDITIONAL item was ticked.
  *
- * The question the paper form could never answer, and the reason `completed_items` is an array
- * rather than twenty-five columns. "Eyewear disinfection is missed on a third of sessions" is
- * something Keoni can act on; "Nicole did not submit the form" is not.
+ * This counts what happened, not what was skipped. That inversion is deliberate and it follows
+ * from making twenty items required: a required item is ticked on every stored row by definition,
+ * so counting omissions could only ever return the five conditionals — and "Report damaged
+ * eyewear: not ticked 40 times" describes forty sessions where the eyewear was fine. It would be
+ * a page of failures that are not failures, which is how a page stops being read.
  *
- * Driven by the CURRENT key list, passed in as a parameter, so an item retired from the checklist
- * stops being counted rather than lingering as a phantom failure.
+ * Ticked, these are real events: a shortage, damage, an adverse event. That IS the thing the paper
+ * form could never total up, and it is the reason `completed_items` is an array rather than
+ * twenty-five columns.
+ *
+ * Driven by the current conditional list, passed as a parameter, so a retired item stops being
+ * counted rather than lingering.
  */
-export async function getSkippedItemCounts(sinceDays = 30): Promise<SkippedItem[]> {
+export async function getConditionalItemCounts(sinceDays = 30): Promise<ConditionalItemCount[]> {
   const since = new Date(Date.now() - sinceDays * 24 * 60 * 60_000)
   // `sql.param`, not a bare interpolation. Drizzle expands a JS array into comma-separated
   // parameters, which Postgres reads as a row constructor and refuses to cast — "cannot cast type
   // record to text[]". This sends the whole list through as one text[] value instead.
-  const keys = END_OF_USE_ITEMS.map((i) => i.key)
+  const keys = END_OF_USE_ITEMS.filter((i) => !i.required).map((i) => i.key)
 
   const rows = await db.execute<{ key: string; times: number }>(sql`
     select k.key, count(*)::int as times
     from ${endOfUseChecklists} c
     cross join unnest(${sql.param(keys)}::text[]) as k(key)
     where c.recorded_at >= ${since}
-      and not (k.key = any(c.completed_items))
+      and k.key = any(c.completed_items)
     group by k.key
     order by times desc, k.key asc
   `)

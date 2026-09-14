@@ -11,7 +11,9 @@ import {
   END_OF_USE_ITEM_COUNT,
   END_OF_USE_VERSION,
   DEVICE_ISSUE_NOTE_MAX,
+  REQUIRED_ITEM_COUNT,
   deviceIssueError,
+  missingRequired,
   sanitiseItems,
 } from '@/lib/end-of-use'
 import { checkWindowOpen } from '@/lib/equipment-checks'
@@ -87,6 +89,19 @@ export async function recordEndOfUseChecklist(
 
   const items = sanitiseItems(formData.getAll('items').map(String))
 
+  // The rule, enforced here and not by the disabled button. v1 had no check at all on this side,
+  // so a close-out with nothing ticked was accepted and certified — which is exactly what happened
+  // the first time somebody used it. The form disables its own button too; that is a courtesy to
+  // whoever is standing in the room, and it is not what makes this true.
+  const missing = missingRequired(items)
+  if (missing.length > 0) {
+    const named = missing.slice(0, 2).map((i) => i.label.toLowerCase()).join('; ')
+    const rest = missing.length > 2 ? `, and ${missing.length - 2} more` : ''
+    return {
+      error: `Still to tick (${missing.length} of ${REQUIRED_ITEM_COUNT} required): ${named}${rest}.`,
+    }
+  }
+
   try {
     await db.insert(endOfUseChecklists).values({
       bookingId: booking.id,
@@ -110,11 +125,17 @@ export async function recordEndOfUseChecklist(
   revalidatePath('/app/appointments')
   revalidatePath('/app/dashboard')
 
-  const complete = items.length >= END_OF_USE_ITEM_COUNT
-
+  // Everything required is ticked or we would not be here, so there is no shortfall to report
+  // back. The count says which of the conditional five also applied, which is information rather
+  // than a shortcoming.
   return {
-    success: complete
-      ? 'Closed out. That is your record of how you left it.'
-      : `Recorded — ${items.length} of ${END_OF_USE_ITEM_COUNT}.`,
+    success:
+      items.length >= END_OF_USE_ITEM_COUNT
+        ? 'Closed out. That is your record of how you left it.'
+        : `Closed out — all ${REQUIRED_ITEM_COUNT} required${
+            items.length > REQUIRED_ITEM_COUNT
+              ? `, plus ${items.length - REQUIRED_ITEM_COUNT} more`
+              : ''
+          }.`,
   }
 }

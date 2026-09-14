@@ -199,21 +199,23 @@ describe('what the email says', () => {
       expect(out.text).not.toContain('No end-of-use check-off.')
     })
 
-    it('shows the count and what was skipped when it was partial', () => {
+    it('says nothing about a close-out that left conditional items unticked', () => {
+      // Twenty items are required, so anything stored has them. An unticked item is a CONDITIONAL
+      // one that did not apply — no damage, nothing short — and "Closed out 22 of 25" in an
+      // exceptions email describes a shortfall that did not happen. The digest reports two things
+      // about close-outs: that one is missing, and that a fault was reported.
       const out = build({
         rows: [
           {
             ...row,
             closeout: { itemsDone: 22, itemCount: 25, deviceIssue: false },
-            missingLabels: ['Restock supplies used', 'Clean countertops and treatment trays', 'Remove all personal items'],
+            missingLabels: ['Report damaged eyewear immediately', 'Document any adverse events'],
           },
         ],
       })
-      expect(out.text).toContain('Closed out 22 of 25.')
-      expect(out.text).toContain('Restock supplies used')
-      // Capped at two, so eight appointments cannot push the "to collect" block off the screen.
-      expect(out.text).toContain('and 1 more')
-      expect(out.text).not.toContain('Remove all personal items')
+      expect(out.text).not.toContain('22 of 25')
+      expect(out.text).not.toContain('Report damaged eyewear')
+      expect(out.html).not.toContain('22 of 25')
     })
 
     it('says nothing at all when it was complete', () => {

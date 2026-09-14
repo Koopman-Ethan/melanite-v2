@@ -5,10 +5,13 @@ import {
   END_OF_USE_ITEMS,
   END_OF_USE_ITEM_COUNT,
   END_OF_USE_SECTIONS,
+  REQUIRED_ITEM_COUNT,
+  canSignOff,
   deviceIssueError,
   isComplete,
   labelsFor,
   missingKeys,
+  missingRequired,
   sanitiseItems,
 } from '@/lib/end-of-use'
 
@@ -93,6 +96,81 @@ describe('the item list, frozen', () => {
     const photos = END_OF_USE_ITEMS.find((i) => i.key === 'docs_photos')
     expect(photos?.hint).toMatch(/chart/i)
     expect(photos?.hint).toMatch(/not the laser/i)
+  })
+})
+
+/** The five items a provider may legitimately leave unticked, frozen like the keys are.
+ *
+ *  Moving an item between required and conditional changes what a signature MEANS, so it belongs
+ *  in a reviewed commit with this list edited alongside — not a quiet one-character diff. */
+const CONDITIONAL_KEYS = [
+  'eyewear_report_damage',
+  'supplies_notify_shortage',
+  'docs_photos',
+  'docs_adverse_events',
+  'docs_device_concerns',
+]
+
+describe('required and conditional', () => {
+  it('requires twenty and leaves five conditional', () => {
+    expect(REQUIRED_ITEM_COUNT).toBe(20)
+    expect(END_OF_USE_ITEM_COUNT - REQUIRED_ITEM_COUNT).toBe(5)
+  })
+
+  it('leaves exactly the five that may genuinely not have happened', () => {
+    // Requiring any of these forces a provider to tick a lie on an uneventful session — nothing
+    // damaged, nothing short, no adverse event — and a record built out of those is worse than no
+    // record. The document itself says "(if applicable)" on the photos item.
+    expect(END_OF_USE_ITEMS.filter((i) => !i.required).map((i) => i.key)).toEqual(CONDITIONAL_KEYS)
+  })
+
+  it('requires powering the laser down', () => {
+    // Chosen deliberately over conditional, knowing it is wrong whenever somebody is booked after
+    // you. Pinned so the decision has to be re-made rather than drifting.
+    expect(END_OF_USE_ITEMS.find((i) => i.key === 'laser_power_down')?.required).toBe(true)
+  })
+
+  it('tells a provider when each conditional item applies', () => {
+    // An item marked "if applicable" with no hint is a coin flip.
+    for (const item of END_OF_USE_ITEMS.filter((i) => !i.required)) {
+      expect(item.hint, `${item.key} is conditional but never says when it applies`).toBeTruthy()
+    }
+  })
+})
+
+describe('canSignOff', () => {
+  const allRequired = END_OF_USE_ITEMS.filter((i) => i.required).map((i) => i.key)
+
+  it('refuses a close-out with nothing ticked', () => {
+    // The hole found in testing: v1 accepted exactly this and certified that the suite had been
+    // left clean, safe and operational.
+    expect(canSignOff([])).toBe(false)
+    expect(missingRequired([])).toHaveLength(20)
+  })
+
+  it('refuses when one required item is missing', () => {
+    expect(canSignOff(allRequired.slice(0, 19))).toBe(false)
+    expect(missingRequired(allRequired.slice(0, 19)).map((i) => i.key)).toEqual([allRequired[19]])
+  })
+
+  it('allows the required twenty with no conditionals ticked', () => {
+    // The ordinary case: an uneventful session, nothing damaged and nothing short.
+    expect(canSignOff(allRequired)).toBe(true)
+  })
+
+  it('allows all twenty-five', () => {
+    expect(canSignOff(END_OF_USE_ITEMS.map((i) => i.key))).toBe(true)
+  })
+
+  it('is not satisfied by ticking conditionals instead', () => {
+    // Twenty ticks is not the bar. The right twenty is.
+    expect(canSignOff([...CONDITIONAL_KEYS, ...allRequired.slice(0, 15)])).toBe(false)
+  })
+
+  it('names what is outstanding, in document order', () => {
+    const missing = missingRequired(allRequired.slice(2))
+    expect(missing.map((i) => i.key)).toEqual(allRequired.slice(0, 2))
+    expect(missing[0].label).toBeTruthy()
   })
 })
 

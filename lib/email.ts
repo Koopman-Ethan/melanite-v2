@@ -766,15 +766,6 @@ export function denverTimeLabel(at: Date): string {
   })
 }
 
-/** " Not done: A; B; and 3 more." — capped, because the point is that something was skipped and
- *  the detail lives on the admin page. Leading space so callers can concatenate it directly. */
-function missingSummary(labels: string[]): string {
-  if (labels.length === 0) return ''
-  const shown = labels.slice(0, 2).join('; ')
-  const rest = labels.length > 2 ? `; and ${labels.length - 2} more` : ''
-  return ` Not done: ${shown}${rest}.`
-}
-
 export interface DigestEmailRow {
   /** `denverTimeLabel(startTime)`. */
   when: string
@@ -864,10 +855,6 @@ export function eveningDigestEmail(input: {
       // is the reason this email is opened at all.
       if (r.closeoutExpected && !r.closeout) {
         textLines.push('    No end-of-use check-off.')
-      } else if (r.closeout && r.closeout.itemsDone < r.closeout.itemCount) {
-        textLines.push(
-          `    Closed out ${r.closeout.itemsDone} of ${r.closeout.itemCount}.${missingSummary(r.missingLabels)}`,
-        )
       }
       if (r.closeout?.deviceIssue) {
         textLines.push('    Device issue reported.')
@@ -896,9 +883,7 @@ export function eveningDigestEmail(input: {
        ${
          r.closeoutExpected && !r.closeout
            ? `<div style="font-size:12px;color:#B8965A;margin-top:4px">No end-of-use check-off.</div>`
-           : r.closeout && r.closeout.itemsDone < r.closeout.itemCount
-             ? `<div style="font-size:12px;color:#B8965A;margin-top:4px">Closed out ${r.closeout.itemsDone} of ${r.closeout.itemCount}.${esc(missingSummary(r.missingLabels))}</div>`
-             : ''
+           : ''
        }
        ${
          r.closeout?.deviceIssue

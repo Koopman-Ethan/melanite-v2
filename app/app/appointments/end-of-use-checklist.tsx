@@ -8,11 +8,10 @@ import {
   DEVICE_ISSUE_NOTE_MAX,
   END_OF_USE_CERTIFICATION,
   END_OF_USE_ITEM_COUNT,
-  END_OF_USE_PARTIAL_CERTIFICATION,
   END_OF_USE_SECTIONS,
   IMMEDIATE_REPORTING,
-  labelsFor,
-  missingKeys,
+  REQUIRED_ITEM_COUNT,
+  missingRequired,
 } from '@/lib/end-of-use'
 
 import { recordEndOfUseChecklist, type ChecklistState } from './end-of-use-actions'
@@ -35,12 +34,14 @@ function Item({
   itemKey,
   label,
   hint,
+  required,
   checked,
   onToggle,
 }: {
   itemKey: string
   label: string
   hint?: string
+  required: boolean
   checked: boolean
   onToggle: () => void
 }) {
@@ -55,7 +56,12 @@ function Item({
         className="mt-0.5 h-5 w-5 shrink-0 rounded border-line-control"
       />
       <span>
-        <span className="block text-xs text-ink-secondary">{label}</span>
+        <span className="block text-xs text-ink-secondary">
+          {label}
+          {/* Only the OPTIONAL ones are marked. Twenty "required" badges would be wallpaper, and
+              the useful signal is the short list of things you may legitimately leave. */}
+          {!required && <span className="ml-1.5 text-[11px] text-ink-faint">If applicable</span>}
+        </span>
         {hint && <span className="mt-0.5 block text-[11px] text-ink-faint">{hint}</span>}
       </span>
     </label>
@@ -83,8 +89,10 @@ export function EndOfUseChecklist({
   const [issue, setIssue] = useState<'none' | 'reported' | ''>('')
 
   const done = new Set(ticked)
-  const complete = ticked.length >= END_OF_USE_ITEM_COUNT
-  const outstanding = labelsFor(missingKeys(ticked))
+  const outstanding = missingRequired(ticked)
+  const ready = outstanding.length === 0
+  const requiredDone = REQUIRED_ITEM_COUNT - outstanding.length
+  const shortageFlagged = done.has('supplies_notify_shortage')
 
   function toggle(key: string) {
     setTicked((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]))
@@ -132,13 +140,16 @@ export function EndOfUseChecklist({
       <div>
         <p className="text-xs font-medium text-ink-secondary">How you left the suite</p>
         <p className="mt-1 text-[11px] text-ink-faint">
-          Tick what you did. If you did not do something, leave it — a short honest list is worth
-          more than a full one that is not, and nothing here stops you working either way.
+          Twenty of these apply to every session and are needed to sign off. Five are marked{' '}
+          <em>If applicable</em> — leave those when they did not happen rather than ticking them
+          anyway. Nothing here stops you working either way.
         </p>
       </div>
 
       {END_OF_USE_SECTIONS.map((section) => {
-        const sectionDone = section.items.filter((i) => done.has(i.key)).length
+        const sectionRequired = section.items.filter((i) => i.required)
+        const sectionDone = sectionRequired.filter((i) => done.has(i.key)).length
+        const sectionShort = sectionDone < sectionRequired.length
         const isCollapsed = collapsed.includes(section.key)
 
         return (
@@ -157,8 +168,10 @@ export function EndOfUseChecklist({
               aria-expanded={!isCollapsed}
             >
               <span className="text-xs font-medium text-ink-secondary">{section.title}</span>
-              <span className="text-[11px] text-ink-faint">
-                {sectionDone} of {section.items.length}
+              {/* Counts the REQUIRED items only. Counting all of them would show "5 of 7" for a
+                  section that is actually finished, because two of its items did not apply. */}
+              <span className={sectionShort ? 'text-[11px] text-warning' : 'text-[11px] text-success'}>
+                {sectionDone} of {sectionRequired.length}
               </span>
             </button>
 
@@ -174,6 +187,7 @@ export function EndOfUseChecklist({
                     itemKey={item.key}
                     label={item.label}
                     hint={item.hint}
+                    required={item.required}
                     checked={done.has(item.key)}
                     onToggle={() => toggle(item.key)}
                   />
@@ -243,8 +257,18 @@ export function EndOfUseChecklist({
 
       <div className="border-t border-line pt-3">
         <label htmlFor={`note-${bookingId}`} className="block text-xs font-medium text-ink-secondary">
-          Anything else? <span className="font-normal text-ink-faint">Optional</span>
+          Anything else?{' '}
+          <span className="font-normal text-ink-faint">
+            {shortageFlagged ? 'Say which supplies are short' : 'Optional'}
+          </span>
         </label>
+        {/* Ticking the shortage item IS the notification, so this is the only place the detail can
+            go. Not enforced — a nudge at the point of typing, which is where it works. */}
+        {shortageFlagged && (
+          <p className="mt-1 text-[11px] text-warning">
+            You flagged a supply shortage. Say which supplies below, or nobody can act on it.
+          </p>
+        )}
         <textarea
           id={`note-${bookingId}`}
           name="note"
@@ -255,37 +279,43 @@ export function EndOfUseChecklist({
         />
       </div>
 
-      {!complete && outstanding.length > 0 && (
-        <div className="rounded-card border border-line bg-transparent p-3">
-          <p className="text-[11px] text-ink-muted">
-            Not ticked ({outstanding.length}):{' '}
-            {outstanding.slice(0, 3).join('; ')}
-            {outstanding.length > 3 && `; and ${outstanding.length - 3} more`}
+      {/* Names what is left rather than counting it. "3 still to tick" sends somebody scrolling
+          back through five sections to work out which three. */}
+      {outstanding.length > 0 && (
+        <div className="rounded-card border border-warning/40 bg-warning/10 p-3">
+          <p className="text-[11px] font-medium text-ink-secondary">
+            Still to tick before you can sign off ({outstanding.length})
           </p>
+          <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[11px] text-ink-secondary">
+            {outstanding.slice(0, 4).map((i) => (
+              <li key={i.key}>{i.label}</li>
+            ))}
+            {outstanding.length > 4 && <li>and {outstanding.length - 4} more</li>}
+          </ul>
         </div>
       )}
 
-      {/* The sentence swaps with the tick count. Nobody signs a certification of work they did not
-          do, and nobody is prevented from filing a truthful partial record. */}
-      <p className="text-[11px] text-ink-muted">
-        {complete ? END_OF_USE_CERTIFICATION : END_OF_USE_PARTIAL_CERTIFICATION}
-      </p>
+      {/* One sentence, always. It is true for anything that can be submitted: the required twenty
+          are done, and the five that are not ticked are the ones that did not apply. */}
+      <p className="text-[11px] text-ink-muted">{END_OF_USE_CERTIFICATION}</p>
 
       {state.error && <Notice>{state.error}</Notice>}
 
       <div className="flex items-center gap-3">
-        <Button type="submit" size="sm" disabled={pending || issue === ''}>
+        <Button type="submit" size="sm" disabled={pending || issue === '' || !ready}>
           {pending
             ? 'Saving…'
-            : complete
-              ? 'Sign off — all 25'
-              : `Sign off — ${ticked.length} of ${END_OF_USE_ITEM_COUNT}`}
+            : ready
+              ? ticked.length >= END_OF_USE_ITEM_COUNT
+                ? 'Sign off — all 25'
+                : `Sign off — ${ticked.length} of ${END_OF_USE_ITEM_COUNT}`
+              : `${requiredDone} of ${REQUIRED_ITEM_COUNT} required`}
         </Button>
         <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>
           Not now
         </Button>
       </div>
-      {issue === '' && (
+      {issue === '' && ready && (
         <p className="text-[11px] text-ink-faint">Answer the device question to sign off.</p>
       )}
 

@@ -7,7 +7,7 @@ import { RemovePhoto } from './remove-photo'
 import {
   getCloseoutIssues,
   getSessionsWithoutCloseout,
-  getSkippedItemCounts,
+  getConditionalItemCounts,
 } from '@/lib/db/queries/end-of-use'
 import {
   getFlaggedChecks,
@@ -89,14 +89,14 @@ function Photo({
 export default async function EquipmentPage() {
   await requireAdmin()
 
-  const [flagged, unbracketed, recent, closeoutIssues, unclosed, skipped] =
+  const [flagged, unbracketed, recent, closeoutIssues, unclosed, cameUp] =
     await Promise.all([
     getFlaggedChecks(),
     getUnbracketedSessions(),
     getRecentChecks(),
     getCloseoutIssues(),
     getSessionsWithoutCloseout(),
-    getSkippedItemCounts(),
+    getConditionalItemCounts(),
     ])
 
   return (
@@ -243,23 +243,24 @@ export default async function EquipmentPage() {
           </div>
         )}
 
-      {/* Quiet, and last of the exception blocks. This is the question the paper form could never
-          answer — not "who forgot" but "which step is the one people skip", which is a thing about
-          the process rather than about a person. */}
-      {skipped.length > 0 && (
+      {/* Quiet, and not an exceptions block at all. Every required item is ticked on every stored
+          close-out, so the only thing worth totalling is how often the conditional ones CAME UP —
+          a shortage, damage, an adverse event. That is a fact about the month rather than about a
+          person, and it is what the paper form could never add up. */}
+      {cameUp.length > 0 && (
         <section className="space-y-2">
           <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">
-            Where it slips
+            What came up
           </h2>
           <ul className="space-y-1">
-            {skipped.slice(0, 5).map((item) => (
+            {cameUp.slice(0, 5).map((item) => (
               <li
                 key={item.key}
                 className="flex flex-wrap items-baseline justify-between gap-x-4 rounded-card border border-line px-3 py-2"
               >
                 <span className="text-xs text-ink-secondary">{item.label}</span>
                 <span className="text-xs text-ink-faint tabular-nums">
-                  not ticked {item.times}&times;
+                  {item.times}&times;
                 </span>
               </li>
             ))}
