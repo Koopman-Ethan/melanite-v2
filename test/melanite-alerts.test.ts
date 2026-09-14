@@ -216,8 +216,22 @@ describe('the close-out alert', () => {
     // whose body is empty reads as one that failed to load, so the nothing is stated.
     const out = deskCloseoutEmail(base)
     expect(out.subject).toBe('Closed out — Nichole Mim, Monday 14 September, 2:00pm')
-    expect(out.text).toContain('Everything required was ticked and nothing was reported.')
-    expect(out.html).toContain('Everything required was ticked and nothing was reported.')
+    expect(out.text).toContain(
+      'Nichole Mim has closed out their Carbon Laser Treatment appointment from Monday 14 September, 2:00pm.',
+    )
+    expect(out.text).toContain(
+      'All required checklist items were marked, and no issues were reported.',
+    )
+    expect(out.html).toContain('All required checklist items were marked, and no issues were reported.')
+  })
+
+  it('does not claim "no issues" when something was reported', () => {
+    // The status sentence is two sentences in one, and the second half is only true on a quiet
+    // session. Saying "no issues were reported" above a reported shortage is the kind of wrong
+    // that makes somebody stop reading the rest.
+    const out = deskCloseoutEmail({ ...base, cameUpLabels: ['Supply shortage reported'] })
+    expect(out.text).toContain('All required checklist items were marked.')
+    expect(out.text).not.toContain('no issues were reported')
   })
 
   it('puts a device fault in the SUBJECT, not just the body', () => {
@@ -231,7 +245,7 @@ describe('the close-out alert', () => {
     })
     expect(out.subject).toBe('Device issue — Nichole Mim, Monday 14 September, 2:00pm')
     expect(out.text).toContain('Handpiece window is chipped')
-    expect(out.text).not.toContain('nothing was reported')
+    expect(out.text).not.toContain('no issues were reported')
   })
 
   it('says when the same session also flagged a photo', () => {
@@ -246,15 +260,17 @@ describe('the close-out alert', () => {
     expect(out.html).toContain('also flagged a photo')
   })
 
-  it('lists only the conditional items that were ticked', () => {
-    const out = deskCloseoutEmail({
-      ...base,
-      cameUpLabels: ['Notify management of any supply shortages'],
-    })
-    expect(out.text).toContain('Notify management of any supply shortages')
+  it('reports conditional items as findings, not as instructions', () => {
+    // The labels are checklist imperatives — "Notify management of any supply shortages". Printed
+    // back as a finding that reads as a reminder to whoever opened the email, which is what the
+    // first version of this actually did: "Also noted: Save before-and-after photos (if
+    // applicable)".
+    const out = deskCloseoutEmail({ ...base, cameUpLabels: ['Supply shortage reported'] })
+    expect(out.text).toContain('Supply shortage reported')
+    expect(out.text).not.toContain('Notify management')
+    expect(out.text).not.toContain('(if applicable)')
     // Still an ordinary close-out — a shortage is not a device fault.
     expect(out.subject).toContain('Closed out')
-    expect(out.text).not.toContain('nothing was reported')
   })
 
   it('escapes what a provider typed', () => {

@@ -1200,7 +1200,10 @@ export function deskCloseoutEmail(input: {
   when: string
   deviceIssue: boolean
   deviceIssueNote: string | null
-  /** Conditional items the provider ticked — damage found, supplies short. Real occurrences. */
+  /** Conditional items the provider ticked, ALREADY in reporting phrasing — "Supply shortage
+   *  reported", not "Notify management of any supply shortages". The caller resolves them through
+   *  `reportedLabelsFor`, because a checklist imperative printed as a finding reads as an
+   *  instruction to whoever opened the email. */
   cameUpLabels: string[]
   note: string | null
   /** Whether the same session ALSO produced a flagged photograph. Stops one fault reported two
@@ -1224,51 +1227,54 @@ export function deskCloseoutEmail(input: {
     ? `Device issue — ${providerName}, ${when}`
     : `Closed out — ${providerName}, ${when}`
 
-  const textLines: string[] = [
-    `${providerName} has closed out the suite after ${serviceName} — ${when}.`,
-    '',
-  ]
+  const opening = `${providerName} has closed out their ${serviceName} appointment from ${when}.`
+
+  // The required twenty are ticked on anything that can be stored, so this sentence is true by
+  // construction rather than by inspection. Saying it anyway is the point of the email: the
+  // reader wants to know the work was done, and an email that only lists exceptions leaves them
+  // inferring it from silence.
+  const quiet = !deviceIssue && cameUpLabels.length === 0
+  const status = quiet
+    ? 'All required checklist items were marked, and no issues were reported.'
+    : 'All required checklist items were marked.'
+
+  const textLines: string[] = [opening, '', status, '']
 
   if (deviceIssue) {
-    textLines.push('DEVICE ISSUE REPORTED', `  "${deviceIssueNote ?? ''}"`, '')
+    textLines.push(`Device issue reported: "${deviceIssueNote ?? ''}"`, '')
     if (alsoFlaggedPhoto) {
-      textLines.push('They also flagged a photo of the machine on this session — same fault, most', 'likely.', '')
+      textLines.push(
+        'They also flagged a photo of the machine on this session — likely the same fault.',
+        '',
+      )
     }
   }
 
   if (cameUpLabels.length > 0) {
-    textLines.push('Also noted:', ...cameUpLabels.map((l) => `  ${l}`), '')
+    textLines.push('Also reported:', ...cameUpLabels.map((l) => `  ${l}`), '')
   }
 
   if (note) textLines.push(`They added: "${note}"`, '')
-
-  if (!deviceIssue && cameUpLabels.length === 0 && !note) {
-    // Said out loud rather than left as an absence. "Nothing to report" is the whole content of
-    // most of these, and an email that looks empty reads as one that failed to load.
-    textLines.push('Everything required was ticked and nothing was reported.', '')
-  }
 
   textLines.push('See the close-out:', url)
 
   const body =
     p(
-      `<strong>${esc(providerName)}</strong> has closed out the suite after ${esc(serviceName)} — ${esc(when)}.`,
+      `<strong>${esc(providerName)}</strong> has closed out their ${esc(serviceName)} appointment from ${esc(when)}.`,
     ) +
+    p(esc(status)) +
     (deviceIssue
       ? p(
-          `<strong style="color:#C2554D">Device issue reported.</strong> “${esc(deviceIssueNote ?? '')}”`,
+          `<strong style="color:#C2554D">Device issue reported:</strong> “${esc(deviceIssueNote ?? '')}”`,
         ) +
         (alsoFlaggedPhoto
-          ? p('They also flagged a photo of the machine on this session — same fault, most likely.')
+          ? p('They also flagged a photo of the machine on this session — likely the same fault.')
           : '')
       : '') +
     (cameUpLabels.length > 0
-      ? p(`Also noted: ${cameUpLabels.map((l) => esc(l)).join('; ')}.`)
+      ? p(`Also reported: ${cameUpLabels.map((l) => esc(l)).join('; ')}.`)
       : '') +
-    (note ? p(`They added: “${esc(note)}”`) : '') +
-    (!deviceIssue && cameUpLabels.length === 0 && !note
-      ? p('Everything required was ticked and nothing was reported.')
-      : '')
+    (note ? p(`They added: “${esc(note)}”`) : '')
 
   return {
     subject,

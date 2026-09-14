@@ -29,7 +29,7 @@ import {
   roomDateLabel,
   sendEmail,
 } from '@/lib/email'
-import { END_OF_USE_ITEMS, labelsFor } from '@/lib/end-of-use'
+import { END_OF_USE_ITEMS, reportedLabelsFor } from '@/lib/end-of-use'
 import { appOrigin } from '@/lib/stripe/config'
 
 /** The five items that mean something WHEN ticked. Everything else is ticked on every row. */
@@ -285,7 +285,7 @@ export async function notifyCloseout(checklistId: string): Promise<void> {
         deviceIssueNote: row.deviceIssueNote,
         // Only the conditional items are worth listing: the required twenty are ticked on every
         // close-out, so naming them would be twenty lines that say nothing.
-        cameUpLabels: labelsFor(
+        cameUpLabels: reportedLabelsFor(
           row.completedItems.filter((k) => CONDITIONAL_KEYS.has(k)),
         ),
         note: row.note,

@@ -65,6 +65,18 @@ export interface EndOfUseItem {
    * action is the rule.
    */
   required: boolean
+  /**
+   * How this item reads when it is being REPORTED rather than ticked.
+   *
+   * The labels are imperatives, because that is what a checklist is: "Report damaged eyewear
+   * immediately". Printed back in an email as a finding, an imperative says nothing — "Also
+   * noted: Save before-and-after photos (if applicable)" reads as a reminder to the person
+   * reading it rather than as something a provider did.
+   *
+   * Only the conditional items need one. A required item is ticked on every close-out, so it is
+   * never news and never reported.
+   */
+  reportedAs?: string
 }
 
 export interface EndOfUseSection {
@@ -157,6 +169,7 @@ export const END_OF_USE_SECTIONS: readonly EndOfUseSection[] = [
         // provider ticks it on every sound pair of glasses, and the one session where it MEANT
         // something would be indistinguishable from the other forty.
         hint: 'Only if you found damage. Leave it if the eyewear was sound.',
+        reportedAs: 'Damaged eyewear reported',
         required: false,
       },
     ],
@@ -210,6 +223,7 @@ export const END_OF_USE_SECTIONS: readonly EndOfUseSection[] = [
         // form points at the notes box — "we are low on something" that does not say what is a
         // message Keoni cannot act on.
         hint: 'Only if something ran short — say which in the notes at the bottom.',
+        reportedAs: 'Supply shortage reported',
         required: false,
       },
     ],
@@ -230,6 +244,7 @@ export const END_OF_USE_SECTIONS: readonly EndOfUseSection[] = [
         //
         // Conditional because the document itself says "(if applicable)".
         hint: 'Your client photos, in their chart — not the laser. Leave it if there were none.',
+        reportedAs: 'Before-and-after photos saved',
         required: false,
       },
       {
@@ -239,12 +254,14 @@ export const END_OF_USE_SECTIONS: readonly EndOfUseSection[] = [
         // "documented any adverse events" after an uneventful session learns that the tick means
         // nothing, which is exactly the habit you do not want on this item.
         hint: 'Only if something happened. Leave it if nothing did.',
+        reportedAs: 'An adverse event was documented',
         required: false,
       },
       {
         key: 'docs_device_concerns',
         label: 'Document any device concerns or errors',
         hint: 'Only if there was something to record — the device question below is where it reaches Melanite.',
+        reportedAs: 'A device concern was documented',
         required: false,
       },
     ],
@@ -379,4 +396,18 @@ export function missingRequired(ticked: readonly string[]): EndOfUseItem[] {
  */
 export function canSignOff(ticked: readonly string[]): boolean {
   return missingRequired(ticked).length === 0
+}
+
+/**
+ * The reporting phrasing for keys that have one, for an email or an admin list.
+ *
+ * Skips anything without a `reportedAs` — a required item has none, because it is ticked on every
+ * close-out and is therefore never news. Falls back to nothing rather than to the label, so an
+ * imperative can never leak into a sentence that reads as a finding.
+ */
+export function reportedLabelsFor(keys: readonly string[]): string[] {
+  const byKey = new Map(END_OF_USE_ITEMS.map((i) => [i.key, i]))
+  return keys
+    .map((k) => byKey.get(k)?.reportedAs)
+    .filter((l): l is string => Boolean(l))
 }
