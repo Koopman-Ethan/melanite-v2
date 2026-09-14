@@ -1,10 +1,11 @@
 import 'server-only'
 
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
 import {
   bookings,
+  endOfUseChecklists,
   equipmentChecks,
   medicalDirectorCredentials,
   providerServices,
@@ -20,6 +21,7 @@ import {
   bookingAccessRestoredEmail,
   bookingPaymentSummary,
   deskBookingEmail,
+  deskCloseoutEmail,
   deskEquipmentFlaggedEmail,
   deskMedicalDirectorEmail,
   deskProviderAccessEmail,
@@ -27,7 +29,11 @@ import {
   roomDateLabel,
   sendEmail,
 } from '@/lib/email'
+import { END_OF_USE_ITEMS, labelsFor } from '@/lib/end-of-use'
 import { appOrigin } from '@/lib/stripe/config'
+
+/** The five items that mean something WHEN ticked. Everything else is ticked on every row. */
+const CONDITIONAL_KEYS = new Set(END_OF_USE_ITEMS.filter((i) => !i.required).map((i) => i.key))
 
 // Notifications about things that have already happened.
 //
@@ -226,6 +232,69 @@ export async function notifyBookingAccessChanged(
     })
   } catch (err) {
     console.error(`[email] booking access ${next} alert failed for provider`, providerId, err)
+  }
+}
+
+/** A provider has closed out the suite after a session.
+ *
+ *  Sent for EVERY close-out, not only the ones reporting a fault. Keoni asked to be told each
+ *  time, and at one to three appointments a day that is a handful of emails — the subject line
+ *  does the triage so a device issue is visible without opening anything.
+ *
+ *  Best effort, after the row exists, like everything else here. A close-out that was filed must
+ *  never be lost because the email describing it could not be sent. */
+export async function notifyCloseout(checklistId: string): Promise<void> {
+  try {
+    const [row] = await db
+      .select({
+        recordedAt: endOfUseChecklists.recordedAt,
+        completedItems: endOfUseChecklists.completedItems,
+        deviceIssue: endOfUseChecklists.deviceIssue,
+        deviceIssueNote: endOfUseChecklists.deviceIssueNote,
+        note: endOfUseChecklists.note,
+        bookingId: endOfUseChecklists.bookingId,
+        startTime: bookings.startTime,
+        serviceName: services.name,
+        firstName: providers.firstName,
+        lastName: providers.lastName,
+        // The same fault can arrive twice — flagged on the photograph and described here. Saying
+        // so in one email beats two that look like two incidents.
+        alsoFlaggedPhoto: sql<boolean>`exists (
+          select 1 from ${equipmentChecks}
+          where ${equipmentChecks}.booking_id = ${endOfUseChecklists}.booking_id
+            and ${equipmentChecks}.needs_attention
+        )`,
+      })
+      .from(endOfUseChecklists)
+      .innerJoin(providers, eq(endOfUseChecklists.providerId, providers.id))
+      .innerJoin(bookings, eq(endOfUseChecklists.bookingId, bookings.id))
+      .innerJoin(providerServices, eq(bookings.providerServiceId, providerServices.id))
+      .innerJoin(services, eq(providerServices.serviceId, services.id))
+      .where(eq(endOfUseChecklists.id, checklistId))
+      .limit(1)
+
+    if (!row) return
+
+    await sendEmail({
+      to: MELANITE_NOTIFY_EMAIL,
+      ...deskCloseoutEmail({
+        providerName: `${row.firstName} ${row.lastName}`,
+        serviceName: row.serviceName,
+        when: appointmentWhen(row.startTime),
+        deviceIssue: row.deviceIssue,
+        deviceIssueNote: row.deviceIssueNote,
+        // Only the conditional items are worth listing: the required twenty are ticked on every
+        // close-out, so naming them would be twenty lines that say nothing.
+        cameUpLabels: labelsFor(
+          row.completedItems.filter((k) => CONDITIONAL_KEYS.has(k)),
+        ),
+        note: row.note,
+        alsoFlaggedPhoto: row.alsoFlaggedPhoto,
+        url: `${await appOrigin()}/app/admin/equipment`,
+      }),
+    })
+  } catch (err) {
+    console.error('[email] close-out alert failed for checklist', checklistId, err)
   }
 }
 

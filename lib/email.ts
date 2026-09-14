@@ -1181,6 +1181,102 @@ export function deskProviderAccessEmail(input: {
  *
  *  The difference between finding a damaged machine today and finding it weeks later in a folder
  *  of photographs. The provider is standing in front of it when they send this; Keoni is not. */
+/**
+ * A provider has closed out the suite. Sent after EVERY close-out, not only the eventful ones.
+ *
+ * The argument for sending on a quiet session is the same one the evening digest makes about
+ * empty days: an email that only arrives when there is news makes a broken feature
+ * indistinguishable from a quiet Tuesday. Keoni should be able to tell "nobody closed out today"
+ * from "nothing reached me today", and at one to three appointments a day the volume is small
+ * enough that she can.
+ *
+ * THE SUBJECT LINE CARRIES THE TRIAGE. A device fault says so before the email is opened, so a
+ * run of ordinary close-outs never buries the one that matters. If this ever gets loud enough to
+ * skim, that is the thing to protect.
+ */
+export function deskCloseoutEmail(input: {
+  providerName: string
+  serviceName: string
+  when: string
+  deviceIssue: boolean
+  deviceIssueNote: string | null
+  /** Conditional items the provider ticked — damage found, supplies short. Real occurrences. */
+  cameUpLabels: string[]
+  note: string | null
+  /** Whether the same session ALSO produced a flagged photograph. Stops one fault reported two
+   *  ways from reading as two separate incidents. */
+  alsoFlaggedPhoto: boolean
+  url: string
+}): Omit<EmailMessage, 'to'> {
+  const {
+    providerName,
+    serviceName,
+    when,
+    deviceIssue,
+    deviceIssueNote,
+    cameUpLabels,
+    note,
+    alsoFlaggedPhoto,
+    url,
+  } = input
+
+  const subject = deviceIssue
+    ? `Device issue — ${providerName}, ${when}`
+    : `Closed out — ${providerName}, ${when}`
+
+  const textLines: string[] = [
+    `${providerName} has closed out the suite after ${serviceName} — ${when}.`,
+    '',
+  ]
+
+  if (deviceIssue) {
+    textLines.push('DEVICE ISSUE REPORTED', `  "${deviceIssueNote ?? ''}"`, '')
+    if (alsoFlaggedPhoto) {
+      textLines.push('They also flagged a photo of the machine on this session — same fault, most', 'likely.', '')
+    }
+  }
+
+  if (cameUpLabels.length > 0) {
+    textLines.push('Also noted:', ...cameUpLabels.map((l) => `  ${l}`), '')
+  }
+
+  if (note) textLines.push(`They added: "${note}"`, '')
+
+  if (!deviceIssue && cameUpLabels.length === 0 && !note) {
+    // Said out loud rather than left as an absence. "Nothing to report" is the whole content of
+    // most of these, and an email that looks empty reads as one that failed to load.
+    textLines.push('Everything required was ticked and nothing was reported.', '')
+  }
+
+  textLines.push('See the close-out:', url)
+
+  const body =
+    p(
+      `<strong>${esc(providerName)}</strong> has closed out the suite after ${esc(serviceName)} — ${esc(when)}.`,
+    ) +
+    (deviceIssue
+      ? p(
+          `<strong style="color:#C2554D">Device issue reported.</strong> “${esc(deviceIssueNote ?? '')}”`,
+        ) +
+        (alsoFlaggedPhoto
+          ? p('They also flagged a photo of the machine on this session — same fault, most likely.')
+          : '')
+      : '') +
+    (cameUpLabels.length > 0
+      ? p(`Also noted: ${cameUpLabels.map((l) => esc(l)).join('; ')}.`)
+      : '') +
+    (note ? p(`They added: “${esc(note)}”`) : '') +
+    (!deviceIssue && cameUpLabels.length === 0 && !note
+      ? p('Everything required was ticked and nothing was reported.')
+      : '')
+
+  return {
+    subject,
+    text: textLines.join('\n'),
+    html: wrap('The suite was closed out', body, { label: 'See the close-out', url }),
+  }
+}
+
 export function deskEquipmentFlaggedEmail(input: {
   providerName: string
   kind: 'before' | 'after'

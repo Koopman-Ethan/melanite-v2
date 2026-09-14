@@ -17,6 +17,7 @@ import {
   sanitiseItems,
 } from '@/lib/end-of-use'
 import { checkWindowOpen } from '@/lib/equipment-checks'
+import { notifyCloseout } from '@/lib/notify-melanite'
 
 // Signing off a session.
 //
@@ -102,17 +103,24 @@ export async function recordEndOfUseChecklist(
     }
   }
 
+  let checklistId: string
   try {
-    await db.insert(endOfUseChecklists).values({
-      bookingId: booking.id,
-      providerId: user.id,
-      version: END_OF_USE_VERSION,
-      completedItems: items,
-      itemCount: END_OF_USE_ITEM_COUNT,
-      deviceIssue,
-      deviceIssueNote: deviceIssue ? deviceIssueNote.trim().slice(0, DEVICE_ISSUE_NOTE_MAX) : null,
-      note,
-    })
+    const [inserted] = await db
+      .insert(endOfUseChecklists)
+      .values({
+        bookingId: booking.id,
+        providerId: user.id,
+        version: END_OF_USE_VERSION,
+        completedItems: items,
+        itemCount: END_OF_USE_ITEM_COUNT,
+        deviceIssue,
+        deviceIssueNote: deviceIssue
+          ? deviceIssueNote.trim().slice(0, DEVICE_ISSUE_NOTE_MAX)
+          : null,
+        note,
+      })
+      .returning({ id: endOfUseChecklists.id })
+    checklistId = inserted.id
   } catch (err) {
     // One row per booking, enforced by a unique index. Somebody submitting twice — a double tap,
     // a stale tab — gets told, not a stack trace. The row already there is theirs and stands.
@@ -124,6 +132,11 @@ export async function recordEndOfUseChecklist(
 
   revalidatePath('/app/appointments')
   revalidatePath('/app/dashboard')
+
+  // Every close-out, not only the ones reporting a fault — Keoni asked to be told each time.
+  // Best effort and after the commit, the rule every notification in this app follows: a
+  // close-out that was filed must never be lost because the email describing it could not go.
+  await notifyCloseout(checklistId)
 
   // Everything required is ticked or we would not be here, so there is no shortfall to report
   // back. The count says which of the conditional five also applied, which is information rather

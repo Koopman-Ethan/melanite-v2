@@ -4,6 +4,7 @@ import {
   MELANITE_NOTIFY_EMAIL,
   bookingPaymentSummary,
   deskBookingEmail,
+  deskCloseoutEmail,
   deskRoomRentalEmail,
   roomDateLabel,
 } from '@/lib/email'
@@ -193,6 +194,77 @@ describe('the room alert', () => {
     const mail = deskRoomRentalEmail({ ...RENTAL, event: 'cancelled' })
     expect(mail.text).not.toContain('admin queue')
     expect(mail.html).not.toContain('admin queue')
+  })
+})
+
+describe('the close-out alert', () => {
+  const base = {
+    providerName: 'Nichole Mim',
+    serviceName: 'Carbon Laser Treatment',
+    when: 'Monday 14 September, 2:00pm',
+    deviceIssue: false,
+    deviceIssueNote: null,
+    cameUpLabels: [],
+    note: null,
+    alsoFlaggedPhoto: false,
+    url: 'https://app.melanitesuite.com/app/admin/equipment',
+  }
+
+  it('sends on a quiet session too, and says so plainly', () => {
+    // The same argument the evening digest makes about empty days: an email that only arrives
+    // when there is news makes a broken feature indistinguishable from a quiet Tuesday. An email
+    // whose body is empty reads as one that failed to load, so the nothing is stated.
+    const out = deskCloseoutEmail(base)
+    expect(out.subject).toBe('Closed out — Nichole Mim, Monday 14 September, 2:00pm')
+    expect(out.text).toContain('Everything required was ticked and nothing was reported.')
+    expect(out.html).toContain('Everything required was ticked and nothing was reported.')
+  })
+
+  it('puts a device fault in the SUBJECT, not just the body', () => {
+    // The triage happens before the email is opened. A run of ordinary close-outs must never
+    // bury the one that matters, and at one to three a day the subject line is the only thing
+    // reliably read.
+    const out = deskCloseoutEmail({
+      ...base,
+      deviceIssue: true,
+      deviceIssueNote: 'Handpiece window is chipped',
+    })
+    expect(out.subject).toBe('Device issue — Nichole Mim, Monday 14 September, 2:00pm')
+    expect(out.text).toContain('Handpiece window is chipped')
+    expect(out.text).not.toContain('nothing was reported')
+  })
+
+  it('says when the same session also flagged a photo', () => {
+    // One fault reported two ways must not read as two incidents.
+    const out = deskCloseoutEmail({
+      ...base,
+      deviceIssue: true,
+      deviceIssueNote: 'Cracked',
+      alsoFlaggedPhoto: true,
+    })
+    expect(out.text).toContain('also flagged a photo')
+    expect(out.html).toContain('also flagged a photo')
+  })
+
+  it('lists only the conditional items that were ticked', () => {
+    const out = deskCloseoutEmail({
+      ...base,
+      cameUpLabels: ['Notify management of any supply shortages'],
+    })
+    expect(out.text).toContain('Notify management of any supply shortages')
+    // Still an ordinary close-out — a shortage is not a device fault.
+    expect(out.subject).toContain('Closed out')
+    expect(out.text).not.toContain('nothing was reported')
+  })
+
+  it('escapes what a provider typed', () => {
+    // The note and the fault description are free text straight from a phone.
+    const out = deskCloseoutEmail({
+      ...base,
+      note: 'gel <b>everywhere</b>',
+    })
+    expect(out.html).toContain('&lt;b&gt;')
+    expect(out.html).not.toContain('<b>everywhere</b>')
   })
 })
 
