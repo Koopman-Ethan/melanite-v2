@@ -5,6 +5,7 @@ import {
   bookingPaymentSummary,
   deskBookingEmail,
   deskCloseoutEmail,
+  deskPaymentReceivedEmail,
   deskRoomRentalEmail,
   roomDateLabel,
 } from '@/lib/email'
@@ -194,6 +195,110 @@ describe('the room alert', () => {
     const mail = deskRoomRentalEmail({ ...RENTAL, event: 'cancelled' })
     expect(mail.text).not.toContain('admin queue')
     expect(mail.html).not.toContain('admin queue')
+  })
+})
+
+describe('the payment-received alert', () => {
+  const paid = {
+    kind: 'booking' as const,
+    clientName: 'halah',
+    providerName: 'Nichole Mim',
+    what: 'Sunspot Removal',
+    when: 'Monday, September 7 at 11:15 AM',
+    charged: '$95.00',
+    tip: null as string | null,
+    isHouse: false,
+    url: 'https://app.melanitesuite.com/app/admin/revenue',
+  }
+
+  it('leads the subject with the amount', () => {
+    // What she is scanning for, and most of what a phone lock screen shows.
+    expect(deskPaymentReceivedEmail(paid).subject).toBe(
+      'Paid: $95.00 — Sunspot Removal, Nichole Mim',
+    )
+  })
+
+  it('names who paid, what for, and which provider', () => {
+    const mail = deskPaymentReceivedEmail(paid)
+    for (const part of [mail.text, mail.html]) {
+      expect(part).toContain('halah')
+      expect(part).toContain('$95.00')
+      expect(part).toContain('Sunspot Removal')
+      expect(part).toContain('Nichole Mim')
+      expect(part).toContain('Monday, September 7 at 11:15 AM')
+    }
+  })
+
+  it('NEVER states anybody’s share', () => {
+    // The decision most likely to be undone by accident later. Keoni was asked whether she wanted
+    // the split and said she can work out her own cut; the provider's version of this email says
+    // "Your share", and copying that across is the obvious wrong turn.
+    for (const kind of ['booking', 'package', 'prepaid'] as const) {
+      const mail = deskPaymentReceivedEmail({ ...paid, kind, tip: '$20.00' })
+      for (const part of [mail.text, mail.html]) {
+        expect(part).not.toContain('share')
+        expect(part).not.toContain('payout')
+        expect(part).not.toContain('Melanite keeps')
+      }
+    }
+  })
+
+  it('mentions a tip only when there was one', () => {
+    expect(deskPaymentReceivedEmail({ ...paid, tip: '$20.00' }).text).toContain(
+      'Includes a $20.00 tip.',
+    )
+    // An explicit "$0.00 tip" reads as a complaint — the same rule providerPaidEmail follows.
+    const none = deskPaymentReceivedEmail(paid)
+    expect(none.text.toLowerCase()).not.toContain('tip')
+    expect(none.html.toLowerCase()).not.toContain('tip')
+  })
+
+  it('says when the money is Melanite’s own', () => {
+    // House appointments are included on purpose. The provider's copy suppresses them because
+    // "your share is nothing" is meaningless; here the whole amount is hers.
+    const mail = deskPaymentReceivedEmail({ ...paid, isHouse: true })
+    expect(mail.text).toContain("Melanite's own")
+    expect(mail.html).toContain('Melanite')
+  })
+
+  it('reads correctly for a package, which has no date', () => {
+    const mail = deskPaymentReceivedEmail({
+      ...paid,
+      kind: 'package',
+      what: 'Glow Package',
+      when: null,
+      charged: '$600.00',
+    })
+    expect(mail.subject).toBe('Paid: $600.00 — Glow Package, Nichole Mim')
+    expect(mail.text).toContain('has paid $600.00 for Glow Package')
+    // No empty gap where the appointment time would be.
+    expect(mail.text).not.toContain('\n\n\n')
+    expect(mail.html).not.toContain('<br></p>')
+  })
+
+  it('says "onto" a prepaid balance rather than "for" one', () => {
+    // "paid $200.00 for a prepaid balance" reads as buying a thing; the money IS the balance.
+    const mail = deskPaymentReceivedEmail({
+      ...paid,
+      kind: 'prepaid',
+      what: 'a prepaid balance',
+      when: null,
+      charged: '$200.00',
+    })
+    expect(mail.text).toContain('has paid $200.00 onto a prepaid balance')
+    expect(mail.text).not.toContain('for a prepaid balance')
+  })
+
+  it('escapes names, which come from a client typing into a checkout page', () => {
+    const mail = deskPaymentReceivedEmail({ ...paid, clientName: 'a<script>b' })
+    expect(mail.html).toContain('&lt;script&gt;')
+    expect(mail.html).not.toContain('<script>')
+  })
+
+  it('links to the revenue page', () => {
+    const mail = deskPaymentReceivedEmail(paid)
+    expect(mail.text).toContain('https://app.melanitesuite.com/app/admin/revenue')
+    expect(mail.html).toContain('https://app.melanitesuite.com/app/admin/revenue')
   })
 })
 

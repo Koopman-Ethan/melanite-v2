@@ -24,12 +24,14 @@ import {
   deskCloseoutEmail,
   deskEquipmentFlaggedEmail,
   deskMedicalDirectorEmail,
+  deskPaymentReceivedEmail,
   deskProviderAccessEmail,
   deskRoomRentalEmail,
   roomDateLabel,
   sendEmail,
 } from '@/lib/email'
 import { END_OF_USE_ITEMS, reportedLabelsFor } from '@/lib/end-of-use'
+import { toMoney } from '@/lib/money'
 import { appOrigin } from '@/lib/stripe/config'
 
 /** The five items that mean something WHEN ticked. Everything else is ticked on every row. */
@@ -232,6 +234,60 @@ export async function notifyBookingAccessChanged(
     })
   } catch (err) {
     console.error(`[email] booking access ${next} alert failed for provider`, providerId, err)
+  }
+}
+
+/** Money has arrived. Sent for every Stripe purchase — a booking, a package, a prepaid top-up.
+ *
+ *  The desk-side counterpart to `notifyProviderPaid` in `lib/stripe/handlers.ts`, which tells the
+ *  PROVIDER their share. Keoni received nothing at all when a payment landed until this existed.
+ *
+ *  TWO DELIBERATE DEPARTURES from the shape of everything else in this file.
+ *
+ *  It takes VALUES rather than an id. Every other function here re-queries by id, which is right
+ *  when the caller only has one. This caller has just written the ledger row and is holding the
+ *  exact figures the charge was built from — reading them back from a second query could disagree
+ *  with what Stripe actually took, and the whole point of the email is to report the real charge.
+ *
+ *  It checks NO preference. `notifyProviderPaid` is gated on `providers.notifyBookingConfirmed`,
+ *  which is a provider's own setting; inheriting it would let a provider switching off their
+ *  receipts also silence the business owner. This is Melanite's own inbox and nothing may turn it
+ *  off.
+ *
+ *  Best effort and never throws, like the rest of this file: a webhook that fails on an email is
+ *  one Stripe replays, and the money is already recorded. */
+export async function notifyMelanitePaid(input: {
+  kind: 'booking' | 'package' | 'prepaid'
+  clientName: string | null
+  providerName: string
+  what: string
+  when: string | null
+  /** Excludes the tip, matching how the ledger stores it. */
+  grossCents: number
+  tipCents: number
+  isHouse: boolean
+}): Promise<void> {
+  try {
+    await sendEmail({
+      to: MELANITE_NOTIFY_EMAIL,
+      ...deskPaymentReceivedEmail({
+        kind: input.kind,
+        // Anonymous checkout leaves no name on the row. "A client" is honest; a gap in the
+        // sentence reads as a bug — the same fallback `notifyProviderPaid` makes.
+        clientName: input.clientName?.trim() || 'A client',
+        providerName: input.providerName,
+        what: input.what,
+        when: input.when,
+        // What actually left the card. The ledger's gross excludes the tip; the client's
+        // statement does not, and this email is about the statement.
+        charged: `$${toMoney(input.grossCents + input.tipCents)}`,
+        tip: input.tipCents > 0 ? `$${toMoney(input.tipCents)}` : null,
+        isHouse: input.isHouse,
+        url: `${await appOrigin()}/app/admin/revenue`,
+      }),
+    })
+  } catch (err) {
+    console.error('[email] melanite payment notification failed', err)
   }
 }
 

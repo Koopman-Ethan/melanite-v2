@@ -1283,6 +1283,76 @@ export function deskCloseoutEmail(input: {
   }
 }
 
+/**
+ * Money has actually arrived. The desk-side counterpart to `providerPaidEmail`.
+ *
+ * Keoni asked for this in as many words: "the providers get this email when using stripe but I
+ * don't get it… I just want to be notified when it's gone through." Nothing told her before.
+ * `deskBookingEmail` fires when the booking ROW is created and says "$95.00 due on a payment
+ * link" — the state BEFORE payment — and nothing followed up. The evening digest's "to collect"
+ * block is the opposite direction of money: cash a provider is holding that Melanite must invoice
+ * for, which is zero for anything paid by card.
+ *
+ * DELIBERATELY SAYS NOTHING ABOUT THE SPLIT. `providerPaidEmail` tells a provider "Your share is
+ * X" because that is the number they are waiting on. Asked whether she wanted the same, Keoni
+ * said she can work out her own cut — so this reports what the client was charged and stops. The
+ * revenue page stays the one place the split is stated.
+ */
+export function deskPaymentReceivedEmail(input: {
+  /** Which of the three Stripe purchase paths this came from. Decides the sentence, not a
+   *  separate template — three near-identical builders would drift. */
+  kind: 'booking' | 'package' | 'prepaid'
+  clientName: string
+  providerName: string
+  /** A service name, a package name, or "a prepaid balance". */
+  what: string
+  /** The appointment time for a booking. Null for a package or a prepaid top-up, which buy no
+   *  single date. */
+  when: string | null
+  /** What actually left the card, tip included. */
+  charged: string
+  /** Null when there was no tip. Shown when there is one, because otherwise "$115.00" against a
+   *  $95.00 service reads as a bug rather than as generosity. */
+  tip: string | null
+  /** Melanite's own appointment. The money is entirely hers and the "provider" is the house. */
+  isHouse: boolean
+  url: string
+}): Omit<EmailMessage, 'to'> {
+  const { kind, clientName, providerName, what, when, charged, tip, isHouse, url } = input
+
+  // Amount first. It is what she is scanning for, and on a phone lock screen it is most of what
+  // she will see — the same reasoning the digest's subject line already follows.
+  const subject = `Paid: ${charged} — ${what}, ${providerName}`
+
+  const opening =
+    kind === 'prepaid'
+      ? `${clientName} has paid ${charged} onto ${what} with ${providerName}.`
+      : `${clientName} has paid ${charged} for ${what} with ${providerName}.`
+
+  const tipLine = tip ? `Includes a ${tip} tip.` : null
+  const houseLine = isHouse ? "This is one of Melanite's own appointments." : null
+
+  const textLines = [opening, when ?? '', '', tipLine ?? '', houseLine ?? '', '']
+    .filter((line, i, all) => line !== '' || all[i - 1] !== '')
+    .concat(['See it against everything else here:', url])
+
+  return {
+    subject,
+    text: textLines.join('\n'),
+    html: wrap(
+      'Payment received',
+      p(
+        `<strong>${esc(clientName)}</strong> has paid <strong>${esc(charged)}</strong> ${
+          kind === 'prepaid' ? 'onto' : 'for'
+        } ${esc(what)} with ${esc(providerName)}.` + (when ? `<br>${esc(when)}` : ''),
+      ) +
+        (tipLine ? p(esc(tipLine)) : '') +
+        (houseLine ? p(esc(houseLine)) : ''),
+      { label: 'View revenue', url },
+    ),
+  }
+}
+
 export function deskEquipmentFlaggedEmail(input: {
   providerName: string
   kind: 'before' | 'after'

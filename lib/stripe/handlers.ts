@@ -35,7 +35,11 @@ import {
 } from '@/lib/email'
 
 import { splitClientPayment, splitHouse, toCents, toMoney } from '@/lib/money'
-import { notifyBookingAccessChanged, notifyMelaniteRoomRental } from '@/lib/notify-melanite'
+import {
+  notifyBookingAccessChanged,
+  notifyMelanitePaid,
+  notifyMelaniteRoomRental,
+} from '@/lib/notify-melanite'
 
 import { appOrigin, planFromMetadata } from './config'
 import { stripeGet } from './client'
@@ -279,6 +283,27 @@ async function bookingPaid(pi: StripePaymentIntentObject): Promise<HandlerResult
     })
   }
 
+  // Melanite is told separately, and DELIBERATELY OUTSIDE the `!house` guard above. The provider
+  // email is suppressed for a house appointment because "your share is nothing" is meaningless to
+  // the house; the desk email is the exact opposite case — that money is entirely Melanite's, and
+  // hiding it would hide her own revenue from her.
+  //
+  // It also ignores `providers.notifyBookingConfirmed`, which gates the provider's copy. That is
+  // a provider's own preference, and one switching off their receipts must not also silence the
+  // business owner.
+  if (detail) {
+    await notifyMelanitePaid({
+      kind: 'booking',
+      clientName: detail.clientName,
+      providerName: detail.providerName,
+      what: detail.serviceName,
+      when: appointmentWhen(detail.startTime),
+      grossCents,
+      tipCents,
+      isHouse: house,
+    })
+  }
+
   return { handled: true, detail: `booking ${bookingId} paid` }
 }
 
@@ -286,6 +311,9 @@ interface BookingEmailDetail {
   clientName: string
   startTime: Date
   serviceName: string
+  /** Already in the join for the client's own email — returned rather than re-queried so the
+   *  desk notification does not repeat a four-table lookup for one string. */
+  providerName: string
 }
 
 /** Tells the client their appointment is on.
@@ -320,6 +348,7 @@ async function confirmBooking(bookingId: string): Promise<BookingEmailDetail | n
       clientName: row.clientName,
       startTime: row.startTime,
       serviceName: row.serviceName,
+      providerName: `${row.providerFirst} ${row.providerLast}`,
     }
 
     if (!row.clientEmail) return detail
@@ -608,14 +637,27 @@ async function packagePurchased(pi: StripePaymentIntentObject): Promise<HandlerR
 
   // A package has no single appointment date, so `when` is null — the provider is being told
   // money arrived, not that anything is scheduled.
+  const packageClientName = await clientNameFor(clientId)
+
   await notifyProviderPaid({
     providerId,
-    clientName: await clientNameFor(clientId),
+    clientName: packageClientName,
     what: template.name,
     when: null,
     grossCents,
     tipCents,
     payoutCents: providerPayoutCents,
+  })
+
+  await notifyMelanitePaid({
+    kind: 'package',
+    clientName: packageClientName,
+    providerName: await providerNameFor(providerId),
+    what: template.name,
+    when: null,
+    grossCents,
+    tipCents,
+    isHouse: await isHousePayment(pi, providerId),
   })
 
   return { handled: true, detail: `package instance ${instance.id} created` }
@@ -704,9 +746,11 @@ async function prepaidPurchased(pi: StripePaymentIntentObject): Promise<HandlerR
   }
 
   // `when` is null — nothing is scheduled. The provider is being told money arrived.
+  const prepaidClientName = await clientNameFor(clientId)
+
   await notifyProviderPaid({
     providerId,
-    clientName: await clientNameFor(clientId),
+    clientName: prepaidClientName,
     what: `Prepaid balance ($${amount})`,
     when: null,
     grossCents,
@@ -714,7 +758,39 @@ async function prepaidPurchased(pi: StripePaymentIntentObject): Promise<HandlerR
     payoutCents: providerPayoutCents,
   })
 
+  await notifyMelanitePaid({
+    kind: 'prepaid',
+    clientName: prepaidClientName,
+    providerName: await providerNameFor(providerId),
+    // Reads as "paid $200.00 onto a prepaid balance with Nichole" — the amount is already in the
+    // sentence, so repeating it inside the name would say it twice.
+    what: 'a prepaid balance',
+    when: null,
+    grossCents,
+    tipCents: 0,
+    isHouse: await isHousePayment(pi, providerId),
+  })
+
   return { handled: true, detail: `prepaid balance ${balance.id} created` }
+}
+
+/** The provider's name, for the desk notification.
+ *
+ *  Falls back to "a provider" rather than throwing or returning null: the email exists to say
+ *  money arrived, and losing it because a name lookup failed would be the notification deciding
+ *  it knows better than the payment. Mirrors `clientNameFor`. */
+async function providerNameFor(providerId: string): Promise<string> {
+  try {
+    const [row] = await db
+      .select({ first: providers.firstName, last: providers.lastName })
+      .from(providers)
+      .where(eq(providers.id, providerId))
+      .limit(1)
+
+    return row ? `${row.first} ${row.last}` : 'a provider'
+  } catch {
+    return 'a provider'
+  }
 }
 
 /** Best-effort name for the notification. Null rather than throwing: failing to name the buyer
