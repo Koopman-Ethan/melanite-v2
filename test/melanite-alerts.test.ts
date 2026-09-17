@@ -315,10 +315,10 @@ describe('the close-out alert', () => {
     url: 'https://app.melanitesuite.com/app/admin/equipment',
   }
 
-  it('sends on a quiet session too, and says so plainly', () => {
-    // The same argument the evening digest makes about empty days: an email that only arrives
-    // when there is news makes a broken feature indistinguishable from a quiet Tuesday. An email
-    // whose body is empty reads as one that failed to load, so the nothing is stated.
+  it('states the nothing, rather than rendering an empty body', () => {
+    // Reachable when a provider leaves a note with no fault attached — the action stopped sending
+    // on genuinely silent close-outs, but this shape still goes out. An email whose body is empty
+    // reads as one that failed to load, so the nothing is said out loud.
     const out = deskCloseoutEmail(base)
     expect(out.subject).toBe('Closed out — Nichole Mim, Monday 14 September, 2:00pm')
     expect(out.text).toContain(

@@ -219,7 +219,7 @@ describe('missingKeys and labelsFor', () => {
     // A row signed against an older version can name a retired item. "laser_old_thing" in an
     // email to Keoni is worse than one fewer line.
     expect(labelsFor(['laser_standby', 'laser_retired_item'])).toEqual([
-      'Return laser to standby mode',
+      'Return laser to homescreen',
     ])
   })
 })

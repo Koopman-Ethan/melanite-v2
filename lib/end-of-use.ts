@@ -32,8 +32,12 @@
  *
  *  v2 made twenty of the twenty-five items REQUIRED. The wording did not change, but what a
  *  signature MEANS did: under v1 a provider could sign off having ticked nothing, which is what
- *  testing found and why v2 exists. Bumping keeps those two kinds of row telling apart. */
-export const END_OF_USE_VERSION = '2026-09-14.v2'
+ *  testing found and why v2 exists. Bumping keeps those two kinds of row telling apart.
+ *
+ *  v3 renamed "standby mode" to "homescreen" on Keoni's correction. A different state of the
+ *  machine is a different thing to attest to, so it bumps even though nothing has shipped and
+ *  there is nothing yet to tell apart. */
+export const END_OF_USE_VERSION = '2026-09-17.v3'
 
 /** When providers were first asked to close the suite out.
  *
@@ -98,7 +102,14 @@ export const END_OF_USE_SECTIONS: readonly EndOfUseSection[] = [
     key: 'laser',
     title: 'Laser Device Care',
     items: [
-      { key: 'laser_standby', label: 'Return laser to standby mode', required: true },
+      {
+        key: 'laser_standby',
+        // "Standby mode" on the paper form; Keoni corrected it to the homescreen on 2026-09-17,
+        // which is what the machine actually calls the state. The KEY is unchanged, because it is
+        // the same action and changing it would rewrite what anybody had already declared.
+        label: 'Return laser to homescreen',
+        required: true,
+      },
       {
         key: 'laser_power_down',
         label: 'Power down laser system',
@@ -108,7 +119,7 @@ export const END_OF_USE_SECTIONS: readonly EndOfUseSection[] = [
         // or tying it to `afterNeededGiven`. A provider with somebody booked after them should not
         // actually power the machine down — the hint is the whole mitigation, and if providers
         // start ticking it untruthfully that is the signal to revisit.
-        hint: 'If somebody is booked after you, leave it in standby — tick this once it is set as you are leaving it.',
+        hint: 'If somebody is booked after you, leave it on the homescreen — tick this once it is set as you are leaving it.',
         required: true,
       },
       {

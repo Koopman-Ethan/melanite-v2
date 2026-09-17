@@ -133,10 +133,21 @@ export async function recordEndOfUseChecklist(
   revalidatePath('/app/appointments')
   revalidatePath('/app/dashboard')
 
-  // Every close-out, not only the ones reporting a fault — Keoni asked to be told each time.
-  // Best effort and after the commit, the rule every notification in this app follows: a
-  // close-out that was filed must never be lost because the email describing it could not go.
-  await notifyCloseout(checklistId)
+  // ONLY when somebody actually wrote something. Keoni asked to hear about every close-out, then
+  // saw what that meant in her inbox and asked on 2026-09-17 for the quiet ones to stop — a mail
+  // per session saying nothing happened is a mail she learns to delete unread, and the one
+  // reporting a chipped handpiece goes with it.
+  //
+  // The test is the two free-text boxes, not the tick count. A fault description and a note are
+  // the only things a provider writes in their own words, and they are the only parts nobody can
+  // reconstruct from the admin page. The conditional items are deliberately NOT a trigger on
+  // their own: ticking "supply shortage" and typing nothing leaves her a notification she cannot
+  // act on, and the form already asks for the detail in the notes box.
+  //
+  // Everything still lands on /app/admin/equipment and in the evening digest either way — this
+  // decides what is worth interrupting her for, not what is recorded.
+  const worthSending = deviceIssue || note !== null
+  if (worthSending) await notifyCloseout(checklistId)
 
   // Everything required is ticked or we would not be here, so there is no shortfall to report
   // back. The count says which of the conditional five also applied, which is information rather

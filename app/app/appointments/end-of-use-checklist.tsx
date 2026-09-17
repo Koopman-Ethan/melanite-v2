@@ -53,10 +53,15 @@ function Item({
         value={itemKey}
         checked={checked}
         onChange={onToggle}
-        className="mt-0.5 h-5 w-5 shrink-0 rounded border-line-control"
+        // No top margin, and `leading-5` on the label below. `text-xs` gives a 16px line box
+        // against a 20px checkbox, so their centres sat 4px apart and every single-line item read
+        // as though its text floated above the box. Matching the line height to the control is
+        // what actually centres them — nudging with a margin only moves the mismatch around, and
+        // centring the whole block instead would drop the box to the middle of a three-line item.
+        className="h-5 w-5 shrink-0 rounded border-line-control"
       />
       <span>
-        <span className="block text-xs text-ink-secondary">
+        <span className="block text-xs leading-5 text-ink-secondary">
           {label}
           {/* Only the OPTIONAL ones are marked. Twenty "required" badges would be wallpaper, and
               the useful signal is the short list of things you may legitimately leave. */}
