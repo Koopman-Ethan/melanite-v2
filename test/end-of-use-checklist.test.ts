@@ -226,8 +226,14 @@ describe('what came up', () => {
       )
     }
 
-    // And it resolves the key to the wording a provider actually saw.
-    expect(after.find((c) => c.key === conditional[0].key)?.label).toBe(conditional[0].label)
+    // And it resolves the key to the REPORTING phrasing, not the checklist label. This list sits
+    // under a heading that says "What came up", so an imperative reads as an instruction to
+    // whoever is looking at it: "Notify management of any supply shortages — 6×" tells Keoni to
+    // go and notify somebody. The same mistake reached a real close-out email before it was
+    // caught in a send.
+    const label = after.find((c) => c.key === conditional[0].key)?.label
+    expect(label).toBe(conditional[0].reportedAs)
+    expect(label).not.toBe(conditional[0].label)
   })
 })
 

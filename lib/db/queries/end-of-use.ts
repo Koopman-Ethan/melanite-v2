@@ -10,7 +10,13 @@ import {
   providers,
   services,
 } from '@/lib/db/schema'
-import { END_OF_USE_ITEMS, END_OF_USE_STARTED_AT, labelsFor, missingKeys } from '@/lib/end-of-use'
+import {
+  END_OF_USE_ITEMS,
+  END_OF_USE_STARTED_AT,
+  labelsFor,
+  missingKeys,
+  reportedLabelsFor,
+} from '@/lib/end-of-use'
 
 // Reading the close-out record.
 //
@@ -207,7 +213,11 @@ export async function getConditionalItemCounts(sinceDays = 30): Promise<Conditio
 
   return rows.rows.map((r) => ({
     key: r.key,
-    label: labelsFor([r.key])[0] ?? r.key,
+    // The REPORTING phrasing, not the checklist label. This block is a list of findings — the
+    // labels are imperatives, and "Notify management of any supply shortages — 6×" under a
+    // heading that says "What came up" reads as an instruction to whoever is looking at it.
+    // Same mistake this made in the close-out email before it was caught in a real send.
+    label: reportedLabelsFor([r.key])[0] ?? labelsFor([r.key])[0] ?? r.key,
     times: Number(r.times),
   }))
 }

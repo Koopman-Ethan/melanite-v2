@@ -33,7 +33,8 @@
     "etl:catalogue": "tsx --tsconfig scripts/tsconfig.json scripts/etl/catalogue.ts",
     "dev:e2e-credentials": "tsx --tsconfig scripts/tsconfig.json scripts/dev-e2e-credentials.ts",
     "dev:house-provider": "tsx --tsconfig scripts/tsconfig.json scripts/dev-house-provider.ts",
-    "dev:usable": "tsx --tsconfig scripts/tsconfig.json scripts/dev-usable.ts"
+    "dev:usable": "tsx --tsconfig scripts/tsconfig.json scripts/dev-usable.ts",
+    "dev:closeout-demo": "tsx --tsconfig scripts/tsconfig.json scripts/dev-closeout-demo.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
