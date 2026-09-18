@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { db } from '@/lib/db'
+import { isExclusionViolation } from '@/lib/db/errors'
 
 // Does the database actually REFUSE bad writes?
 //
@@ -294,27 +295,45 @@ describe('ledger check constraints', () => {
 })
 
 describe('end_of_use_checklists', () => {
-  // The laser is one shared resource behind `bookings_no_overlap`, so every fixture needs its own
-  // hour. A fixed "three hours ago" works for the first test in the file and collides with itself
-  // on the second — which is how this was found.
+  // The laser is ONE shared resource behind `bookings_no_overlap`, and dev carries both real
+  // appointments copied from production and whatever `dev:closeout-demo` last seeded. Any fixed
+  // offset eventually lands on one of them: a fixed "three hours ago" collided with itself on the
+  // second test, and staggered offsets then collided with a demo fixture. Walk back until the
+  // machine is free, the way the e2e suite and the demo seeder already do.
   let slot = 0
 
   async function aBooking(): Promise<string> {
-    slot += 1
-    const start = sql.raw(`now() - interval '${slot * 2 + 2} hours'`)
-    const end = sql.raw(`now() - interval '${slot * 2 + 1} hours'`)
+    let lastError: unknown
 
-    const [row] = (
-      await db.execute<{ id: string }>(sql`
-        INSERT INTO bookings
-          (provider_id, provider_service_id, client_name, original_price, price, payment_source,
-           duration_mins, start_time, end_time, status)
-        VALUES (${providerId}::uuid, ${providerServiceId}::uuid, ${TAG}, '100.00', '100.00',
-                'checkout_link', 60, ${start}, ${end}, 'completed')
-        RETURNING id
-      `)
-    ).rows
-    return row.id
+    for (let attempt = 0; attempt < 48; attempt += 1) {
+      slot += 1
+      const start = sql.raw(`now() - interval '${slot * 2 + 2} hours'`)
+      const end = sql.raw(`now() - interval '${slot * 2 + 1} hours'`)
+
+      try {
+        const [row] = (
+          await db.execute<{ id: string }>(sql`
+            INSERT INTO bookings
+              (provider_id, provider_service_id, client_name, original_price, price, payment_source,
+               duration_mins, start_time, end_time, status)
+            VALUES (${providerId}::uuid, ${providerServiceId}::uuid, ${TAG}, '100.00', '100.00',
+                    'checkout_link', 60, ${start}, ${end}, 'completed')
+            RETURNING id
+          `)
+        ).rows
+        return row.id
+      } catch (err) {
+        // `isExclusionViolation`, not a string match. Drizzle wraps the driver error in a plain
+        // Error whose message is the failed SQL and hangs the NeonDbError off `.cause`, so
+        // `String(err)` never contains the constraint name — which `lib/db/errors.ts` says in as
+        // many words, having been written after two such checks were found never to have caught
+        // anything. This was written the wrong way first and retried nothing.
+        if (!isExclusionViolation(err)) throw err
+        lastError = err
+      }
+    }
+
+    throw lastError ?? new Error('could not place a fixture booking')
   }
 
   const REQUIRED = sql.raw(

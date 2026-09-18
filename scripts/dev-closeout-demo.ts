@@ -160,6 +160,21 @@ async function uploadFixturePhoto(): Promise<StoredPhoto | null> {
   return { storageKey, mimeType: 'image/jpeg', sizeBytes: bytes.byteLength }
 }
 
+/** Did Postgres reject this because the slot is taken?
+ *
+ *  A local copy of `isExclusionViolation`, because `lib/db/errors.ts` is `server-only` and refuses
+ *  to load in a plain Node process. Same reasoning as the copy there: drizzle wraps the driver
+ *  error in a plain Error whose message is the failed SQL and puts the real one on `.cause`, so a
+ *  string match on the constraint name never fires. This file had that bug and retried nothing. */
+function isSlotTaken(err: unknown): boolean {
+  let current: unknown = err
+  for (let depth = 0; depth < 5 && current; depth += 1) {
+    if ((current as { code?: unknown }).code === '23P01') return true
+    current = (current as { cause?: unknown }).cause
+  }
+  return false
+}
+
 /** The laser is one shared resource behind an exclusion constraint, and dev carries real
  *  appointments copied from production. Walk back an hour at a time until a slot is free rather
  *  than failing on whoever happened to be booked. */
@@ -189,7 +204,7 @@ async function insertBooking(
         .returning({ id: bookings.id })
       return row.id
     } catch (err) {
-      if (!String(err).includes('bookings_no_overlap')) throw err
+      if (!isSlotTaken(err)) throw err
       lastError = err
     }
   }
