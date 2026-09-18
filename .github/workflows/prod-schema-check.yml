@@ -40,8 +40,8 @@ on:
   # 2026-08-19 was not caused by nobody knowing the rule. It was caused by the rule living in
   # somebody's head on the night they were tired. A merge to main deploys code, and code that
   # names a table production does not have takes down every page whose query mentions it —
-  # `getAppointments` runs `select 1 from equipment_checks` per row for the photo feature, the
-  # exact shape that `prepaid_redemptions` had when /app/appointments died for ten hours.
+  # `getAppointments` left-joins `end_of_use_checklists` on every row for the close-out feature,
+  # the same exposure `prepaid_redemptions` had when /app/appointments died for ten hours.
   #
   # So the question moves one step earlier: does production ALREADY have the schema this branch
   # expects? If not, this fails and the merge is blocked until the migrations are applied.

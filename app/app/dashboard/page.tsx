@@ -4,7 +4,6 @@ import Link from 'next/link'
 import { BookingGates } from '@/components/booking-gates'
 import { bookingBlockedReasons, canBook, requireProvider } from '@/lib/auth/dal'
 import { getAppointmentCounts, getNextAppointment } from '@/lib/db/queries/appointments'
-import { getCheckPrompts } from '@/lib/db/queries/equipment'
 import { getEarningsTotals } from '@/lib/db/queries/earnings'
 import { getOutstandingPackageLinks } from '@/lib/db/queries/packages'
 
@@ -53,22 +52,14 @@ export default async function DashboardPage() {
   // Only queried once the provider is actually cleared. Someone still in setup has no
   // appointments and no earnings, and four zeroes read as a broken page rather than an empty
   // one — the gates above are the answer they need.
-  const [next, counts, earnings, links, prompts] = cleared
+  const [next, counts, earnings, links] = cleared
     ? await Promise.all([
         getNextAppointment(user.id),
         getAppointmentCounts(user.id),
         getEarningsTotals(user.id),
         getOutstandingPackageLinks(user.id),
-        getCheckPrompts(user.id),
       ])
-    : [null, null, null, [], []]
-
-  // Only what is still outstanding, and only the "after" when nobody follows — otherwise the
-  // next provider's arrival photo already records how this session left the machine, and asking
-  // is friction that buys nothing.
-  const checkPrompts = prompts.filter((p) =>
-    p.hasBefore ? p.afterNeeded && !p.hasAfter : true,
-  )
+    : [null, null, null, []]
 
   const cherry = links.filter((l) => l.cherryStartedAt)
 
@@ -146,34 +137,11 @@ export default async function DashboardPage() {
 
           {/* Only shown when there is something to act on. A permanent empty panel teaches
               people to stop looking at that part of the screen. */}
-          {(links.length > 0 || checkPrompts.length > 0) && (
+          {links.length > 0 && (
             <section className="space-y-3">
               <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">
                 Needs your attention
               </h2>
-
-              {/* The laser, if they are working today. First in the panel because it is the one
-                  thing here that expires: an arrival photo taken tomorrow records nothing, and
-                  a package link will still be there this evening. */}
-              {checkPrompts.map((p) => (
-                <Link
-                  key={p.bookingId}
-                  href="/app/appointments"
-                  className="block rounded-card border border-gold/40 bg-gold/5 p-5 hover:border-gold/60"
-                >
-                  <div className="font-medium">
-                    {p.hasBefore
-                      ? 'Photograph the laser before you leave'
-                      : 'Photograph the laser before you start'}
-                  </div>
-                  <div className="mt-0.5 text-sm text-ink-muted">
-                    {p.clientName} · {p.serviceName}
-                    {p.hasBefore
-                      ? ' — nobody is booked after you, so nothing else will record how you left it.'
-                      : ' — it is your record that you found it the way you found it.'}
-                  </div>
-                </Link>
-              ))}
 
               {links.length > 0 && (
               <Link

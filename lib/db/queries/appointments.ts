@@ -7,7 +7,6 @@ import {
   bookings,
   checkoutLinks,
   endOfUseChecklists,
-  equipmentChecks,
   packageRedemptions,
   prepaidRedemptions,
   providerServices,
@@ -62,8 +61,6 @@ export interface Appointment {
   /** Whether the laser was photographed around this session. Selected here rather than fetched
    *  per card, because the appointments list is the one place a provider is already looking on
    *  the day they need to do it. */
-  hasBeforeCheck: boolean
-  hasAfterCheck: boolean
   /** How this session was signed off, or null if nobody has.
    *
    *  Assembled from three columns by `asAppointment` so callers get one thing to check rather
@@ -81,16 +78,6 @@ export interface Appointment {
   checkoutToken: string | null
   checkoutStatus: (typeof checkoutLinks.status.enumValues)[number] | null
   checkoutExpiresAt: Date | null
-  /** When the laser is next used after this session ends, by ANY provider. Null when nothing
-   *  follows. Feeds `afterNeededGiven` — the whole point being that another provider's arrival
-   *  photo brackets this session, so it is a question about the machine and not about one
-   *  person's calendar.
-   *
-   *  A real Date, and it takes work to keep it one: this comes from a raw `sql` fragment, and
-   *  those bypass Drizzle's type mapping entirely — the driver returns a timestamp STRING and
-   *  the `sql<Date>` annotation is simply a lie the compiler believes. Same family as the
-   *  `money()` columns coming back as strings. It is converted below. */
-  nextLaserUseAt: Date | null
 }
 
 /** Month boundaries computed in America/Denver. A booking at 7pm Mountain on the 31st is
@@ -105,7 +92,6 @@ export async function getAppointments(
   filters: AppointmentFilters = {},
 ): Promise<Appointment[]> {
   const where: SQL[] = [eq(bookings.providerId, providerId)]
-  // Assembled below and mapped through `asAppointment` — see the note on `nextLaserUseAt`.
   if (filters.status) where.push(eq(bookings.status, filters.status))
   if (filters.providerServiceId) {
     where.push(eq(bookings.providerServiceId, filters.providerServiceId))
@@ -152,22 +138,6 @@ export async function getAppointments(
         where ${prepaidRedemptions}.booking_id = ${bookings}.id
           and ${prepaidRedemptions}.voided_at is null
       )`,
-      hasBeforeCheck: sql<boolean>`exists (
-        select 1 from ${equipmentChecks}
-        where ${equipmentChecks}.booking_id = ${bookings}.id
-          and ${equipmentChecks}.kind = 'before'
-      )`,
-      hasAfterCheck: sql<boolean>`exists (
-        select 1 from ${equipmentChecks}
-        where ${equipmentChecks}.booking_id = ${bookings}.id
-          and ${equipmentChecks}.kind = 'after'
-      )`,
-      nextLaserUseAt: sql<Date | null>`(
-        select min(n.start_time) from bookings n
-        where n.status in ('upcoming', 'completed')
-          and n.id <> ${bookings}.id
-          and n.start_time >= ${bookings}.end_time
-      )`,
       checkoutToken: checkoutLinks.token,
       checkoutStatus: checkoutLinks.status,
       checkoutExpiresAt: checkoutLinks.expiresAt,
@@ -184,7 +154,7 @@ export async function getAppointments(
     // Left, and safe to join rather than subquery: `end_of_use_checklists` is unique on
     // `booking_id`, so this can add at most one row and cannot duplicate an appointment. Going
     // through Drizzle's column mapping also keeps these arriving as real types, which the
-    // `nextLaserUseAt` note above explains the cost of getting wrong.
+    // arriving as real types rather than strings, which the note on `asAppointment` explains.
     .leftJoin(endOfUseChecklists, eq(endOfUseChecklists.bookingId, bookings.id))
     .where(and(...where))
     .orderBy(desc(bookings.startTime))
@@ -192,17 +162,16 @@ export async function getAppointments(
   return rows.map(asAppointment)
 }
 
-/** Converts what the driver actually returned into what the type claims.
+/** Folds the left-joined close-out columns into one object.
  *
- *  Only `nextLaserUseAt` needs it. Real columns go through Drizzle's mapping and arrive as
- *  Dates; a raw `sql` fragment does not, so this one arrives as a string and every caller that
- *  treats it as a Date throws — which took down the entire appointments list for any booking
- *  that had another one after it, meaning most of them. */
+ *  It used to convert `nextLaserUseAt` as well — a raw `sql` fragment arrives as a string rather
+ *  than a Date, and treating it as one took down the whole appointments list for any booking that
+ *  had another after it. That column went with the before/after photographs; the lesson did not,
+ *  which is why the close-out fields below come through Drizzle's own mapping instead. */
 function asAppointment(row: RawAppointment): Appointment {
   const { closeoutItems, closeoutItemCount, closeoutDeviceIssue, ...rest } = row
   return {
     ...rest,
-    nextLaserUseAt: row.nextLaserUseAt ? new Date(row.nextLaserUseAt) : null,
     // The left join produces nulls across all three when no close-out exists. `itemCount` is the
     // one that decides: it is NOT NULL on the table, so a non-null value means there is a row.
     closeout:
@@ -216,8 +185,7 @@ function asAppointment(row: RawAppointment): Appointment {
   }
 }
 
-type RawAppointment = Omit<Appointment, 'nextLaserUseAt' | 'closeout'> & {
-  nextLaserUseAt: string | Date | null
+type RawAppointment = Omit<Appointment, 'closeout'> & {
   closeoutItems: string[] | null
   closeoutItemCount: number | null
   closeoutDeviceIssue: boolean | null
@@ -274,22 +242,6 @@ async function getAppointmentsById(providerId: string, bookingId: string): Promi
         where ${prepaidRedemptions}.booking_id = ${bookings}.id
           and ${prepaidRedemptions}.voided_at is null
       )`,
-      hasBeforeCheck: sql<boolean>`exists (
-        select 1 from ${equipmentChecks}
-        where ${equipmentChecks}.booking_id = ${bookings}.id
-          and ${equipmentChecks}.kind = 'before'
-      )`,
-      hasAfterCheck: sql<boolean>`exists (
-        select 1 from ${equipmentChecks}
-        where ${equipmentChecks}.booking_id = ${bookings}.id
-          and ${equipmentChecks}.kind = 'after'
-      )`,
-      nextLaserUseAt: sql<Date | null>`(
-        select min(n.start_time) from bookings n
-        where n.status in ('upcoming', 'completed')
-          and n.id <> ${bookings}.id
-          and n.start_time >= ${bookings}.end_time
-      )`,
       checkoutToken: checkoutLinks.token,
       checkoutStatus: checkoutLinks.status,
       checkoutExpiresAt: checkoutLinks.expiresAt,
@@ -304,7 +256,7 @@ async function getAppointmentsById(providerId: string, bookingId: string): Promi
     // Left, and safe to join rather than subquery: `end_of_use_checklists` is unique on
     // `booking_id`, so this can add at most one row and cannot duplicate an appointment. Going
     // through Drizzle's column mapping also keeps these arriving as real types, which the
-    // `nextLaserUseAt` note above explains the cost of getting wrong.
+    // arriving as real types rather than strings, which the note on `asAppointment` explains.
     .leftJoin(endOfUseChecklists, eq(endOfUseChecklists.bookingId, bookings.id))
     .where(and(eq(bookings.id, bookingId), eq(bookings.providerId, providerId)))
     .limit(1)

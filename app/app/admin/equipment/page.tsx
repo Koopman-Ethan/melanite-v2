@@ -6,25 +6,27 @@ import { equipmentPhotoUrl } from '@/lib/blob'
 import { RemovePhoto } from './remove-photo'
 import {
   getCloseoutIssues,
-  getSessionsWithoutCloseout,
   getConditionalItemCounts,
+  getRecentCloseouts,
+  getSessionsWithoutCloseout,
 } from '@/lib/db/queries/end-of-use'
-import {
-  getFlaggedChecks,
-  getRecentChecks,
-  getUnbracketedSessions,
-} from '@/lib/db/queries/equipment'
 
 export const metadata: Metadata = { title: 'Equipment · Melanite' }
 export const dynamic = 'force-dynamic'
 
-// The condition of the laser, and — more usefully — the sessions nobody can account for.
+// What providers reported about the laser, and the sessions nobody accounted for.
 //
 // Exceptions first, deliberately. A wall of thumbnails where everything is fine is a page that
-// gets opened twice and then never again, and the whole value of this record is the GAP: a
-// session with no arrival photograph is one where damage found afterwards cannot be pinned to
-// anybody. Everything here is derived from the bookings themselves, never a stored list, so
-// nothing can linger after it has been dealt with — the same rule the review queue follows.
+// gets opened twice and then never again.
+//
+// This used to lead with photographs, because every session was bracketed by one on arrival and
+// the GAP was the signal — a session with no photo was damage that could not be pinned to anybody.
+// Keoni dropped the brackets on 2026-09-17: two prompts an appointment for a machine almost always
+// fine. A photograph now appears only against a reported fault, so the thing worth leading with is
+// the report itself.
+//
+// Everything here is derived from the bookings and close-outs themselves, never a stored work
+// list, so nothing can linger after it has been dealt with — the rule the review queue follows.
 
 const when = (d: Date) =>
   d.toLocaleString('en-US', {
@@ -89,15 +91,12 @@ function Photo({
 export default async function EquipmentPage() {
   await requireAdmin()
 
-  const [flagged, unbracketed, recent, closeoutIssues, unclosed, cameUp] =
-    await Promise.all([
-    getFlaggedChecks(),
-    getUnbracketedSessions(),
-    getRecentChecks(),
+  const [closeoutIssues, unclosed, cameUp, recentCloseouts] = await Promise.all([
     getCloseoutIssues(),
     getSessionsWithoutCloseout(),
     getConditionalItemCounts(),
-    ])
+    getRecentCloseouts(),
+  ])
 
   return (
     <main className="mx-auto w-full max-w-4xl px-6 py-10 space-y-6">
@@ -109,68 +108,7 @@ export default async function EquipmentPage() {
         </p>
       </header>
 
-      {flagged.length > 0 && (
-        <section className="rounded-card border border-critical/40 bg-critical/10 p-5">
-          <h2 className="text-sm font-medium">
-            {flagged.length} {flagged.length === 1 ? 'problem' : 'problems'} reported
-          </h2>
-          <ul className="mt-3 space-y-3">
-            {flagged.map((f) => (
-              <li key={f.id} className="flex gap-3 rounded-card border border-line bg-surface p-3">
-                <Photo
-                  checkId={f.id}
-                  alt={`Laser, reported by ${f.providerName}`}
-                  deletedAt={f.photoDeletedAt}
-                />
-                <div className="min-w-0">
-                  <p className="text-sm font-medium">{f.providerName}</p>
-                  <p className="mt-0.5 text-xs text-ink-muted">
-                    {f.kind === 'before' ? 'On arrival' : 'On the way out'} · {when(f.recordedAt)}
-                  </p>
-                  {f.note ? (
-                    <p className="mt-1.5 text-sm text-ink-secondary italic">“{f.note}”</p>
-                  ) : (
-                    <p className="mt-1.5 text-xs text-ink-faint">
-                      No note — the photo is the whole message.
-                    </p>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
 
-      {unbracketed.length > 0 && (
-        <section className="rounded-card border border-warning/40 bg-warning/10 p-5">
-          <h2 className="text-sm font-medium">
-            {unbracketed.length}{' '}
-            {unbracketed.length === 1 ? 'session' : 'sessions'} with no arrival photo
-          </h2>
-          <p className="mt-1 text-xs text-ink-secondary">
-            The laser was used and nobody recorded the state they found it in. This cannot be
-            filled in now — a photo taken today would show a machine other people have used since.
-            It is a record, not a task.
-          </p>
-          <ul className="mt-3 space-y-2">
-            {unbracketed.map((s) => (
-              <li
-                key={s.bookingId}
-                className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-card border border-line bg-surface px-3 py-2"
-              >
-                <span className="text-sm">{s.providerName}</span>
-                <span className="text-xs text-ink-muted">
-                  {s.serviceName} · {when(s.startTime)}
-                </span>
-                <span className="text-xs text-ink-faint tabular-nums">
-                  {agoLabel(s.startTime)}
-                  {s.hasAfter && ' · has a leaving photo'}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
 
       {closeoutIssues.length > 0 && (
         <section className="rounded-card border border-critical/40 bg-critical/10 p-5">
@@ -178,15 +116,18 @@ export default async function EquipmentPage() {
             {closeoutIssues.length}{' '}
             {closeoutIssues.length === 1 ? 'device issue' : 'device issues'} reported on a close-out
           </h2>
-          {/* Shown beside the flagged photographs rather than in some other page, because a
-              provider can report the same fault either way and a surface that shows only one
-              teaches Keoni that it shows everything. */}
           <p className="mt-1 text-xs text-ink-secondary">
-            Reported on the checklist rather than on a photo. The two are the same question.
+            Each one carries the photograph the provider had to attach.
           </p>
           <ul className="mt-3 space-y-2">
             {closeoutIssues.map((c) => (
-              <li key={c.id} className="rounded-card border border-line bg-surface p-3">
+              <li key={c.id} className="flex gap-3 rounded-card border border-line bg-surface p-3">
+                <Photo
+                  checkId={c.id}
+                  alt={`Laser, reported by ${c.providerName}`}
+                  deletedAt={c.photoDeletedAt}
+                />
+                <div className="min-w-0">
                 <p className="text-sm font-medium">{c.providerName}</p>
                 <p className="mt-0.5 text-xs text-ink-muted">
                   {c.serviceName} · {when(c.startTime)}
@@ -195,6 +136,8 @@ export default async function EquipmentPage() {
                 <p className="mt-1 text-xs text-ink-faint tabular-nums">
                   Closed out {c.itemsDone} of {c.itemCount}
                 </p>
+                {!c.photoDeletedAt && <RemovePhoto checklistId={c.id} />}
+                </div>
               </li>
             ))}
           </ul>
@@ -231,17 +174,13 @@ export default async function EquipmentPage() {
         </section>
       )}
 
-      {flagged.length === 0 &&
-        unbracketed.length === 0 &&
-        closeoutIssues.length === 0 &&
-        unclosed.length === 0 && (
-          <div className="rounded-card border border-dashed border-line p-8 text-center">
-            <p className="text-sm text-ink-muted">
-              Nothing reported, every recent session was photographed on arrival, and every one was
-              closed out.
-            </p>
-          </div>
-        )}
+      {closeoutIssues.length === 0 && unclosed.length === 0 && (
+        <div className="rounded-card border border-dashed border-line p-8 text-center">
+          <p className="text-sm text-ink-muted">
+            Nothing reported, and every session was closed out.
+          </p>
+        </div>
+      )}
 
       {/* Quiet, and not an exceptions block at all. Every required item is ticked on every stored
           close-out, so the only thing worth totalling is how often the conditional ones CAME UP —
@@ -270,43 +209,28 @@ export default async function EquipmentPage() {
 
       <section className="space-y-3">
         <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">
-          Recently photographed
+          Recent close-outs
         </h2>
 
-        {recent.length === 0 ? (
+        {recentCloseouts.length === 0 ? (
           <div className="rounded-card border border-dashed border-line p-8 text-center">
-            <p className="text-sm text-ink-muted">No photos of the laser yet.</p>
+            <p className="text-sm text-ink-muted">Nobody has closed out a session yet.</p>
           </div>
         ) : (
-          <ul className="grid gap-3 sm:grid-cols-2">
-            {recent.map((c) => (
-              <li key={c.id} className="flex gap-3 rounded-card border border-line bg-surface p-3">
-                <Photo
-                  checkId={c.id}
-                  alt={`Laser, ${when(c.recordedAt)}`}
-                  deletedAt={c.photoDeletedAt}
-                />
-                <div className="min-w-0">
-                  <p className="text-sm">{c.providerName}</p>
-                  <p className="mt-0.5 text-xs text-ink-muted">
-                    {c.kind === 'before' ? 'On arrival' : 'On the way out'} · {when(c.recordedAt)}
-                  </p>
-                  {c.note && (
-                    <p className="mt-1 text-xs text-ink-secondary italic">“{c.note}”</p>
-                  )}
-                  {c.needsAttention && (
-                    <p className="mt-1 text-xs text-critical">Flagged as a problem</p>
-                  )}
-                  {c.photoDeletedAt ? (
-                    <p className="mt-1 text-xs text-ink-faint">
-                      Photo removed by Melanite. The session is still accounted for.
-                    </p>
-                  ) : (
-                    <div className="mt-1.5">
-                      <RemovePhoto checkId={c.id} />
-                    </div>
-                  )}
-                </div>
+          <ul className="space-y-2">
+            {recentCloseouts.map((c) => (
+              <li
+                key={c.id}
+                className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-card border border-line bg-surface px-3 py-2"
+              >
+                <span className="text-sm">{c.providerName}</span>
+                <span className="text-xs text-ink-muted">
+                  {c.serviceName} · {when(c.startTime)}
+                </span>
+                <span className="text-xs text-ink-faint tabular-nums">
+                  {c.itemsDone} of {c.itemCount}
+                  {c.deviceIssue && ' · issue reported'}
+                </span>
               </li>
             ))}
           </ul>

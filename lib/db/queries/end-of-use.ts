@@ -20,19 +20,18 @@ import {
 
 // Reading the close-out record.
 //
-// A separate module from `queries/equipment.ts`, which says in its own header that it is about
-// photographs. These are about what somebody declared they did, which is a different question
-// with a different failure mode — a photo is missing or it is not, whereas a close-out can exist
-// and still be mostly empty.
+// This was one of two modules: photographs bracketing every session lived in `queries/equipment.ts`
+// and what a provider declared lived here. The brackets were dropped on 2026-09-17, that module
+// went with them, and a photograph is now one column on the row it belongs to — taken only when
+// there is a fault to show.
 //
-// Nothing here is scoped to a provider: every caller is an admin page behind `requireAdmin()`,
-// the same arrangement the equipment queries use.
+// Nothing here is scoped to a provider: every caller is an admin page behind `requireAdmin()`.
 
 /** How long after a session ends before a missing close-out becomes an exception rather than a
  *  task.
  *
- *  The same twelve hours `checkWindowOpen` gives a provider to file one. Before that it is still
- *  theirs to do and listing it would be nagging Keoni about something nobody is late for. */
+ *  The same twelve hours `closeoutWindowOpen` gives a provider to file one. Before that it is
+ *  still theirs to do, and listing it would nag Keoni about something nobody is late for. */
 const CLOSEOUT_GRACE_HOURS = 12
 
 export interface CloseoutRecord {
@@ -49,6 +48,10 @@ export interface CloseoutRecord {
   note: string | null
   serviceName: string
   startTime: Date
+  /** Null when nothing was reported — only a fault carries a photograph now. Non-null with
+   *  `photoDeletedAt` set means Melanite destroyed the image and the record of it stays. */
+  photoStorageKey: string | null
+  photoDeletedAt: Date | null
 }
 
 const CLOSEOUT_COLUMNS = {
@@ -63,6 +66,8 @@ const CLOSEOUT_COLUMNS = {
   note: endOfUseChecklists.note,
   serviceName: services.name,
   startTime: bookings.startTime,
+  photoStorageKey: endOfUseChecklists.photoStorageKey,
+  photoDeletedAt: endOfUseChecklists.photoDeletedAt,
 }
 
 type RawCloseout = {
@@ -77,6 +82,8 @@ type RawCloseout = {
   note: string | null
   serviceName: string
   startTime: Date
+  photoStorageKey: string | null
+  photoDeletedAt: Date | null
 }
 
 function asCloseout(row: RawCloseout): CloseoutRecord {
@@ -93,9 +100,9 @@ function asCloseout(row: RawCloseout): CloseoutRecord {
 /**
  * Device faults reported on a close-out.
  *
- * Pairs with `getFlaggedChecks` — a provider can report a problem by flagging a photograph or by
- * saying so here, and Keoni has to see both or the second kind goes unnoticed. Any surface that
- * shows one must show the other.
+ * The only way a fault now reaches Melanite. It used to be possible to report one by flagging an
+ * arrival photograph instead, which meant two surfaces had to agree or the second kind went
+ * unnoticed; there is one path now, and it carries its own picture.
  */
 export async function getCloseoutIssues(sinceDays = 30): Promise<CloseoutRecord[]> {
   const since = new Date(Date.now() - sinceDays * 24 * 60 * 60_000)
@@ -124,9 +131,8 @@ export interface UnclosedSession {
 /**
  * Sessions that were used and never signed off, once it is too late to sign off.
  *
- * A record, not a to-do — exactly like `getUnbracketedSessions`, and for the same reason. Past the
- * twelve-hour window other people have used the room, so a check-off filed now would describe a
- * state this provider did not leave it in. Oldest first, because age is what matters in a list of
+ * A record, not a to-do. Past the twelve-hour window other people have used the room, so a
+ * check-off filed now would describe a state this provider did not leave it in. Oldest first, because age is what matters in a list of
  * things nobody dealt with.
  *
  * Bounded by `END_OF_USE_STARTED_AT` so the page does not open with every session that predates

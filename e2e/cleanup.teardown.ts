@@ -25,19 +25,19 @@ teardown('remove e2e rows', async () => {
        SELECT id FROM bookings WHERE client_name LIKE 'ZZ E2E %'
      )`,
   )
-  // Equipment photos too, and they are not optional: the FK is ON DELETE RESTRICT, so a check
-  // left behind does not orphan — it blocks the booking delete outright and every later run
-  // accumulates another year-2099 ghost on the admin calendar.
+  // Close-outs too, and they are not optional: the FK is ON DELETE RESTRICT, so one left behind
+  // does not orphan — it blocks the booking delete outright and every later run accumulates
+  // another year-2099 ghost on the admin calendar.
   await query.query(
-    `DELETE FROM equipment_checks WHERE booking_id IN (
+    `DELETE FROM end_of_use_checklists WHERE booking_id IN (
        SELECT id FROM bookings WHERE client_name LIKE 'ZZ E2E %'
      )`,
   )
   await query.query(`DELETE FROM bookings WHERE client_name LIKE 'ZZ E2E %'`)
 
-  // The objects those rows pointed at. Only ever the dev prefix — production photographs are
-  // never reachable from here, and `deleteEquipmentPhoto` refuses outside production for the
-  // same reason. Best effort: a blob store that is not configured, or a delete that fails, must
+  // The objects those rows pointed at — a photograph now exists only where a fault was reported.
+  // Only ever the dev prefix: production photographs are never reachable from here, and
+  // `deleteEquipmentPhoto` refuses outside production for the same reason. Best effort: a blob store that is not configured, or a delete that fails, must
   // not fail a teardown whose real job is the database.
   if (process.env.BLOB_READ_WRITE_TOKEN && process.env.MELANITE_ENV !== 'prod') {
     try {

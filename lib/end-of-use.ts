@@ -422,3 +422,26 @@ export function reportedLabelsFor(keys: readonly string[]): string[] {
     .map((k) => byKey.get(k)?.reportedAs)
     .filter((l): l is string => Boolean(l))
 }
+
+/**
+ * Is this session still one somebody may sign off?
+ *
+ * Opens an hour before the appointment and closes twelve hours after it ends. Generous on both
+ * sides on purpose: a prompt that vanishes at an arbitrary moment is worse than one that lingers,
+ * and somebody finishing a long day should still be able to account for the morning.
+ *
+ * Past the close it is refused, and that refusal is the whole ethic of this feature — other people
+ * have used the room by then, so a check-off filed now would describe a state this provider did
+ * not leave it in. A missing record stays missing rather than being filled in with a guess.
+ *
+ * Moved here from `lib/equipment-checks.ts` when the before/after photographs were dropped; it was
+ * the only thing in that module still wanted, and the rest went with the brackets.
+ */
+export function closeoutWindowOpen(
+  session: { startTime: Date; endTime: Date },
+  now: Date = new Date(),
+): boolean {
+  const opensAt = session.startTime.getTime() - 60 * 60_000
+  const closesAt = session.endTime.getTime() + 12 * 60 * 60_000
+  return now.getTime() >= opensAt && now.getTime() <= closesAt
+}

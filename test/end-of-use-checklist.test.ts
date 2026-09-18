@@ -148,6 +148,20 @@ describe('the constraints', () => {
     expect(isUniqueViolation(caught)).toBe(true)
   })
 
+  it('refuses a reported fault with no photograph', async () => {
+    // The whole of what replaced the before/after brackets, and not something the form's required
+    // file input can be trusted to guarantee on its own.
+    await expect(
+      sql.query(
+        `INSERT INTO end_of_use_checklists
+           (booking_id, provider_id, version, completed_items, item_count, device_issue,
+            device_issue_note)
+         VALUES ($1, $2, $3, '{}'::text[], $4, true, 'cracked')`,
+        [recentBookingId, providerId, END_OF_USE_VERSION, END_OF_USE_ITEM_COUNT],
+      ),
+    ).rejects.toThrow()
+  })
+
   it('refuses a reported issue with no description', async () => {
     await expect(
       sql.query(
@@ -239,11 +253,15 @@ describe('what came up', () => {
 
 describe('reported device faults', () => {
   it('surfaces a close-out that reported one', async () => {
+    // A photograph, because the constraint now insists on one. A fault with nothing to look at is
+    // the shape this arrangement cannot afford — there is no longer a sequence of arrival photos
+    // to fall back on.
     await sql.query(
       `INSERT INTO end_of_use_checklists
          (booking_id, provider_id, version, completed_items, item_count, device_issue,
-          device_issue_note)
-       VALUES ($1, $2, $3, '{}'::text[], $4, true, 'ZZ handpiece window is chipped')`,
+          device_issue_note, photo_storage_key)
+       VALUES ($1, $2, $3, '{}'::text[], $4, true, 'ZZ handpiece window is chipped',
+               'equipment/dev/zz-fault.jpg')`,
       [recentBookingId, providerId, END_OF_USE_VERSION, END_OF_USE_ITEM_COUNT],
     )
 

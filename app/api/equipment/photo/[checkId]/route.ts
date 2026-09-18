@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm'
 import { getCurrentUser } from '@/lib/auth/dal'
 import { readEquipmentPhoto } from '@/lib/blob'
 import { db } from '@/lib/db'
-import { equipmentChecks } from '@/lib/db/schema'
+import { endOfUseChecklists } from '@/lib/db/schema'
 
 // Serving a photograph of the laser.
 //
@@ -12,9 +12,12 @@ import { equipmentChecks } from '@/lib/db/schema'
 // read can be AUTHORISED, rather than access being "whoever ended up with the link".
 //
 // Deliberately coarse: any signed-in provider may view any equipment photo. That is right for a
-// machine everybody shares and is jointly accountable for — a provider should be able to see the
-// state the last person left it in, and that is half the reason they take their own. It would be
-// entirely wrong for anything photographing a person, which is the line `lib/blob.ts` draws.
+// machine everybody shares and is jointly accountable for — a fault one person reported is a fault
+// the next person walks into. It would be entirely wrong for anything photographing a person,
+// which is the line `lib/blob.ts` draws.
+//
+// Every photo reaching here now hangs off a reported fault. The before/after brackets that used to
+// produce most of them were dropped on 2026-09-17.
 //
 // Second only to authentication: nothing here is derived from user input except the id, which is
 // looked up rather than used to build a path. A route that took a storage key in the URL would be
@@ -35,12 +38,14 @@ export async function GET(
   const { checkId } = await params
 
   const [check] = await db
-    .select({ storageKey: equipmentChecks.storageKey, mimeType: equipmentChecks.mimeType })
-    .from(equipmentChecks)
-    .where(eq(equipmentChecks.id, checkId))
+    .select({ storageKey: endOfUseChecklists.photoStorageKey, mimeType: endOfUseChecklists.photoMimeType })
+    .from(endOfUseChecklists)
+    .where(eq(endOfUseChecklists.id, checkId))
     .limit(1)
 
-  if (!check) return new Response('Not found', { status: 404 })
+  // No row, or a close-out that reported nothing and so carries no image. Both are a 404: the
+  // difference is not the caller's business and saying which would confirm the id exists.
+  if (!check?.storageKey) return new Response('Not found', { status: 404 })
 
   const photo = await readEquipmentPhoto(check.storageKey)
 

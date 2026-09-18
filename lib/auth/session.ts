@@ -76,8 +76,6 @@ export interface SessionUser {
    *  booking — v1's LICENSE_EXPIRED gate, which is easy to miss because it lives in the
    *  create endpoint rather than alongside the other two gates. */
   licenseExpiry: string | null
-  /** Which wording of the equipment policy they have accepted, if any. Null until they do. */
-  equipmentPolicyAckVersion: string | null
   requiresPasswordReset: boolean
 }
 
@@ -105,7 +103,6 @@ export async function getSessionUser(): Promise<SessionUser | null> {
       // form she has already filled in.
       hasMedicalDirectorOnFile: sql<boolean>`${medicalDirectorCredentials.providerId} is not null`,
       licenseExpiry: providers.licenseExpiry,
-      equipmentPolicyAckVersion: providers.equipmentPolicyAckVersion,
       requiresPasswordReset: providers.requiresPasswordReset,
     })
     .from(sessions)

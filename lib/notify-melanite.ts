@@ -1,12 +1,11 @@
 import 'server-only'
 
-import { eq, sql } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
 import {
   bookings,
   endOfUseChecklists,
-  equipmentChecks,
   medicalDirectorCredentials,
   providerServices,
   providers,
@@ -22,7 +21,6 @@ import {
   bookingPaymentSummary,
   deskBookingEmail,
   deskCloseoutEmail,
-  deskEquipmentFlaggedEmail,
   deskMedicalDirectorEmail,
   deskPaymentReceivedEmail,
   deskProviderAccessEmail,
@@ -313,13 +311,6 @@ export async function notifyCloseout(checklistId: string): Promise<void> {
         serviceName: services.name,
         firstName: providers.firstName,
         lastName: providers.lastName,
-        // The same fault can arrive twice — flagged on the photograph and described here. Saying
-        // so in one email beats two that look like two incidents.
-        alsoFlaggedPhoto: sql<boolean>`exists (
-          select 1 from ${equipmentChecks}
-          where ${equipmentChecks}.booking_id = ${endOfUseChecklists}.booking_id
-            and ${equipmentChecks}.needs_attention
-        )`,
       })
       .from(endOfUseChecklists)
       .innerJoin(providers, eq(endOfUseChecklists.providerId, providers.id))
@@ -345,48 +336,11 @@ export async function notifyCloseout(checklistId: string): Promise<void> {
           row.completedItems.filter((k) => CONDITIONAL_KEYS.has(k)),
         ),
         note: row.note,
-        alsoFlaggedPhoto: row.alsoFlaggedPhoto,
         url: `${await appOrigin()}/app/admin/equipment`,
       }),
     })
   } catch (err) {
     console.error('[email] close-out alert failed for checklist', checklistId, err)
-  }
-}
-
-/** A provider has flagged a problem with the laser.
- *
- *  Goes only to Melanite. The provider already knows — they are the one holding the phone — and
- *  the point of this message is that somebody who is NOT in the room finds out the same day. */
-export async function notifyEquipmentFlagged(checkId: string): Promise<void> {
-  try {
-    const [row] = await db
-      .select({
-        kind: equipmentChecks.kind,
-        recordedAt: equipmentChecks.recordedAt,
-        note: equipmentChecks.note,
-        firstName: providers.firstName,
-        lastName: providers.lastName,
-      })
-      .from(equipmentChecks)
-      .innerJoin(providers, eq(equipmentChecks.providerId, providers.id))
-      .where(eq(equipmentChecks.id, checkId))
-      .limit(1)
-
-    if (!row) return
-
-    await sendEmail({
-      to: MELANITE_NOTIFY_EMAIL,
-      ...deskEquipmentFlaggedEmail({
-        providerName: `${row.firstName} ${row.lastName}`,
-        kind: row.kind,
-        when: appointmentWhen(row.recordedAt),
-        note: row.note,
-        url: `${await appOrigin()}/app/admin/equipment`,
-      }),
-    })
-  } catch (err) {
-    console.error('[email] equipment flag alert failed for check', checkId, err)
   }
 }
 

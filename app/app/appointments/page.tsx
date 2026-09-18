@@ -12,12 +12,12 @@ import {
   type Appointment,
   type AppointmentStatus,
 } from '@/lib/db/queries/appointments'
-import { afterNeededGiven, checkWindowOpen } from '@/lib/equipment-checks'
 import { appOrigin } from '@/lib/stripe/config'
 
 import { AppointmentActions } from './appointment-actions'
+import { closeoutWindowOpen } from '@/lib/end-of-use'
+
 import { EndOfUseChecklist } from './end-of-use-checklist'
-import { EquipmentCheck } from './equipment-check'
 import { PaymentLink } from './payment-link'
 import { BookedBanner } from './booked-banner'
 import { Filters } from './filters'
@@ -140,61 +140,30 @@ function AppointmentCard({ appointment, origin }: { appointment: Appointment; or
             hasEmail={Boolean(appointment.clientEmail)}
           />
         )}
-        <EquipmentChecks appointment={appointment} />
+        <CloseoutPrompt appointment={appointment} />
       </div>
     </li>
   )
 }
 
-/** The laser photographs for one appointment.
+/** The close-out prompt, on a finished session.
  *
- *  Only rendered inside the window around the session — a prompt sitting on an appointment three
- *  weeks out is noise, and an appointment from last month cannot be photographed truthfully any
- *  more. Cancelled and no-show bookings never touched the machine, so they get nothing.
+ *  This used to render three things: a photograph on arrival, a second one on the way out when
+ *  nobody followed closely enough to bracket the session, and the checklist. Keoni dropped the
+ *  brackets on 2026-09-17 — two prompts an appointment for a machine that was almost always fine —
+ *  in favour of one photograph attached to an actual report, which the checklist now collects.
  *
- *  The "after" prompt is deliberately absent when somebody follows soon: their arrival photo
- *  already records the state this session left the laser in, and asking for a second photograph
- *  of the same moment is how a prompt becomes something people click past. */
-function EquipmentChecks({ appointment }: { appointment: Appointment }) {
+ *  Only on a session that has finished and is still inside its window. A prompt on an appointment
+ *  three weeks out is noise, and one from last month cannot be answered truthfully any more.
+ *  Cancelled and no-show bookings never touched the machine, so they get nothing. */
+function CloseoutPrompt({ appointment }: { appointment: Appointment }) {
   if (appointment.status === 'cancelled' || appointment.status === 'no_show') return null
-
-  const slot = {
-    id: appointment.id,
-    startTime: appointment.startTime,
-    endTime: appointment.endTime,
-  }
-  if (!checkWindowOpen(slot)) return null
-
-  const finished = appointment.endTime <= new Date()
+  if (appointment.endTime > new Date()) return null
+  if (!closeoutWindowOpen(appointment)) return null
 
   return (
     <div className="mt-3 border-t border-line pt-3">
-      <EquipmentCheck
-        bookingId={appointment.id}
-        kind="before"
-        done={appointment.hasBeforeCheck}
-      />
-      {finished && afterNeededGiven(appointment.endTime, appointment.nextLaserUseAt) && (
-        <EquipmentCheck
-          bookingId={appointment.id}
-          kind="after"
-          done={appointment.hasAfterCheck}
-        />
-      )}
-      {/* Deliberately NOT gated on `afterNeededGiven`, which looks inconsistent beside the line
-          above and is the whole reason the cadence is per-appointment.
-
-          The after-PHOTOGRAPH is redundant when somebody follows you in ten minutes: their arrival
-          photo records the same moment, so asking twice is how a prompt becomes something people
-          click past. The CLEANING is not redundant. It is owed to the person walking in, and it is
-          owed after every client rather than once at the end of the day. */}
-      {finished && (
-        <EndOfUseChecklist
-          bookingId={appointment.id}
-          recorded={appointment.closeout}
-          laserPhotographed={appointment.hasBeforeCheck}
-        />
-      )}
+      <EndOfUseChecklist bookingId={appointment.id} recorded={appointment.closeout} />
     </div>
   )
 }

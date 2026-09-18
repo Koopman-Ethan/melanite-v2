@@ -3,10 +3,6 @@ import '../envConfig'
 import { eq, inArray } from 'drizzle-orm'
 
 import { hashPassword } from '@/lib/auth/password'
-import {
-  EQUIPMENT_POLICY_VERSION,
-  hasAcceptedEquipmentPolicy,
-} from '@/lib/equipment-policy'
 import { licenseStatus } from '@/lib/license'
 import { providers } from '@/lib/db/schema'
 
@@ -71,7 +67,6 @@ async function main() {
       bookingEnabled: providers.bookingEnabled,
       medicalDirectorStatus: providers.medicalDirectorStatus,
       licenseExpiry: providers.licenseExpiry,
-      equipmentPolicyAckVersion: providers.equipmentPolicyAckVersion,
       requiresPasswordReset: providers.requiresPasswordReset,
     })
     .from(providers)
@@ -134,25 +129,6 @@ async function main() {
         await db
           .update(providers)
           .set({ medicalDirectorStatus: 'active' })
-          .where(eq(providers.id, provider.id))
-      },
-    })
-  }
-
-  // The equipment policy stands in front of the booking form, so a suite that has not accepted
-  // it cannot book — and the failure surfaces as "no time slots", which names nothing. Same
-  // class of problem as the medical-director gate above: a real product behaviour that a test
-  // fixture has to satisfy deliberately rather than by accident.
-  if (!hasAcceptedEquipmentPolicy(provider.equipmentPolicyAckVersion)) {
-    repairs.push({
-      label: `equipment policy for ${provider.email} (${provider.equipmentPolicyAckVersion ?? 'never accepted'})`,
-      fix: async () => {
-        await db
-          .update(providers)
-          .set({
-            equipmentPolicyAckAt: new Date(),
-            equipmentPolicyAckVersion: EQUIPMENT_POLICY_VERSION,
-          })
           .where(eq(providers.id, provider.id))
       },
     })

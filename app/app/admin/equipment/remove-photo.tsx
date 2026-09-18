@@ -15,7 +15,7 @@ import { removeEquipmentPhoto } from './actions'
  * the two halves people get wrong — the file is gone for good, and the session stays accounted
  * for — because "delete" on a compliance record reasonably sounds like it erases the record.
  */
-export function RemovePhoto({ checkId }: { checkId: string }) {
+export function RemovePhoto({ checklistId }: { checklistId: string }) {
   const [open, setOpen] = useState(false)
   const [reason, setReason] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -40,11 +40,11 @@ export function RemovePhoto({ checkId }: { checkId: string }) {
         stays, so the session is still accounted for.
       </p>
 
-      <label htmlFor={`why-${checkId}`} className="mt-2 block text-[11px] text-ink-faint">
+      <label htmlFor={`why-${checklistId}`} className="mt-2 block text-[11px] text-ink-faint">
         Why, briefly <span className="text-ink-disabled">Optional</span>
       </label>
       <input
-        id={`why-${checkId}`}
+        id={`why-${checklistId}`}
         value={reason}
         onChange={(e) => setReason(e.target.value)}
         maxLength={300}
@@ -67,7 +67,7 @@ export function RemovePhoto({ checkId }: { checkId: string }) {
           onClick={() =>
             start(async () => {
               setError(null)
-              const result = await removeEquipmentPhoto({ checkId, reason })
+              const result = await removeEquipmentPhoto({ checklistId, reason })
               if (result.error) setError(result.error)
               else setOpen(false)
             })

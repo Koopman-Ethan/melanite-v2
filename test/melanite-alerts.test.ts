@@ -311,7 +311,6 @@ describe('the close-out alert', () => {
     deviceIssueNote: null,
     cameUpLabels: [],
     note: null,
-    alsoFlaggedPhoto: false,
     url: 'https://app.melanitesuite.com/app/admin/equipment',
   }
 
@@ -353,16 +352,17 @@ describe('the close-out alert', () => {
     expect(out.text).not.toContain('no issues were reported')
   })
 
-  it('says when the same session also flagged a photo', () => {
-    // One fault reported two ways must not read as two incidents.
+  it('points at the photograph the report had to carry', () => {
+    // A fault could once arrive twice — flagged on an arrival photo AND described here — and this
+    // said so to stop one incident reading as two. The arrival photos are gone: there is one
+    // report, it carries its own picture, and the email says where to look at it.
     const out = deskCloseoutEmail({
       ...base,
       deviceIssue: true,
       deviceIssueNote: 'Cracked',
-      alsoFlaggedPhoto: true,
     })
-    expect(out.text).toContain('also flagged a photo')
-    expect(out.html).toContain('also flagged a photo')
+    expect(out.text).toContain('A photo of it is on the close-out.')
+    expect(out.html).toContain('A photo of it is on the close-out.')
   })
 
   it('reports conditional items as findings, not as instructions', () => {

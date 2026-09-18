@@ -1206,9 +1206,6 @@ export function deskCloseoutEmail(input: {
    *  instruction to whoever opened the email. */
   cameUpLabels: string[]
   note: string | null
-  /** Whether the same session ALSO produced a flagged photograph. Stops one fault reported two
-   *  ways from reading as two separate incidents. */
-  alsoFlaggedPhoto: boolean
   url: string
 }): Omit<EmailMessage, 'to'> {
   const {
@@ -1219,7 +1216,6 @@ export function deskCloseoutEmail(input: {
     deviceIssueNote,
     cameUpLabels,
     note,
-    alsoFlaggedPhoto,
     url,
   } = input
 
@@ -1242,12 +1238,10 @@ export function deskCloseoutEmail(input: {
 
   if (deviceIssue) {
     textLines.push(`Device issue reported: "${deviceIssueNote ?? ''}"`, '')
-    if (alsoFlaggedPhoto) {
-      textLines.push(
-        'They also flagged a photo of the machine on this session — likely the same fault.',
-        '',
-      )
-    }
+    // The photograph is on the close-out page, not in here. It used to be possible for one fault
+    // to arrive twice — flagged on an arrival photo AND described on the checklist — and this said
+    // so; the arrival photos are gone, so there is only ever the one report.
+    textLines.push('A photo of it is on the close-out.', '')
   }
 
   if (cameUpLabels.length > 0) {
@@ -1266,10 +1260,7 @@ export function deskCloseoutEmail(input: {
     (deviceIssue
       ? p(
           `<strong style="color:#C2554D">Device issue reported:</strong> “${esc(deviceIssueNote ?? '')}”`,
-        ) +
-        (alsoFlaggedPhoto
-          ? p('They also flagged a photo of the machine on this session — likely the same fault.')
-          : '')
+        ) + p('A photo of it is on the close-out.')
       : '') +
     (cameUpLabels.length > 0
       ? p(`Also reported: ${cameUpLabels.map((l) => esc(l)).join('; ')}.`)
@@ -1349,46 +1340,6 @@ export function deskPaymentReceivedEmail(input: {
         (tipLine ? p(esc(tipLine)) : '') +
         (houseLine ? p(esc(houseLine)) : ''),
       { label: 'View revenue', url },
-    ),
-  }
-}
-
-export function deskEquipmentFlaggedEmail(input: {
-  providerName: string
-  kind: 'before' | 'after'
-  when: string
-  note: string | null
-  url: string
-}): Omit<EmailMessage, 'to'> {
-  const moment =
-    input.kind === 'before'
-      ? 'when they arrived, before their appointment'
-      : 'after their appointment, on the way out'
-
-  // Their words, or an honest admission that there are none. "No note" is information: it means
-  // look at the photograph, because nobody has told you what you are looking for.
-  const said = input.note
-    ? `They said: "${input.note}"`
-    : 'They left no note, so the photo is the whole message.'
-
-  return {
-    subject: `Laser flagged by ${input.providerName}`,
-    text: [
-      `${input.providerName} has flagged a problem with the laser.`,
-      '',
-      `Noticed ${moment} — ${input.when}.`,
-      '',
-      said,
-      '',
-      'See the photo:',
-      input.url,
-    ].join('\n'),
-    html: wrap(
-      'A provider flagged the laser',
-      p(`<strong>${input.providerName}</strong> has flagged a problem with the laser.`) +
-        p(`Noticed ${moment} — ${input.when}.`) +
-        p(said),
-      { label: 'See the photo', url: input.url },
     ),
   }
 }

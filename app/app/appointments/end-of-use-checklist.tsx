@@ -1,6 +1,6 @@
 'use client'
 
-import { useActionState, useState } from 'react'
+import { useActionState, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Notice } from '@/components/ui/field'
@@ -26,6 +26,63 @@ import { recordEndOfUseChecklist, type ChecklistState } from './end-of-use-actio
 //
 // NO "tick everything" control. It would make the form a single tap and the record worthless,
 // which is the opposite of the trade this feature exists to make.
+
+/** Longest edge after downscaling.
+ *
+ *  A phone photo is 3–5MB and a treatment room is the worst signal the app will ever see. At
+ *  1600px a scratch, a warning light or a depleted consumable is perfectly legible.
+ *
+ *  Measured on a real iPhone photo through this path on 1 September: 1200x1600, and 671KB and
+ *  714KB for the two checks. This comment previously guessed 200–400KB, which was optimistic by
+ *  about half — worth stating as measurement rather than estimate, since the number is the whole
+ *  argument for downscaling at all. Still roughly a fifth of the original, which is the
+ *  difference between an upload that finishes while they put the phone down and one they
+ *  cancel.
+ *
+ *  It also keeps the request inside the server action body limit, which a raw phone photo would
+ *  blow straight through. */
+const MAX_EDGE = 1600
+
+/** What `lib/blob.ts` will actually take. Kept here only to decide whether a file can skip the
+ *  canvas — the authoritative check is on the server. */
+const SERVER_ACCEPTS = new Set(['image/jpeg', 'image/png', 'image/webp'])
+const QUALITY = 0.82
+
+/** Redraws the photo smaller, in the browser, before it is ever sent.
+ *
+ *  Returns the ORIGINAL file when anything goes wrong — a canvas that will not decode, an image
+ *  the browser dislikes. The server validates type and size regardless, so the worst case is a
+ *  slower upload rather than a lost photograph. Failing closed here would mean refusing to record
+ *  a laser somebody is standing in front of. */
+async function downscale(file: File): Promise<File> {
+  try {
+    const bitmap = await createImageBitmap(file)
+    const scale = Math.min(1, MAX_EDGE / Math.max(bitmap.width, bitmap.height))
+    // Small AND already a type the server takes. The second half matters: an iPhone hands back
+    // HEIC from the photo library, which is often under a megabyte and which the server refuses.
+    // Returning it untouched would turn a good photo into "Photos only — JPEG, PNG or WebP".
+    // Redrawing it through the canvas is what makes it a JPEG.
+    if (scale === 1 && file.size < 1_000_000 && SERVER_ACCEPTS.has(file.type)) return file
+
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.round(bitmap.width * scale)
+    canvas.height = Math.round(bitmap.height * scale)
+
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return file
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+    bitmap.close()
+
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, 'image/jpeg', QUALITY),
+    )
+    if (!blob) return file
+
+    return new File([blob], 'laser.jpg', { type: 'image/jpeg' })
+  } catch {
+    return file
+  }
+}
 
 /** Native checkboxes, deliberately — not the `aria-pressed` pill buttons `room-form.tsx` uses.
  *  Four options can afford custom semantics; twenty-five cannot. A checkbox in a fieldset gives a
@@ -76,13 +133,10 @@ function Item({
 export function EndOfUseChecklist({
   bookingId,
   recorded,
-  laserPhotographed,
 }: {
   bookingId: string
   /** The row, if this session was already closed out. Null means nobody has. */
   recorded: { itemsDone: number; itemCount: number; deviceIssue: boolean } | null
-  /** Whether an arrival photograph exists. Stated back to them, never ticked FOR them. */
-  laserPhotographed: boolean
 }) {
   const [state, action, pending] = useActionState<ChecklistState, FormData>(
     recordEndOfUseChecklist,
@@ -92,12 +146,37 @@ export function EndOfUseChecklist({
   const [ticked, setTicked] = useState<string[]>([])
   const [collapsed, setCollapsed] = useState<string[]>([])
   const [issue, setIssue] = useState<'none' | 'reported' | ''>('')
+  const [photoName, setPhotoName] = useState<string | null>(null)
+  const photoRef = useRef<HTMLInputElement>(null)
 
   const done = new Set(ticked)
   const outstanding = missingRequired(ticked)
   const ready = outstanding.length === 0
   const requiredDone = REQUIRED_ITEM_COUNT - outstanding.length
   const shortageFlagged = done.has('supplies_notify_shortage')
+  // A report needs its photograph. Enforced on the server and by the constraint too — this is the
+  // courtesy that stops somebody filling the whole form in before being told.
+  const photoMissing = issue === 'reported' && photoName === null
+
+  // Shrinking happens on selection rather than on submit, so the wait overlaps with them typing
+  // the description instead of following the button press.
+  async function onPickPhoto(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setPhotoName(file.name)
+
+    const smaller = await downscale(file)
+    // Putting the shrunken file back into the input is what makes the form submit it. Wrapped
+    // because DataTransfer is the one API here a phone might not have, and failing it must leave
+    // the ORIGINAL photo in the input — a slow upload beats a dead button.
+    try {
+      const box = new DataTransfer()
+      box.items.add(smaller)
+      if (photoRef.current) photoRef.current.files = box.files
+    } catch {
+      /* keep whatever the picker put there */
+    }
+  }
 
   function toggle(key: string) {
     setTicked((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]))
@@ -198,15 +277,6 @@ export function EndOfUseChecklist({
                   />
                 ))}
 
-            {/* A fact the app owns, stated where the photo item would otherwise be confused with
-                it. Not a checkbox: letting somebody tick it would let them contradict the record. */}
-            {section.key === 'docs' && !isCollapsed && (
-              <p className="mt-2 text-[11px] text-ink-faint">
-                {laserPhotographed
-                  ? 'Laser photographed on arrival — we have that already.'
-                  : 'No arrival photo for this session. That cannot be added now.'}
-              </p>
-            )}
           </fieldset>
         )
       })}
@@ -256,6 +326,40 @@ export function EndOfUseChecklist({
               If somebody was hurt, or the machine is unsafe, tell Melanite now rather than
               leaving it here.
             </p>
+
+            <label
+              htmlFor={`photo-${bookingId}`}
+              className="mt-3 block text-xs font-medium text-ink-secondary"
+            >
+              Photo of the problem
+            </label>
+            <p className="mt-1 text-[11px] text-ink-faint">
+              A picture of the machine, not of anyone. It is the only photograph of this we will
+              have.
+            </p>
+            <input
+              ref={photoRef}
+              id={`photo-${bookingId}`}
+              name="photo"
+              type="file"
+              // `image/*`, NOT the three types the server accepts. An explicit MIME list is the
+              // difference between a control that opens and one that does nothing at all when
+              // tapped: phones match `accept` against their own idea of a file's type, and an
+              // entry they do not recognise can leave the picker with nothing it is willing to
+              // offer. The server still enforces the real allowlist.
+              //
+              // NO `capture`. It looks like the right attribute and it fails CLOSED — it tells the
+              // browser camera-or-nothing, so any browser that will not hand over the camera
+              // offers no fallback and the control does nothing when tapped. Brave on iOS does
+              // exactly that, which is what a provider testing on her own phone actually hit.
+              accept="image/*"
+              required
+              onChange={onPickPhoto}
+              className="mt-2 block w-full text-xs text-ink-muted file:mr-3 file:min-h-11 file:rounded-control file:border file:border-line-control file:bg-transparent file:px-3 file:text-xs file:font-bold file:text-ink-secondary"
+            />
+            {photoName && (
+              <p className="mt-1 text-[11px] text-ink-faint">Ready to send: {photoName}</p>
+            )}
           </div>
         )}
       </fieldset>
@@ -307,7 +411,7 @@ export function EndOfUseChecklist({
       {state.error && <Notice>{state.error}</Notice>}
 
       <div className="flex items-center gap-3">
-        <Button type="submit" size="sm" disabled={pending || issue === '' || !ready}>
+        <Button type="submit" size="sm" disabled={pending || issue === '' || !ready || photoMissing}>
           {pending
             ? 'Saving…'
             : ready
@@ -322,6 +426,9 @@ export function EndOfUseChecklist({
       </div>
       {issue === '' && ready && (
         <p className="text-[11px] text-ink-faint">Answer the device question to sign off.</p>
+      )}
+      {photoMissing && ready && (
+        <p className="text-[11px] text-ink-faint">Add a photo of the problem to sign off.</p>
       )}
 
       <div className="border-t border-line pt-3">

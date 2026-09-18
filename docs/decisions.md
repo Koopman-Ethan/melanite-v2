@@ -1894,3 +1894,63 @@ will generate exactly one confused message; if it generates more, the answer is 
 second row that supersedes rather than replaces. Room renters are out of scope for the same reason
 they are out of scope for the photographs — a room rental does not book the laser — though they
 are in the room with it.
+
+### The before/after photographs are gone — 2026-09-18
+
+Keoni reviewed the checklist with Ethan on 2026-09-17 and dropped the photo brackets. A
+photograph is now taken in exactly one circumstance: a provider reporting something wrong with
+the machine, where it is required.
+
+**What this gives up, stated plainly, because it is the whole argument the photos were built on.**
+The brackets were a chain of custody. Consecutive arrival photos bracketed every session, so damage
+found later could be pinned to the session it appeared in, and the GAP was the signal —
+`getUnbracketedSessions` existed to surface exactly that. Melanite can no longer answer "who had it
+when this happened". It can only answer "who noticed".
+
+**What it buys.** Two prompts an appointment, on a machine that is almost always fine, for a record
+nobody read unless something went wrong. `docs/decisions.md` warned from the start that a prompt
+which feels redundant is how people learn to dismiss the whole thing; that applied to a photograph
+of an unmarked laser more than to anything else in the feature. A picture attached to a real fault
+is worth more than forty of a machine in good order.
+
+**Required, and enforced by a CHECK.** `end_of_use_issue_photo` says a row with `device_issue` has
+a `photo_storage_key`. It is not left to the form's required file input, because there is no longer
+a sequence of arrival photos to fall back on — a report with nothing to look at is now the entire
+record rather than a gap beside one. This is also the first hard blocker in a feature otherwise
+built on never blocking anybody, which was a deliberate call and not an oversight.
+
+**Storage is written before the row, and the row is what may fail.** The constraint means a row
+asserting a photograph that never uploaded is unrecoverable; an orphaned blob is not, and is
+deleted in the catch. The old photo action had the same compensating cleanup for the same reason.
+
+**`photo_deleted_at` is deliberately outside the constraint.** Melanite destroying an image must
+not make the row invalid — the record that a photograph existed, and the fault it described, both
+outlive the bytes.
+
+**The agreement went too.** `lib/equipment-policy.ts` was five paragraphs about photographing the
+laser on arrival, shown before a provider could book. With arrival photos gone it described a
+feature that no longer exists, so the gate, the module and the two `providers.equipment_policy_ack_*`
+columns were removed rather than left standing in front of the booking form.
+
+**Migration 0031 is destructive and that is safe here only because nothing shipped.** It drops
+`equipment_checks`, the `equipment_check_kind` enum and those two columns — all created by 0028,
+which production has never run. In production the pair nets to nothing. Rewriting 0028 instead
+would have been the wrong fix: it has run on dev, and the rule is that an applied migration is
+never edited.
+
+**It failed halfway on first run**, which is worth recording because it is the documented cost of
+`scripts/migrate.ts` having no surrounding transaction. The new CHECK was rejected by existing demo
+rows — a seeded fault with no photograph — leaving statements 1 to 11 applied, 12 not, and the
+migration unrecorded. Finished by hand. Production has no rows at all, so the same sequence applies
+cleanly there; on any database with data, a constraint added over existing rows needs them fixed
+first.
+
+**Also gone:** `afterNeededGiven` and the three-hour `UNATTENDED_GAP_MINUTES` rule, `isUnbracketed`,
+the dashboard's "photograph the laser" cards, the admin page's flagged-photo and no-arrival-photo
+sections, `notifyEquipmentFlagged`, `deskEquipmentFlaggedEmail`, and `hasBeforeCheck` /
+`hasAfterCheck` / `nextLaserUseAt` from the appointments query. `checkWindowOpen` survived as
+`closeoutWindowOpen` in `lib/end-of-use.ts` — it was the only part of that module still wanted, and
+the twelve-hour close it enforces is unchanged.
+
+**Still true, and the reason the close-out itself was never gated:** nothing here stops anybody
+using the laser. It records what somebody says they did.

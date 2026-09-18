@@ -78,7 +78,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   // Order matters — children first. Runs even if a test threw.
-  await db.execute(sql`DELETE FROM equipment_checks WHERE note = ${TAG}`)
+  await db.execute(sql`DELETE FROM end_of_use_checklists WHERE note = ${TAG}`)
   await db.execute(sql`DELETE FROM ledger_entries WHERE note = ${TAG}`)
   await db.execute(sql`DELETE FROM room_bookings WHERE provider_id = ${providerId}::uuid`)
   await db.execute(sql`DELETE FROM checkout_links WHERE token LIKE ${`${TAG}%`}`)
@@ -293,85 +293,132 @@ describe('ledger check constraints', () => {
   })
 })
 
-describe('equipment checks', () => {
-  /** A booking to hang photographs off. Cancelled deliberately — nothing here should care, and a
-   *  cancelled fixture cannot collide with a real appointment on the laser. */
+describe('end_of_use_checklists', () => {
+  // The laser is one shared resource behind `bookings_no_overlap`, so every fixture needs its own
+  // hour. A fixed "three hours ago" works for the first test in the file and collides with itself
+  // on the second — which is how this was found.
+  let slot = 0
+
   async function aBooking(): Promise<string> {
-    const start = new Date(Date.UTC(2095, 0, 4, 17))
+    slot += 1
+    const start = sql.raw(`now() - interval '${slot * 2 + 2} hours'`)
+    const end = sql.raw(`now() - interval '${slot * 2 + 1} hours'`)
+
     const [row] = (
       await db.execute<{ id: string }>(sql`
         INSERT INTO bookings
-          (provider_id, provider_service_id, client_name, original_price, price,
-           payment_source, duration_mins, start_time, end_time, status)
+          (provider_id, provider_service_id, client_name, original_price, price, payment_source,
+           duration_mins, start_time, end_time, status)
         VALUES (${providerId}::uuid, ${providerServiceId}::uuid, ${TAG}, '100.00', '100.00',
-                'comped', 60, ${start.toISOString()}::timestamptz,
-                ${new Date(start.getTime() + 3_600_000).toISOString()}::timestamptz, 'cancelled')
+                'checkout_link', 60, ${start}, ${end}, 'completed')
         RETURNING id
       `)
     ).rows
     return row.id
   }
 
-  it('accepts SEVERAL photos of the same end of the same session', async () => {
-    // Two angles of one scratch is an ordinary thing to want, and "was this session bracketed?"
-    // is an EXISTS rather than a count. A unique index on (booking, kind) would look tidy and
-    // would quietly refuse the second photograph of a problem — which is the one that shows it.
+  const REQUIRED = sql.raw(
+    "array['laser_standby','laser_power_down','laser_inspect_handpieces']::text[]",
+  )
+
+  it('refuses a reported fault with no photograph', async () => {
+    // The whole of what replaced the before/after brackets. There is no longer a sequence of
+    // arrival photos to fall back on, so a report with nothing to look at is the one shape this
+    // arrangement cannot afford — and the form's required file input is not what makes it true.
     const bookingId = await aBooking()
 
-    for (const key of ['equipment/zz-a.jpg', 'equipment/zz-b.jpg']) {
-      await db.execute(sql`
-        INSERT INTO equipment_checks (booking_id, provider_id, kind, storage_key, note)
-        VALUES (${bookingId}::uuid, ${providerId}::uuid, 'before', ${key}, ${TAG})
-      `)
-    }
-
-    const [row] = (
-      await db.execute<{ n: number }>(
-        sql`SELECT count(*)::int AS n FROM equipment_checks WHERE booking_id = ${bookingId}::uuid`,
-      )
-    ).rows
-
-    expect(row.n).toBe(2)
-  })
-
-  it('refuses a photo against a booking that does not exist', async () => {
-    // The record is an attribution. One pointing at no appointment attributes nothing, and the
-    // FK is what stops a bad id becoming a row nobody can interpret.
     await rejects(
       sql`
-        INSERT INTO equipment_checks (booking_id, provider_id, kind, storage_key, note)
-        VALUES (gen_random_uuid(), ${providerId}::uuid, 'before', 'equipment/zz-orphan.jpg', ${TAG})
+        INSERT INTO end_of_use_checklists
+          (booking_id, provider_id, version, completed_items, item_count, device_issue,
+           device_issue_note, note)
+        VALUES (${bookingId}::uuid, ${providerId}::uuid, 'zz.v1', ${REQUIRED}, 25, true,
+                'cracked window', ${TAG})
       `,
-      'equipment_checks_booking_id_bookings_id_fk',
+      'end_of_use_issue_photo',
     )
   })
 
-  it('will not let a provider or a booking be deleted out from under a photo', async () => {
-    // Asserted against the catalog rather than by attempting a delete. A delete is refused by
-    // `bookings`' own RESTRICT first, so trying it proves nothing about THIS constraint — the
-    // rejection arrives under another name and the test would pass or fail for the wrong reason.
+  it('accepts a reported fault that carries one', async () => {
+    const bookingId = await aBooking()
+
+    await db.execute(sql`
+      INSERT INTO end_of_use_checklists
+        (booking_id, provider_id, version, completed_items, item_count, device_issue,
+         device_issue_note, photo_storage_key, note)
+      VALUES (${bookingId}::uuid, ${providerId}::uuid, 'zz.v1', ${REQUIRED}, 25, true,
+              'cracked window', 'equipment/dev/zz-fault.jpg', ${TAG})
+    `)
+
+    const [row] = (
+      await db.execute<{ n: number }>(
+        sql`SELECT count(*)::int AS n FROM end_of_use_checklists
+            WHERE booking_id = ${bookingId}::uuid`,
+      )
+    ).rows
+    expect(row.n).toBe(1)
+  })
+
+  it('still accepts a quiet close-out with no photograph at all', async () => {
+    // Most sessions. The constraint must not turn "nothing was wrong" into an error.
+    const bookingId = await aBooking()
+
+    await db.execute(sql`
+      INSERT INTO end_of_use_checklists
+        (booking_id, provider_id, version, completed_items, item_count, device_issue, note)
+      VALUES (${bookingId}::uuid, ${providerId}::uuid, 'zz.v1', ${REQUIRED}, 25, false, ${TAG})
+    `)
+
+    const [row] = (
+      await db.execute<{ n: number }>(
+        sql`SELECT count(*)::int AS n FROM end_of_use_checklists
+            WHERE booking_id = ${bookingId}::uuid`,
+      )
+    ).rows
+    expect(row.n).toBe(1)
+  })
+
+  it('allows the photograph to be destroyed without invalidating the report', async () => {
+    // Melanite can remove an image — a client caught in frame is health information in a store
+    // built for a machine. `photo_deleted_at` is deliberately outside the constraint: the record
+    // that a photograph existed, and the fault it described, both outlive the bytes.
+    const bookingId = await aBooking()
+
+    await db.execute(sql`
+      INSERT INTO end_of_use_checklists
+        (booking_id, provider_id, version, completed_items, item_count, device_issue,
+         device_issue_note, photo_storage_key, photo_deleted_at, note)
+      VALUES (${bookingId}::uuid, ${providerId}::uuid, 'zz.v1', ${REQUIRED}, 25, true,
+              'cracked window', 'equipment/dev/zz-gone.jpg', now(), ${TAG})
+    `)
+
+    const [row] = (
+      await db.execute<{ n: number }>(
+        sql`SELECT count(*)::int AS n FROM end_of_use_checklists
+            WHERE booking_id = ${bookingId}::uuid AND photo_deleted_at IS NOT NULL`,
+      )
+    ).rows
+    expect(row.n).toBe(1)
+  })
+
+  it('will not let a provider or a booking be deleted out from under a close-out', async () => {
+    // Asserted against the catalog rather than by attempting a delete, which `bookings`' own
+    // RESTRICT refuses first — the rejection would arrive under another name and the test would
+    // pass for the wrong reason.
     //
-    // What matters is that neither is 'c'. Cascade here would mean deleting a provider silently
-    // erases the record of what state they left a shared machine in, which is the one thing this
-    // table exists to remember.
+    // Cascade here would mean deleting a provider silently erases what they declared about a
+    // shared machine, which is the one thing this table exists to remember.
     const rows = (
       await db.execute<{ conname: string; confdeltype: string }>(sql`
         SELECT conname, confdeltype FROM pg_constraint
-        WHERE conrelid = 'equipment_checks'::regclass AND contype = 'f'
-        ORDER BY conname
+        WHERE conrelid = 'end_of_use_checklists'::regclass AND contype = 'f'
       `)
     ).rows
 
-    expect(rows.map((r) => r.conname)).toEqual([
-      'equipment_checks_booking_id_bookings_id_fk',
-      // Who destroyed the photograph, when Melanite removes one. RESTRICT for the same reason as
-      // the others: the row is a record of what happened to a shared machine, and deleting an
-      // account should never quietly take part of that record with it.
-      'equipment_checks_photo_deleted_by_providers_id_fk',
-      'equipment_checks_provider_id_providers_id_fk',
-    ])
-    // 'r' is RESTRICT; 'c' would be CASCADE.
-    expect(rows.every((r) => r.confdeltype === 'r')).toBe(true)
+    expect(rows.length).toBeGreaterThan(0)
+    for (const r of rows) {
+      expect(r.confdeltype, `${r.conname} must not cascade`).not.toBe('c')
+    }
   })
 })
 

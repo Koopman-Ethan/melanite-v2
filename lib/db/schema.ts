@@ -107,18 +107,6 @@ export const bookingStatus = pgEnum('booking_status', [
   'no_show',
 ])
 
-/** Which end of a session a laser photograph belongs to.
- *
- *  `before` is the load-bearing one. The NEXT provider's before-photo is, in practice, the after
- *  photo of the previous session — nothing happens to the machine in between — so consecutive
- *  before-photos bracket each use on their own. An `after` is only worth asking for when nobody
- *  follows: last booking of the day, or a long gap before the next one.
- *
- *  Neither can be filled in later. Once somebody else has touched the laser, a photo taken then
- *  shows a state the previous provider did not leave it in, and this record is worth only as much
- *  as it can be trusted. A missing check stays missing. */
-export const equipmentCheckKind = pgEnum('equipment_check_kind', ['before', 'after'])
-
 /** How a discount was expressed. Kept rather than collapsing to a single percentage: "10% off"
  *  and "$25 off" can produce the same price today and diverge the moment the service is
  *  repriced, so the intent is worth storing alongside the result. */
@@ -363,8 +351,6 @@ export const providers = pgTable('providers', {
    *  Versioned for the reason `platform_settings.cardPolicyVersion` is: changing the wording later
    *  must not silently rewrite what somebody actually accepted. Bumping the version in
    *  `lib/equipment-policy.ts` asks everyone again. */
-  equipmentPolicyAckAt: timestamp({ withTimezone: true }),
-  equipmentPolicyAckVersion: text(),
 
   /** Where this provider's client money ends up. See `providerRevenueModel`.
    *
@@ -696,53 +682,6 @@ export const checkoutLinks = pgTable('checkout_links', {
  *  Several rows per (booking, kind) are deliberately allowed: two angles of the same scratch is
  *  an ordinary thing to want, and "was this session bracketed?" is an EXISTS rather than a count.
  *  A unique index here would quietly refuse the second photograph of a problem. */
-export const equipmentChecks = pgTable('equipment_checks', {
-  id: uuid().primaryKey().defaultRandom(),
-  bookingId: uuid()
-    .notNull()
-    .references(() => bookings.id, { onDelete: 'restrict' }),
-  /** Who took it. Denormalised from the booking on purpose — attribution is the whole point, and
-   *  it must survive a booking being reassigned or a provider row being renamed. */
-  providerId: uuid()
-    .notNull()
-    .references(() => providers.id, { onDelete: 'restrict' }),
-  kind: equipmentCheckKind().notNull(),
-  /** SERVER time, never the photograph's EXIF. A timestamp the photographer controls is not
-   *  evidence. This records when the app received it, which is the only honest claim available. */
-  recordedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
-  /** Opaque object-storage key, resolved to a URL at read time — the same decision `documents`
-   *  already documents, so the file store can change without a data migration. */
-  storageKey: text().notNull(),
-  mimeType: text(),
-  sizeBytes: integer(),
-  /** What they noticed, in their words. Deliberately not `bookings.notes`, which is promised to
-   *  the provider as "visible only to you" and is genuinely not read by any admin query. */
-  note: text(),
-  /** They are reporting a problem, not just filing a photograph. Emails Melanite immediately —
-   *  the difference between finding a broken laser today and finding it in an archive later. */
-  needsAttention: boolean().notNull().default(false),
-
-  /** The photograph was destroyed, but the CHECK still happened.
-   *
-   *  The row is deliberately kept. Every query that asks "was this session accounted for?" asks
-   *  whether a check row exists, so deleting the row outright would silently turn a provider who
-   *  complied into one who did not — rewriting history as a side effect of tidying up. The bytes
-   *  go permanently; the fact that she photographed the laser does not.
-   *
-   *  Exists for removing what should never have been stored — a client caught in frame is health
-   *  information sitting in a store built for a machine — not for saving space. At roughly half a
-   *  gigabyte a year, space is not the problem. */
-  photoDeletedAt: timestamp({ withTimezone: true }),
-  photoDeletedBy: uuid().references(() => providers.id, { onDelete: 'restrict' }),
-  photoDeletedReason: text(),
-}, (t) => [
-  index().on(t.bookingId, t.kind),
-  index().on(t.providerId, t.recordedAt.desc()),
-  // Partial: the flagged ones are a handful among all checks ever taken, and they are the only
-  // rows anybody queries for on their own.
-  index().on(t.needsAttention).where(sql`${t.needsAttention}`),
-])
-
 /** One provider's account of how they left the suite, for one session.
  *
  *  The photographs beside this record the STATE of the machine. This records the WORK — cleaning,
@@ -765,8 +704,8 @@ export const endOfUseChecklists = pgTable('end_of_use_checklists', {
   bookingId: uuid()
     .notNull()
     .references(() => bookings.id, { onDelete: 'restrict' }),
-  /** Denormalised from the booking, for the reason `equipment_checks.provider_id` is: attribution
-   *  is the whole point of the record and has to survive a booking being reassigned. */
+  /** Denormalised from the booking: attribution is the whole point of the record and has to
+   *  survive a booking being reassigned to somebody else. */
   providerId: uuid()
     .notNull()
     .references(() => providers.id, { onDelete: 'restrict' }),
@@ -797,12 +736,29 @@ export const endOfUseChecklists = pgTable('end_of_use_checklists', {
   /** Anything else worth saying — a supply shortage, something odd. Deliberately not for clinical
    *  detail; the form says so where somebody is typing. */
   note: text(),
+  /** The photograph of the fault. Opaque key in Postgres, URL resolved at read time — the shape
+   *  `documents.storageKey` settled on long before anything used it.
+   *
+   *  Photographs used to bracket every session, arrival and departure, as a chain of custody. That
+   *  was two prompts an appointment for a machine that was almost always fine, and Keoni dropped
+   *  it on 2026-09-17 in favour of one picture attached to an actual report. The trade is real and
+   *  is recorded in `docs/decisions.md`: nothing can now answer "who had it when this happened",
+   *  only "who noticed". */
+  photoStorageKey: text(),
+  photoMimeType: text(),
+  photoSizeBytes: integer(),
+  /** Melanite can destroy a photograph without destroying the record that one was taken — a client
+   *  caught in frame is health information sitting in a store built for a machine. The row stays,
+   *  marked — the record that a photograph was taken outlives the image itself. */
+  photoDeletedAt: timestamp({ withTimezone: true }),
+  photoDeletedBy: uuid().references(() => providers.id, { onDelete: 'restrict' }),
+  photoDeletedReason: text(),
 }, (t) => [
   // One per booking. A second row would let somebody quietly replace what they declared.
   uniqueIndex().on(t.bookingId),
   index().on(t.providerId, t.recordedAt.desc()),
-  // Partial, for the same reason as `equipment_checks.needs_attention`: reported faults are a
-  // handful among every close-out ever filed, and the only rows queried on their own.
+  // Partial: reported faults are a handful among every close-out ever filed, and the only rows
+  // anybody queries for on their own.
   index().on(t.deviceIssue).where(sql`${t.deviceIssue}`),
   // A reported issue that names nothing is a message nobody can act on, and a description filed
   // against "no issues" is one nobody will read. Enforced here as well as in the action because
@@ -817,6 +773,17 @@ export const endOfUseChecklists = pgTable('end_of_use_checklists', {
         or (not ${t.deviceIssue} and ${t.deviceIssueNote} is null)`,
   ),
   check('end_of_use_item_count', sql`cardinality(${t.completedItems}) <= ${t.itemCount}`),
+  // A reported fault carries a photograph. This is the whole of what replaced the before/after
+  // brackets, so it is enforced here and not only by a required file input: a report with no
+  // picture is the one shape the new arrangement cannot afford, because there is no longer a
+  // sequence of arrival photos to fall back on.
+  //
+  // `photo_deleted_at` is deliberately not part of it. Melanite destroying the image afterwards
+  // must not make the row invalid — the record that a photograph existed is the point.
+  check(
+    'end_of_use_issue_photo',
+    sql`not ${t.deviceIssue} or ${t.photoStorageKey} is not null`,
+  ),
 ])
 
 // ---------------------------------------------------------------------------
