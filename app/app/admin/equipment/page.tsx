@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 
 import { requireAdmin } from '@/lib/auth/dal'
+import { REQUIRED_ITEM_COUNT } from '@/lib/end-of-use'
 import { equipmentPhotoUrl } from '@/lib/blob'
 
 import { RemovePhoto } from './remove-photo'
@@ -11,7 +12,7 @@ import {
   getSessionsWithoutCloseout,
 } from '@/lib/db/queries/end-of-use'
 
-export const metadata: Metadata = { title: 'Equipment · Melanite' }
+export const metadata: Metadata = { title: 'Equipment & close-outs · Melanite' }
 export const dynamic = 'force-dynamic'
 
 // What providers reported about the laser, and the sessions nobody accounted for.
@@ -103,8 +104,8 @@ export default async function EquipmentPage() {
       <header>
         <h1 className="text-2xl font-semibold">Equipment &amp; close-outs</h1>
         <p className="mt-1 text-sm text-ink-muted">
-          The laser, photographed by whoever had it, and how they said they left the room. Problems
-          and unaccounted sessions first.
+          How providers said they left the room, and anything they reported wrong with the laser.
+          Problems and unaccounted sessions first.
         </p>
       </header>
 
@@ -133,8 +134,14 @@ export default async function EquipmentPage() {
                   {c.serviceName} · {when(c.startTime)}
                 </p>
                 <p className="mt-1.5 text-sm text-ink-secondary italic">“{c.deviceIssueNote}”</p>
-                <p className="mt-1 text-xs text-ink-faint tabular-nums">
-                  Closed out {c.itemsDone} of {c.itemCount}
+                {/* NOT "21 of 25". The twenty required items are ticked on anything that can be
+                    stored, so a raw count reads as four things missed when nothing was — the same
+                    reason the evening digest stopped printing one. What is worth saying is how
+                    many of the five conditionals actually came up. */}
+                <p className="mt-1 text-xs text-ink-faint">
+                  {c.itemsDone > REQUIRED_ITEM_COUNT
+                    ? `All required, plus ${c.itemsDone - REQUIRED_ITEM_COUNT} reported`
+                    : 'All required items ticked'}
                 </p>
                 {!c.photoDeletedAt && <RemovePhoto checklistId={c.id} />}
                 </div>
@@ -151,9 +158,9 @@ export default async function EquipmentPage() {
             close-out
           </h2>
           <p className="mt-1 text-xs text-ink-secondary">
-            The laser was used and nobody said how they left the room. Like the photos, this
-            cannot be filled in now — a check-off today would describe a room other people have
-            used since. It is a record, not a task.
+            The laser was used and nobody said how they left the room. This cannot be filled in
+            now — a check-off today would describe a room other people have used since. It is a
+            record, not a task.
           </p>
           <ul className="mt-3 space-y-2">
             {unclosed.map((s) => (
@@ -237,10 +244,12 @@ export default async function EquipmentPage() {
         )}
       </section>
 
+      {/* "who had it" was the chain of custody, and that is the thing dropping the before/after
+          brackets gave up. Saying it here would promise an answer this page can no longer give. */}
       <p className="text-xs text-ink-faint">
         Photographs are taken by providers on their phones and timestamped when Melanite receives
-        them, not by the camera. Nothing here stops the laser being used — it records who had it
-        and what they found.
+        them, not by the camera. Nothing here stops the laser being used — it records what somebody
+        said they did, and anything they reported wrong.
       </p>
     </main>
   )
