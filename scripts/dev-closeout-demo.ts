@@ -1,5 +1,9 @@
 import '../envConfig'
 
+import { randomUUID } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+
 import { and, eq, like } from 'drizzle-orm'
 
 import { bookings, endOfUseChecklists, providerServices, providers, services } from '@/lib/db/schema'
@@ -32,6 +36,11 @@ import { db } from './db'
 // NEVER IN PRODUCTION. Guarded by `requireEnv`, because this writes fictional appointments and a
 // fictional device fault, and a fictional device fault in the real equipment log is worse than no
 // demo at all.
+//
+// The fault seed UPLOADS A REAL IMAGE. Since 2026-09-18 a reported fault must carry a photograph
+// — `end_of_use_issue_photo` is a CHECK constraint, not a form rule — so a row cannot be faked
+// with a made-up storage key and still render. Reuses the e2e fixture rather than shipping a
+// second picture of the same machine.
 
 const PREFIX = 'ZZ DEMO'
 
@@ -117,6 +126,40 @@ function hoursAgo(h: number): Date {
   return new Date(Date.now() - h * 60 * 60_000)
 }
 
+interface StoredPhoto {
+  storageKey: string
+  mimeType: string
+  sizeBytes: number
+}
+
+/**
+ * Puts the fixture image in the blob store, the way `lib/blob.ts` would.
+ *
+ * Not by importing it: that module is `server-only` and refuses to load in a plain Node process,
+ * which is the same reason `scripts/db.ts` exists. The three things that must match are the key
+ * prefix, `access: 'private'` (the store is private and the SDK refuses 'public' outright) and
+ * `addRandomSuffix: false` — without the last, the store saves under a pathname different from
+ * the one recorded and the photo is unreachable.
+ *
+ * Returns null when there is no token, and the caller downgrades that seed to a quiet close-out
+ * rather than failing: a demo of the rest of the feature beats no demo.
+ */
+async function uploadFixturePhoto(): Promise<StoredPhoto | null> {
+  if (!process.env.BLOB_READ_WRITE_TOKEN) return null
+
+  const bytes = readFileSync(join(process.cwd(), 'e2e', 'fixtures', 'laser.jpg'))
+  const storageKey = `equipment/dev/${randomUUID()}.jpg`
+
+  const { put } = await import('@vercel/blob')
+  await put(storageKey, bytes, {
+    access: 'private',
+    contentType: 'image/jpeg',
+    addRandomSuffix: false,
+  })
+
+  return { storageKey, mimeType: 'image/jpeg', sizeBytes: bytes.byteLength }
+}
+
 /** The laser is one shared resource behind an exclusion constraint, and dev carries real
  *  appointments copied from production. Walk back an hour at a time until a slot is free rather
  *  than failing on whoever happened to be booked. */
@@ -197,21 +240,41 @@ async function main() {
     const service = offered[i % offered.length]
     const bookingId = await insertBooking(seed, provider.id, service.id)
 
+    let downgraded = false
+
     if (seed.closeout) {
+      const reporting = seed.closeout.deviceIssue !== null
+      const photo = reporting ? await uploadFixturePhoto() : null
+
+      // `end_of_use_issue_photo` will not take a fault without a picture, and there is no honest
+      // way to fake one — a made-up storage key produces a row that renders "Photo unavailable",
+      // which is a worse demo than not showing a fault at all. Without a token this becomes an
+      // ordinary close-out and says so.
+      const faulted = reporting && photo !== null
+      downgraded = reporting && !faulted
+
       await db.insert(endOfUseChecklists).values({
         bookingId,
         providerId: provider.id,
         version: END_OF_USE_VERSION,
         completedItems: [...REQUIRED_KEYS, ...seed.closeout.alsoTick],
         itemCount: END_OF_USE_ITEM_COUNT,
-        deviceIssue: seed.closeout.deviceIssue !== null,
-        deviceIssueNote: seed.closeout.deviceIssue,
+        deviceIssue: faulted,
+        deviceIssueNote: faulted ? seed.closeout.deviceIssue : null,
         note: seed.closeout.note,
+        photoStorageKey: photo?.storageKey ?? null,
+        photoMimeType: photo?.mimeType ?? null,
+        photoSizeBytes: photo?.sizeBytes ?? null,
       })
     }
 
     console.log(`  ${seed.label}  ${service.name}`)
-    console.log(`     ${seed.why}\n`)
+    console.log(
+      downgraded
+        ? '     DOWNGRADED — no BLOB_READ_WRITE_TOKEN, so this is a quiet close-out instead.\n' +
+            '     A reported fault has to carry a photograph and one cannot be faked.\n'
+        : `     ${seed.why}\n`,
+    )
   }
 
   console.log(`Provider: ${provider.first} ${provider.last} (nichole.mim@gmail.com)`)
