@@ -18,11 +18,14 @@ import { recordEndOfUseChecklist, type ChecklistState } from './end-of-use-actio
 
 // Closing out the suite, from a phone, with the next client possibly already waiting.
 //
-// Twenty-five ticks is a great deal more than the photograph asks for, and the same warning
-// applies with more force: a provider who finds this slow will stop doing it honestly long before
-// they stop doing it at all. So the sections collapse to a counter once touched, the whole thing
-// opens behind one button, and a partial answer is a legitimate thing to submit rather than a
-// failure state.
+// Twenty-five items is a lot to ask of somebody in that position, and a provider who finds this
+// slow will stop doing it honestly long before they stop doing it at all. So the sections collapse
+// to a counter once touched and the whole thing opens behind one button.
+//
+// TWENTY OF THEM ARE REQUIRED. An earlier version let anybody submit having ticked nothing, on the
+// theory that a truthful partial record beat a coerced full one; testing produced a signed
+// certification with zero items behind it, which settled it. The five that stay optional describe
+// things that may genuinely not have happened.
 //
 // NO "tick everything" control. It would make the form a single tap and the record worthless,
 // which is the opposite of the trade this feature exists to make.
@@ -432,8 +435,14 @@ export function EndOfUseChecklist({
       )}
 
       <div className="border-t border-line pt-3">
-        <p className="text-[11px] font-medium text-ink-secondary">
-          Tell Melanite straight away — not here
+        {/* This said "Tell Melanite straight away — NOT HERE", which stopped being true when
+            reporting a device issue above started emailing her the same day. It was sending people
+            away from the field built for exactly these. What survives is the part about people: a
+            burn is not an equipment record and does not belong in this app at all. */}
+        <p className="text-[11px] font-medium text-ink-secondary">Immediate reporting required</p>
+        <p className="mt-1 text-[11px] text-ink-faint">
+          Reporting a device issue above reaches Melanite the same day. Anything involving a
+          person — a burn, a reaction — is a phone call, not a form.
         </p>
         <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[11px] text-ink-faint">
           {IMMEDIATE_REPORTING.map((line) => (

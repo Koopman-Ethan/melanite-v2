@@ -12,7 +12,7 @@
 // `RoomProcedure.key` carries.
 //
 // THIS IS A RECORD, NOT AN INTERLOCK. Nothing here stops anybody using the laser or leaving the
-// room, exactly as the photographs cannot. `docs/decisions.md` is explicit about what actually
+// room — there is no interlock to hook into. `docs/decisions.md` is explicit about what actually
 // decides whether these get filled in honestly: a provider who reads it as surveillance will tick
 // everything without looking, and a provider who reads it as their own account of how they left
 // the room will not.
@@ -308,11 +308,17 @@ export const REQUIRED_ITEM_COUNT = REQUIRED_ITEMS.length
 export const END_OF_USE_CERTIFICATION =
   'I certify that I have completed the above checklist and have left the laser suite and equipment in clean, safe, and operational condition.'
 
-/** Reference only — never tickable, never stored.
+/** Keoni's own "Immediate Reporting Required" list. Reference only — never tickable, never stored.
  *
- *  These reach Melanite immediately by other means (flag the photograph, or a phone call). Listing
- *  them at the foot of the form is what stops somebody filing a burn as a checklist note and
- *  assuming it has been dealt with. */
+ *  THE FRAMING AROUND IT CHANGED on 2026-09-18 and the list did not. It used to sit under "Tell
+ *  Melanite straight away — not here", which was true when a close-out reached her only in the
+ *  nightly digest and a fault was reported by flagging an arrival photograph. Neither holds now:
+ *  reporting a device issue above emails her the same day, and there are no arrival photographs to
+ *  flag. Sending somebody away from the field built for this was the opposite of the intent.
+ *
+ *  The half that is still true is the half about people. A burn or a reaction is about a person,
+ *  does not belong in an equipment record, and is a phone call — which is what listing these at
+ *  the foot of the form is for. */
 export const IMMEDIATE_REPORTING: readonly string[] = [
   'Damaged handpieces',
   'Cracked or scratched eyewear',
