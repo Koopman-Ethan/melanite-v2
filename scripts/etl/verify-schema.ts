@@ -19,10 +19,18 @@ import { db } from '../db'
 //
 // "The migrations ran" is not the same claim as "the guarantees are in place". Every check
 // below is a rule the application relies on and cannot enforce by itself — and each one fails
-// silently if it is missing. A booking overlaps and nobody notices until two clients arrive for
-// the same laser; an invoice is recorded twice and revenue is simply wrong. Reading it back
-// from the live database is the only way to know, because a migration that appears in the
-// journal is only evidence that a file was executed.
+// silently if it is missing.
+//
+// A booking overlaps and nobody notices until two clients arrive for the same laser; an invoice
+// is recorded twice and revenue is simply wrong. Reading it back from the live database is the
+// only way to know, because a migration that appears in the journal is only evidence that a file
+// was executed.
+//
+// ONE CHECK LEAVES THE DATABASE: photo storage. It is here rather than in a script of its own
+// because this is the command the deploy runbook already names, and a second thing to remember is
+// a thing that gets forgotten. It SKIPS where there is no token — notably CI, which holds a
+// read-only database role on purpose and must not be handed a write-capable blob token to delete
+// production photographs with. A skip is printed and counted, never reported as a pass.
 //
 // Emptiness is REPORTED, not required, so this is as useful the morning after the load as it is
 // the day before.
@@ -35,6 +43,10 @@ interface Check {
    *  say which object is missing, which is the difference between "go and look" and "go and
    *  fix this one thing at 11pm". */
   run: (q: Sql) => Promise<boolean | string>
+  /** Returns a reason when this environment cannot answer the question at all, which is neither
+   *  a pass nor a failure. Printed as SKIP and counted, because a check that quietly reports `ok`
+   *  when it did not run is worse than not having it. */
+  skipWhen?: () => string | null
 }
 
 type Sql = NeonQueryFunction<false, false>
@@ -206,6 +218,36 @@ const CHECKS: Check[] = [
       return row.n === onDisk
     },
   },
+  {
+    label: 'photo storage answers',
+    because:
+      'a provider reporting a device fault cannot submit without one, so an unconfigured store traps them mid-clinic with no honest way to close out',
+    // NOT a schema check, and the only one here that leaves the database. It earns its place
+    // because it fails the same way everything else in this file does: silently, until somebody
+    // is standing in a treatment room.
+    //
+    // Making the photograph REQUIRED on 2026-09-18 turned this from a soft failure into a hard
+    // one. Before, an unconfigured store meant the photo was politely refused and the close-out
+    // carried on; now `recordEndOfUseChecklist` returns the refusal as an error and the provider
+    // cannot sign off at all — their only way out is to select "No device issues", which records
+    // a falsehood about a machine that has something wrong with it.
+    //
+    // Writes nothing. `list` with a limit proves the token is real and the store is reachable,
+    // which is the pair that actually matters — an env var that is merely PRESENT proves neither.
+    skipWhen: () =>
+      process.env.BLOB_READ_WRITE_TOKEN
+        ? null
+        : 'no BLOB_READ_WRITE_TOKEN here — run this against production with .env.migration to check it',
+    run: async () => {
+      try {
+        const { list } = await import('@vercel/blob')
+        await list({ limit: 1 })
+        return true
+      } catch (err) {
+        return `the store refused the token: ${firstLine(err)}`
+      }
+    },
+  },
 ]
 
 async function main() {
@@ -217,7 +259,16 @@ async function main() {
   console.log(`\nVerifying ${describeDatabase()}  [${env}]\n`)
 
   let failed = 0
+  let skipped = 0
   for (const check of CHECKS) {
+    const skip = check.skipWhen?.() ?? null
+    if (skip) {
+      skipped++
+      console.log(`  SKIP ${check.label}`)
+      console.log(`       ${skip}`)
+      continue
+    }
+
     let pass = false
     let error: string | null = null
     try {
@@ -253,6 +304,14 @@ async function main() {
     console.log(`\n${failed} check(s) failed. Do not load data into this database.\n`)
     process.exit(1)
   }
+  // Said out loud rather than folded into "verified". A skipped check is a question nobody
+  // answered, and the whole argument of this script is that the silent failures are the expensive
+  // ones — printing one as a clean bill of health would make it another.
+  if (skipped > 0) {
+    console.log(`\nSchema verified — but ${skipped} check(s) SKIPPED and NOT run. See above.\n`)
+    return
+  }
+
   console.log(`\nSchema verified.\n`)
 }
 

@@ -44,8 +44,18 @@ export const END_OF_USE_VERSION = '2026-09-17.v3'
  *  Sessions before it have no close-out and nobody could have filed one, so listing them as
  *  exceptions is noise. The same reasoning — and the same mistake already made once — as
  *  `EQUIPMENT_LOG_STARTED_AT`: the equipment page first loaded with sixteen unfixable rows on it,
- *  which is how a page becomes one nobody opens twice. */
-export const END_OF_USE_STARTED_AT = new Date('2026-09-12T00:00:00-06:00')
+ *  which is how a page becomes one nobody opens twice.
+ *
+ *  Midnight Denver on the production ship date, 20 September 2026, chosen by Ethan. Denver is on
+ *  MDT then, hence -06:00 — an hour out either way would include or exclude a real session.
+ *
+ *  ONE CONSTANT FOR TWO ENVIRONMENTS, which is a known limitation rather than an oversight.
+ *  appdev has been running this feature since 18 September and production starts on the 20th, so
+ *  between those dates appdev's exceptions list reads empty even though close-outs are being
+ *  filed there. The fix, when a third environment or a second rollout makes it worth doing, is a
+ *  `platform_settings` column: that table is one row per database, which is exactly the
+ *  distinction a compiled-in date cannot make. */
+export const END_OF_USE_STARTED_AT = new Date('2026-09-20T00:00:00-06:00')
 
 export interface EndOfUseItem {
   /** Stored on the checklist row. Kept stable — changing one rewrites what past providers

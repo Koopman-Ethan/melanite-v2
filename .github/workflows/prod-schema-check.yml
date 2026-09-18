@@ -99,6 +99,13 @@ jobs:
       # Fails the run when a table is missing, a guarantee is absent, or the journal is short
       # of the migrations on disk. The output names the host it checked and never the
       # credentials.
+      #
+      # `db:verify` also checks that photo storage answers, and that check SKIPS here — it needs
+      # `BLOB_READ_WRITE_TOKEN`, and a Vercel blob token is read-write with no read-only variant.
+      # Handing this workflow one would give it the power to delete production photographs, which
+      # is the opposite of the read-only-by-grant posture the header describes. The skip is
+      # printed, not swallowed. It is covered instead by the deploy runbook's
+      # `MELANITE_ENV_FILE=.env.migration npm run db:verify`, which runs with real credentials.
       - name: Verify production schema matches the migrations on disk
         run: npm run db:verify
 
