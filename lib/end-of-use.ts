@@ -46,16 +46,18 @@ export const END_OF_USE_VERSION = '2026-09-17.v3'
  *  `EQUIPMENT_LOG_STARTED_AT`: the equipment page first loaded with sixteen unfixable rows on it,
  *  which is how a page becomes one nobody opens twice.
  *
- *  Midnight Denver on the production ship date, 20 September 2026, chosen by Ethan. Denver is on
- *  MDT then, hence -06:00 — an hour out either way would include or exclude a real session.
+ *  Midnight Denver on the production ship date, 22 September 2026. Ethan chose "from ship day";
+ *  the ship was planned for Sunday the 20th and slipped to the 22nd, so the date followed it —
+ *  left at the 20th, production would have opened with two days of sessions listed as missed
+ *  close-outs that nobody could have filed. Denver is on MDT, hence -06:00.
  *
  *  ONE CONSTANT FOR TWO ENVIRONMENTS, which is a known limitation rather than an oversight.
- *  appdev has been running this feature since 18 September and production starts on the 20th, so
+ *  appdev has been running this feature since 18 September and production starts on the 22nd, so
  *  between those dates appdev's exceptions list reads empty even though close-outs are being
  *  filed there. The fix, when a third environment or a second rollout makes it worth doing, is a
  *  `platform_settings` column: that table is one row per database, which is exactly the
  *  distinction a compiled-in date cannot make. */
-export const END_OF_USE_STARTED_AT = new Date('2026-09-20T00:00:00-06:00')
+export const END_OF_USE_STARTED_AT = new Date('2026-09-22T00:00:00-06:00')
 
 export interface EndOfUseItem {
   /** Stored on the checklist row. Kept stable — changing one rewrites what past providers
