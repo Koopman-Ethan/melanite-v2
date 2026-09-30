@@ -200,6 +200,15 @@ export const ledgerSource = pgEnum('ledger_source', [
    *  reporting that folds the two together cannot answer "how much unspent credit is out
    *  there", which is the only question a never-expiring balance raises. */
   'prepaid',
+  /** What a provider pays Melanite to use the laser for one session, under the rental model that
+   *  replaced the 50/50 split. Provider-paid like `room_rental` and `membership`, so the whole
+   *  amount is `melaniteCut` and `providerPayout` is zero — the check constraint at the bottom of
+   *  `ledgerEntries` enforces that and this row is no exception.
+   *
+   *  Its own source rather than a flavour of `room_rental`, which is a half or full DAY of the
+   *  treatment room at a flat rate. This is one use of one machine, priced per service, and
+   *  folding them together would make "what does the laser earn" unanswerable. */
+  'rental_fee',
 ])
 
 /** Who handed over the money. This is what makes `SUM(melanite_cut)` mean the same thing
@@ -363,6 +372,22 @@ export const providers = pgTable('providers', {
   stripeOnboardingComplete: boolean().notNull().default(false),
   // Stripe Customer for billing the provider (money in, distinct from any client Customer).
   stripeBillingCustomerId: text(),
+
+  /** The card Melanite charges for rental fees, off-session, when a provider books the laser.
+   *
+   *  Deliberately stored here rather than read from the Customer's `invoice_settings` at charge
+   *  time: the same shape `clients.defaultPaymentMethodId` uses, for the same reason — a charge
+   *  should name the instrument it is using rather than depend on remote state that something
+   *  else may have changed. The display fields exist so a provider can see WHICH card is about to
+   *  be charged without a round trip to Stripe.
+   *
+   *  Null means no card on file, which is a refusal: `chargeRentalFee` declines before it reaches
+   *  Stripe rather than booking laser time nobody has paid for. */
+  billingPaymentMethodId: text(),
+  billingCardBrand: text(),
+  billingCardLast4: text(),
+  billingCardExpMonth: integer(),
+  billingCardExpYear: integer(),
 
   medicalDirectorType: medicalDirectorType(),
   medicalDirectorStatus: medicalDirectorStatus().notNull().default('none'),
