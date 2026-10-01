@@ -204,6 +204,15 @@ export const UNPRICED: Readonly<Record<string, string>> = {
 
 const TIER_BY_KEY = new Map(RENTAL_TIERS.map((t) => [t.key, t]))
 
+/** The tier with this key, or null when nothing in the schedule has it.
+ *
+ *  Provider packs store a tier key rather than referencing a row, because the schedule lives in
+ *  code. This is the lookup that turns a stored key back into a fee, and the null it can return is
+ *  what `test/rental-packs.test.ts` exists to keep impossible. */
+export function tierByKey(key: string): RentalTier | null {
+  return TIER_BY_KEY.get(key) ?? null
+}
+
 /** The tier a service falls into, or null when the guide does not price it. */
 export function tierForService(serviceName: string): RentalTier | null {
   const key = SERVICE_TIER[serviceName]

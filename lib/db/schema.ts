@@ -232,6 +232,9 @@ export const ledgerSubjectType = pgEnum('ledger_subject_type', [
   'membership',
   'training_enrollment',
   'prepaid_balance',
+  /** A block of laser sessions a provider pre-bought. The subject is the pack, not any one
+   *  booking, because the money moves once and the sessions are spent later. */
+  'provider_pack',
 ])
 
 export const payoutStatus = pgEnum('payout_status', ['pending', 'paid', 'failed'])
@@ -1077,6 +1080,88 @@ export const prepaidCheckoutLinks = pgTable('prepaid_checkout_links', {
 ])
 
 // ---------------------------------------------------------------------------
+// Laser rental packs
+// ---------------------------------------------------------------------------
+
+/** Sessions a provider has pre-bought at the pack rate, drawn down as they book.
+ *
+ *  The provider-side mirror of `clientPackages`, and deliberately simpler: a client package
+ *  spans several services and snapshots a per-session value for each, because a client buys a
+ *  bundle. A provider buys laser time in one tier at one rate, so the balance is a single pair
+ *  of counters and there is no items table.
+ *
+ *  KEYED BY TIER, NOT BY SERVICE. The fee schedule prices packs per tier, so a Small pack is six
+ *  Small sessions and the provider spends them on underarms or jawline as their week turns out.
+ *  Pricing by tier and then redeeming by service would let someone buy the cheapest service in a
+ *  bracket and spend it on the dearest.
+ *
+ *  `tierKey` is a `RENTAL_TIERS` key and is NOT a foreign key, because the schedule lives in code
+ *  — see the header of `lib/rental-fees.ts` for why. `test/rental-packs.test.ts` asserts every
+ *  stored key still resolves, which is the check a foreign key would have given us. */
+export const providerPacks = pgTable('provider_packs', {
+  id: uuid().primaryKey().defaultRandom(),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  providerId: uuid()
+    .notNull()
+    .references(() => providers.id, { onDelete: 'restrict' }),
+  /** A `RENTAL_TIERS` key, e.g. `lhr_small`. */
+  tierKey: text().notNull(),
+  sessionsTotal: integer().notNull(),
+  sessionsUsed: integer().notNull().default(0),
+  /** What the provider actually paid, snapshotted. Not derived from the schedule, so that
+   *  republishing the guide never rewrites what somebody already bought. Zero is legitimate and
+   *  means comped — see `note`. */
+  amountPaid: money().notNull().default('0.00'),
+  purchasedAt: timestamp({ withTimezone: true }),
+  stripePaymentIntentId: text(),
+  /** Why this pack exists, when the answer is not "they bought it". Required for a comped pack:
+   *  a free balance with nothing recording who granted it or why is indistinguishable from a bug,
+   *  and the cutover creates several of them at once. */
+  note: text(),
+}, (t) => [
+  index().on(t.providerId, t.tierKey),
+  check('provider_packs_sessions_total', sql`${t.sessionsTotal} > 0`),
+  // The real guarantee that a pack cannot be overdrawn. `claimPackSession` picks a row with
+  // `FOR UPDATE` so the count is rechecked under lock, but a pack is a thing of value and the
+  // constraint is what makes overdrawing impossible rather than merely unlikely.
+  check(
+    'provider_packs_sessions_used',
+    sql`${t.sessionsUsed} >= 0 AND ${t.sessionsUsed} <= ${t.sessionsTotal}`,
+  ),
+  check('provider_packs_amount_paid', sql`${t.amountPaid} >= 0`),
+  // A free pack with no explanation. Mirrors the note constraint migration 0030 added for
+  // close-outs, including the `coalesce` — `length(btrim(note)) > 0` is NULL when note is null,
+  // so without it the constraint passes on exactly the row it exists to catch.
+  check(
+    'provider_packs_comped_needs_note',
+    sql`${t.amountPaid} > 0 OR coalesce(length(btrim(${t.note})), 0) > 0`,
+  ),
+])
+
+/** Append-only: one row per pack session spent on a booking.
+ *
+ *  Same shape and same reasoning as `packageRedemptions` — `voidedAt` set means the booking went
+ *  away and the session went back, kept for audit and excluded from balance math. The unique index
+ *  on `bookingId` is what stops one appointment spending two sessions. */
+export const providerPackRedemptions = pgTable('provider_pack_redemptions', {
+  id: uuid().primaryKey().defaultRandom(),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  providerPackId: uuid()
+    .notNull()
+    .references(() => providerPacks.id, { onDelete: 'cascade' }),
+  bookingId: uuid()
+    .notNull()
+    .references(() => bookings.id, { onDelete: 'restrict' }),
+  /** Which session of the pack this was, 1-based — "session 4 of 6". */
+  sessionIndex: integer().notNull(),
+  redeemedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  voidedAt: timestamp({ withTimezone: true }),
+}, (t) => [
+  index().on(t.providerPackId),
+  uniqueIndex().on(t.bookingId),
+])
+
+// ---------------------------------------------------------------------------
 // Memberships
 // ---------------------------------------------------------------------------
 
@@ -1373,6 +1458,7 @@ export const providersRelations = relations(providers, ({ one, many }) => ({
   packageTemplates: many(packageTemplates),
   memberships: many(memberships),
   roomBookings: many(roomBookings),
+  providerPacks: many(providerPacks),
   documents: many(documents),
 }))
 
@@ -1506,6 +1592,22 @@ export const prepaidCheckoutLinksRelations = relations(prepaidCheckoutLinks, ({ 
 
 export const membershipsRelations = relations(memberships, ({ one }) => ({
   provider: one(providers, { fields: [memberships.providerId], references: [providers.id] }),
+}))
+
+export const providerPacksRelations = relations(providerPacks, ({ one, many }) => ({
+  provider: one(providers, { fields: [providerPacks.providerId], references: [providers.id] }),
+  redemptions: many(providerPackRedemptions),
+}))
+
+export const providerPackRedemptionsRelations = relations(providerPackRedemptions, ({ one }) => ({
+  pack: one(providerPacks, {
+    fields: [providerPackRedemptions.providerPackId],
+    references: [providerPacks.id],
+  }),
+  booking: one(bookings, {
+    fields: [providerPackRedemptions.bookingId],
+    references: [bookings.id],
+  }),
 }))
 
 export const roomBookingsRelations = relations(roomBookings, ({ one }) => ({
