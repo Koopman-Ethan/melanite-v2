@@ -7,7 +7,7 @@ import {
   getAppointmentCounts,
   getAppointments,
   getBookedMonths,
-  getBookingLink,
+  getRentalBookingSummary,
   getProviderServiceOptions,
   type Appointment,
   type AppointmentStatus,
@@ -19,7 +19,7 @@ import { closeoutWindowOpen } from '@/lib/end-of-use'
 
 import { EndOfUseChecklist } from './end-of-use-checklist'
 import { PaymentLink } from './payment-link'
-import { BookedBanner } from './booked-banner'
+import { RentalBookedBanner } from './booked-banner'
 import { Filters } from './filters'
 
 export const metadata: Metadata = { title: 'Appointments · Melanite' }
@@ -45,6 +45,9 @@ const PAYMENT_LABELS: Record<Appointment['paymentSource'], string> = {
   package_redemption: 'Package session',
   prepaid: 'Prepaid balance',
   comped: 'Comped',
+  // Not "unpaid". The provider paid Melanite rent for the slot; what their client paid them is
+  // not something this app knows or shows.
+  rental: 'Laser rental',
 }
 
 const usd = (v: string) => Number(v).toLocaleString('en-US', { style: 'currency', currency: 'USD' })
@@ -239,7 +242,9 @@ export default async function AppointmentsPage({
   ])
 
   // Only after a booking, and only for a booking that belongs to this provider.
-  const justBooked = params.booked ? await getBookingLink(params.booked, user.id) : null
+  const justBooked = params.booked
+    ? await getRentalBookingSummary(params.booked, user.id)
+    : null
 
   return (
     <main className="mx-auto w-full max-w-4xl px-6 py-10 space-y-6">
@@ -251,11 +256,18 @@ export default async function AppointmentsPage({
       </header>
 
       {justBooked && (
-        <BookedBanner
-          url={`${await appOrigin()}/pay/${justBooked.token}`}
-          clientName={justBooked.clientName}
-          clientEmail={justBooked.clientEmail}
-          emailed={params.emailed === '1'}
+        <RentalBookedBanner
+          serviceName={justBooked.serviceName}
+          when={justBooked.startTime.toLocaleString('en-US', {
+            weekday: 'long',
+            month: 'long',
+            day: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+            timeZone: 'America/Denver',
+          })}
+          chargedCents={justBooked.chargedCents}
+          packSession={justBooked.packSession}
         />
       )}
 

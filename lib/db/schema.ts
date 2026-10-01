@@ -126,6 +126,11 @@ export const bookingPaymentSource = pgEnum('booking_payment_source', [
    *  `bookings.externalMethod`, because the route and the method are different questions and
    *  v1 could answer neither: four of its five real appointments have money nobody recorded. */
   'external',
+  /** The rental model. The provider bills their own client on their own system and pays Melanite
+   *  rent for the laser, so there is NO client payment here at all and nothing for this app to
+   *  collect. `price` is zero and the client columns are empty — not unknown, absent — and
+   *  `bookings_rental_has_no_client` makes that a guarantee rather than a convention. */
+  'rental',
 ])
 
 export const checkoutLinkStatus = pgEnum('checkout_link_status', [
@@ -611,9 +616,13 @@ export const bookings = pgTable('bookings', {
 
   /** Nullable so ETL and walk-ins are never blocked on resolving an identity. */
   clientId: uuid().references(() => clients.id, { onDelete: 'set null' }),
-  // Point-in-time snapshot of who attended. Not a cache of `clients` — the name on the
-  // appointment record should not change because someone later edited a client row.
-  clientName: text().notNull(),
+  /** Point-in-time snapshot of who attended. Not a cache of `clients` — the name on the
+   *  appointment record should not change because someone later edited a client row.
+   *
+   *  NULLABLE since the rental model: Melanite no longer knows who the client is, because the
+   *  provider books laser time and bills their own client themselves. Historic bookings keep the
+   *  names they were made with; a rental booking has none to keep. */
+  clientName: text(),
   clientPhone: text(),
   clientEmail: text(),
 
@@ -662,6 +671,22 @@ export const bookings = pgTable('bookings', {
   index().on(t.status),
   index().on(t.clientId),
   check('bookings_time_order', sql`${t.endTime} > ${t.startTime}`),
+  // Under the rental model Melanite deliberately holds no client record — Keoni's reason for
+  // the whole change was that her name on a stranger's receipt confuses them. "We do not store
+  // it" is a promise, so it is enforced here rather than left to whichever form happens to be
+  // posting. A column quietly populated by a later code path would break the promise silently.
+  check(
+    'bookings_rental_has_no_client',
+    sql`${t.paymentSource} <> 'rental' OR (${t.clientId} IS NULL AND ${t.clientName} IS NULL
+        AND ${t.clientPhone} IS NULL AND ${t.clientEmail} IS NULL)`,
+  ),
+  // And no client price. Melanite does not know what the provider charged and must not appear
+  // to: a figure here would be read as revenue by every report that sums this column.
+  check(
+    'bookings_rental_has_no_price',
+    sql`${t.paymentSource} <> 'rental' OR (${t.price} = 0 AND ${t.originalPrice} = 0
+        AND ${t.discountType} = 'none')`,
+  ),
 ])
 
 /** Token-authenticated public checkout, 1:1 with a booking. */

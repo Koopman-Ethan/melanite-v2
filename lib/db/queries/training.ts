@@ -2,6 +2,7 @@ import 'server-only'
 
 import { and, asc, desc, eq, gt, gte, inArray, isNotNull, lt, sql } from 'drizzle-orm'
 
+import { clientLabel } from '@/lib/booking-labels'
 import { db } from '@/lib/db'
 import { denverInstant } from '@/lib/db/queries/availability'
 import { bookings, providers, trainingCourses, trainingEnrollments } from '@/lib/db/schema'
@@ -456,7 +457,7 @@ export async function bookingsDuringCourse(input: {
       )
       .orderBy(asc(bookings.startTime))
 
-    found.push(...rows)
+    found.push(...rows.map((r) => ({ ...r, clientName: clientLabel(r.clientName) })))
   }
 
   return found

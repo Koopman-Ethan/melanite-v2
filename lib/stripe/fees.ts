@@ -2,6 +2,7 @@ import 'server-only'
 
 import { and, eq, inArray } from 'drizzle-orm'
 
+import { clientLabel } from '@/lib/booking-labels'
 import { db } from '@/lib/db'
 import { getClientCard } from '@/lib/db/queries/checkout'
 import {
@@ -273,7 +274,7 @@ export async function chargeBookingFee(bookingId: string, kind: FeeKind): Promis
       await sendEmail({
         to: booking.clientEmail,
         ...feeChargedEmail({
-          clientName: booking.clientName,
+          clientName: clientLabel(booking.clientName),
           providerName: `${provider?.firstName ?? 'your provider'} ${provider?.lastName ?? ''}`.trim(),
           reason: kind,
           amount: `$${toMoney(amountCents)}`,

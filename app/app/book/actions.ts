@@ -1,7 +1,5 @@
 'use server'
 
-import { randomBytes } from 'node:crypto'
-
 import { and, eq, sql } from 'drizzle-orm'
 import { redirect } from 'next/navigation'
 
@@ -9,23 +7,44 @@ import { canBook, bookingBlockedReasons, requireProvider } from '@/lib/auth/dal'
 import { denverInstant, getLaserHours, overlapsTrainingCourse } from '@/lib/db/queries/availability'
 import { db } from '@/lib/db'
 import { isExclusionViolation } from '@/lib/db/errors'
-import { providerServices, services } from '@/lib/db/schema'
-import { bookingPaymentLinkEmail, sendEmail } from '@/lib/email'
+import { bookings, providerServices, providers, services } from '@/lib/db/schema'
 import { notifyMelaniteBooked } from '@/lib/notify-melanite'
-import { appOrigin } from '@/lib/stripe/config'
-import { isValidEmail, isValidPhone } from '@/lib/validation'
+import { chargeRentalFee } from '@/lib/rental/charge'
+import {
+  claimPackSession,
+  recordPackRedemption,
+  releasePackSession,
+  type PackClaim,
+} from '@/lib/rental/packs'
+import { rentalFeeFor } from '@/lib/rental-fees'
 
 export interface BookState {
   error?: string
 }
 
-const CHECKOUT_LINK_TTL_DAYS = 7
-
-/** Create a booking and its checkout link.
+/** Reserve the laser, and pay Melanite rent for it.
  *
- *  v1 calls this "the critical atomic write". The ordering is the point: every gate and
- *  validation first, then a collision check that is part of the write itself rather than a
- *  step before it. See the statement below for how that is done here.
+ *  Under the rental model this app does not know who the client is, what they are being charged,
+ *  or whether they have paid. The provider runs their own business; Melanite rents out one
+ *  machine. So the booking carries a provider, a service and a block of time, and the only money
+ *  in it is the rental fee — charged to the provider, by Melanite, immediately.
+ *
+ *  THE ORDER HERE IS THE DESIGN. Two things can fail and they must fail in this order:
+ *
+ *    1. The slot. One laser, one appointment — `bookings_no_overlap` is the guarantee and it can
+ *       only arbitrate once a row exists. So the slot is claimed FIRST.
+ *    2. The card. Ethan's rule is that a declined card fails the booking, so the charge follows
+ *       immediately and the booking is deleted if it does not go through.
+ *
+ *  Charging before inserting would invert both: money taken for a slot somebody else won a
+ *  millisecond earlier, then refunded. Taking the slot first means the only cost of a decline is
+ *  a row that existed for a few hundred milliseconds.
+ *
+ *  The window this leaves is a crash between the insert and the charge, which would leave an
+ *  appointment nobody was billed for. That cannot be closed without a transaction the driver does
+ *  not have, so it is detected instead — `unchargedRentalBookings()` in `lib/rental/charge.ts`
+ *  finds them, and re-running the charge is safe because the Stripe idempotency key is the
+ *  booking's own id.
  */
 export async function createBooking(_prev: BookState, formData: FormData): Promise<BookState> {
   const user = await requireProvider()
@@ -41,69 +60,25 @@ export async function createBooking(_prev: BookState, formData: FormData): Promi
 
   const providerServiceId = String(formData.get('providerServiceId') ?? '')
   const startTimeRaw = String(formData.get('startTime') ?? '')
-  const clientName = String(formData.get('clientName') ?? '').trim()
-  const clientPhone = String(formData.get('clientPhone') ?? '').trim() || null
-  const clientEmail = String(formData.get('clientEmail') ?? '').trim().toLowerCase() || null
   const treatmentArea = String(formData.get('treatmentArea') ?? '').trim() || null
   const notes = String(formData.get('notes') ?? '').trim() || null
-  // Both optional, both validated when present. A client email with a typo is worse than a
-  // blank one: the payment link is generated, sent, and silently reaches nobody, while the
-  // booking sits looking as though the client was contacted.
-  if (clientEmail && !isValidEmail(clientEmail)) {
-    return { error: 'That client email doesn’t look right. Check it, or leave it blank.' }
-  }
-  if (clientPhone && !isValidPhone(clientPhone)) {
-    return { error: 'That client phone number doesn’t look right. Check it, or leave it blank.' }
-  }
-
-  const discountTypeRaw = String(formData.get('discountType') ?? 'none')
-  const discountValue = Number(formData.get('discountValue') ?? 0)
-
-  // How the client is paying. Empty means the normal route: a checkout link, emailed.
-  //
-  // Anything else means the money arrives outside this app — a Groupon voucher, a Cherry plan,
-  // cash, a card in person — and generating a payment link for it would be worse than useless:
-  // the provider has to remember not to send it, and the client might pay twice.
-  const externalMethodRaw = String(formData.get('externalMethod') ?? '').trim()
-
-  if (!clientName) return { error: 'Enter the client’s name.' }
-
-  const EXTERNAL_METHODS = ['groupon', 'cherry', 'cash', 'check', 'other'] as const
-  type ExternalMethod = (typeof EXTERNAL_METHODS)[number]
-
-  if (externalMethodRaw && !EXTERNAL_METHODS.includes(externalMethodRaw as ExternalMethod)) {
-    return { error: 'That is not a payment method we can record.' }
-  }
-  const externalMethod = (externalMethodRaw || null) as ExternalMethod | null
 
   if (!providerServiceId) return { error: 'Choose a service.' }
   if (!startTimeRaw) return { error: 'Choose a time.' }
-  if (!['none', 'percent', 'amount'].includes(discountTypeRaw)) {
-    return { error: 'That discount type is not valid.' }
-  }
-  const discountType = discountTypeRaw as 'none' | 'percent' | 'amount'
-
-  if (discountType !== 'none') {
-    if (!Number.isFinite(discountValue) || discountValue <= 0) {
-      return { error: 'Enter a discount greater than zero, or choose no discount.' }
-    }
-    // v1 capped percentages below 100. The same intent applies to a flat amount, but the
-    // ceiling depends on the price, so it is checked once the service is known.
-    if (discountType === 'percent' && discountValue >= 100) {
-      return { error: 'A percentage discount must be under 100%.' }
-    }
-  }
 
   const startTime = new Date(startTimeRaw)
   if (Number.isNaN(startTime.getTime())) return { error: 'That time is not valid.' }
   if (startTime <= new Date()) return { error: 'Choose a time in the future.' }
 
   // The service must exist, belong to the caller, be switched on by them, and still be offered
-  // platform-wide. v1 checked all four; they fail for different reasons and all of them mean
-  // the booking must not happen.
+  // platform-wide. They fail for different reasons and all of them mean the booking must not
+  // happen.
+  //
+  // `providerServices.price` is deliberately not read. It is what the provider charges their own
+  // client, which is now none of Melanite's business; the column survives until the client
+  // payment code is removed, and reading it here would quietly make it matter again.
   const [svc] = await db
     .select({
-      price: providerServices.price,
       durationMins: providerServices.durationMins,
       minDurationMins: services.minDurationMins,
       maxDurationMins: services.maxDurationMins,
@@ -122,9 +97,39 @@ export async function createBooking(_prev: BookState, formData: FormData): Promi
     .limit(1)
 
   if (!svc) return { error: 'That service is not available on your profile.' }
-  if (Number(svc.price) <= 0) return { error: 'That service has no price set.' }
   if (svc.durationMins < svc.minDurationMins || svc.durationMins > svc.maxDurationMins) {
     return { error: 'That service’s configured duration is outside its allowed range.' }
+  }
+
+  const [provider] = await db
+    .select({
+      revenueModel: providers.revenueModel,
+      customerId: providers.stripeBillingCustomerId,
+      paymentMethodId: providers.billingPaymentMethodId,
+    })
+    .from(providers)
+    .where(eq(providers.id, user.id))
+    .limit(1)
+
+  // Melanite treating Melanite's own client. There is no rent to pay yourself.
+  const payingRent = provider?.revenueModel !== 'house'
+
+  const feeCents = rentalFeeFor(svc.name)
+  if (payingRent && feeCents === null) {
+    // A service nobody has set a rental fee for. Refusing is the whole point: letting it through
+    // would be a free session, and a free session is not discovered until the month's takings are
+    // short. See UNPRICED in lib/rental-fees.ts for what each one is waiting on.
+    return {
+      error: `${svc.name} has no rental fee set yet, so it can’t be booked. Ask Keoni to price it.`,
+    }
+  }
+
+  // Checked before the slot is taken rather than after. The charge checks this too, but finding
+  // out here costs nobody an appointment that gets created and deleted.
+  if (payingRent && (!provider?.customerId || !provider?.paymentMethodId)) {
+    return {
+      error: 'Add a card before booking — Melanite charges the rental fee when you reserve the laser.',
+    }
   }
 
   const endTime = new Date(startTime.getTime() + svc.durationMins * 60_000)
@@ -138,99 +143,45 @@ export async function createBooking(_prev: BookState, formData: FormData): Promi
     return { error: 'That time is outside laser operating hours.' }
   }
 
-  const originalPrice = Number(svc.price)
-
-  // Computed in cents so a percentage discount cannot land a fraction of a penny off — the
-  // same reasoning as the package builder's total check.
-  const originalCents = Math.round(originalPrice * 100)
-  const discountCents =
-    discountType === 'percent'
-      ? Math.round(originalCents * (discountValue / 100))
-      : discountType === 'amount'
-        ? Math.round(discountValue * 100)
-        : 0
-
-  // A discount may not exceed the price. Comping an appointment is a different thing with a
-  // different payment source, so this refuses rather than clamping to zero — silently turning
-  // an over-discount into a free session would misprice it and hide the mistake.
-  if (discountCents > originalCents) {
-    return {
-      error: `That discount is more than the ${originalPrice.toFixed(2)} price. Use a smaller amount.`,
-    }
-  }
-  if (discountCents === originalCents) {
-    return { error: 'That would make the appointment free. Book it as comped instead.' }
-  }
-
-  const price = (originalCents - discountCents) / 100
-
-  // Checked here rather than with the other validation, because the price is only known once
-  // the service and discount have been resolved.
-  //
-  // For an external payment this figure is the whole point: it is what Keoni invoices a share
-  // of. A Groupon booking recorded at $0 tells her to collect half of nothing.
-  if (externalMethod && !(price > 0)) {
-    return { error: 'Enter what the client is paying — Melanite needs it to work out the split.' }
-  }
-
   const bookingId = crypto.randomUUID()
-  const token = randomBytes(24).toString('base64url')
-  const expiresAt = new Date(Date.now() + CHECKOUT_LINK_TTL_DAYS * 24 * 60 * 60 * 1000)
 
-  // One statement, so the booking and its checkout link are written together or not at all.
+  // The pack session is claimed HERE, after every validation and immediately before the write.
   //
-  // A transaction wrapper would not do here: the neon-http driver is non-interactive, so it
-  // cannot branch on a result mid-transaction. The CTE solves that — the link is inserted from
-  // the booking's output, so it can only exist if the booking does.
-  //
-  // The NOT EXISTS is the FRIENDLY check, not the guarantee. It is what turns the common case
-  // into a readable message instead of a database error. It is not a lock: under READ COMMITTED
+  // Claiming late matters as much as claiming atomically: every `return { error }` above is a
+  // path where nothing was booked, and a session claimed before one of them is a session the
+  // provider paid for and lost to a mistyped time. The same lesson as the client-package path,
+  // which learned it the expensive way.
+  let claim: PackClaim | null = null
+  if (payingRent) {
+    claim = await claimPackSession(user.id, svc.name)
+  }
+
+  /** Hands the claimed session back. Must run on every path between here and the redirect that
+   *  does not end in a booking. */
+  const releaseClaim = async () => {
+    if (claim) await releasePackSession(claim)
+  }
+
+  // One statement. The NOT EXISTS is the FRIENDLY check, not the guarantee: under READ COMMITTED
   // two concurrent statements each evaluate it against a snapshot that cannot see the other's
   // uncommitted row, so both find the slot free and both insert. The real guarantee is the
-  // `bookings_no_overlap` EXCLUDE constraint (migration 0013), which is why the insert is
-  // wrapped below — a violation there means somebody won the race, not that anything is broken.
+  // `bookings_no_overlap` EXCLUDE constraint (migration 0013) — a violation there means somebody
+  // won the race, not that anything is broken.
+  //
+  // No client columns and no price: `bookings_rental_has_no_client` and
+  // `bookings_rental_has_no_price` make that a database guarantee rather than a habit of this
+  // one function.
   let booked
   try {
-    // Two shapes, one query each. An external payment gets NO checkout link — the CTE that
-    // creates one is simply not there, rather than a link being written and then ignored.
-    // A payment page for money that has already changed hands is how a client pays twice.
-    booked = externalMethod
-      ? await db.execute(sql`
-          INSERT INTO bookings
-            (id, provider_id, provider_service_id, client_name, client_phone, client_email,
-             treatment_area, notes, original_price, discount_type, discount_value, price,
-             payment_source, external_method, duration_mins, start_time, end_time, status)
-          SELECT ${bookingId}::uuid, ${user.id}::uuid, ${providerServiceId}::uuid, ${clientName},
-                 ${clientPhone}, ${clientEmail}, ${treatmentArea}, ${notes},
-                 ${originalPrice.toFixed(2)}::numeric, ${discountType}::discount_type,
-                 ${discountValue.toFixed(2)}::numeric, ${price.toFixed(2)}::numeric,
-                 'external'::booking_payment_source, ${externalMethod}::payment_method,
-                 ${svc.durationMins}, ${startTime.toISOString()}::timestamptz,
-                 ${endTime.toISOString()}::timestamptz, 'upcoming'::booking_status
-          WHERE NOT EXISTS (
-            SELECT 1 FROM bookings b
-            WHERE b.status IN ('upcoming', 'completed')
-              AND b.start_time < ${endTime.toISOString()}::timestamptz
-              AND b.end_time   > ${startTime.toISOString()}::timestamptz
-          )
-          -- ...and not inside a training course. Same statement as the booking check on
-          -- purpose: two separate reads could each pass against a different snapshot.
-          AND NOT ${overlapsTrainingCourse(startTime.toISOString(), endTime.toISOString())}
-          RETURNING id AS booking_id
-        `)
-      : await db.execute(sql`
-    WITH new_booking AS (
+    booked = await db.execute(sql`
       INSERT INTO bookings
-        (id, provider_id, provider_service_id, client_name, client_phone, client_email,
-         treatment_area, notes, original_price, discount_type, discount_value, price,
-         payment_source, duration_mins, start_time, end_time, status)
-      SELECT ${bookingId}::uuid, ${user.id}::uuid, ${providerServiceId}::uuid, ${clientName},
-             ${clientPhone}, ${clientEmail}, ${treatmentArea}, ${notes},
-             ${originalPrice.toFixed(2)}::numeric, ${discountType}::discount_type,
-             ${discountValue.toFixed(2)}::numeric, ${price.toFixed(2)}::numeric,
-             'checkout_link'::booking_payment_source,
-             ${svc.durationMins}, ${startTime.toISOString()}::timestamptz,
-             ${endTime.toISOString()}::timestamptz, 'upcoming'::booking_status
+        (id, provider_id, provider_service_id, treatment_area, notes,
+         original_price, price, payment_source, duration_mins, start_time, end_time, status)
+      SELECT ${bookingId}::uuid, ${user.id}::uuid, ${providerServiceId}::uuid,
+             ${treatmentArea}, ${notes}, '0.00'::numeric, '0.00'::numeric,
+             'rental'::booking_payment_source, ${svc.durationMins},
+             ${startTime.toISOString()}::timestamptz, ${endTime.toISOString()}::timestamptz,
+             'upcoming'::booking_status
       WHERE NOT EXISTS (
         SELECT 1 FROM bookings b
         WHERE b.status IN ('upcoming', 'completed')
@@ -241,13 +192,9 @@ export async function createBooking(_prev: BookState, formData: FormData): Promi
       -- purpose: two separate reads could each pass against a different snapshot.
       AND NOT ${overlapsTrainingCourse(startTime.toISOString(), endTime.toISOString())}
       RETURNING id
-    )
-    INSERT INTO checkout_links (booking_id, token, status, expires_at)
-    SELECT id, ${token}, 'pending'::checkout_link_status, ${expiresAt.toISOString()}::timestamptz
-    FROM new_booking
-    RETURNING booking_id
-  `)
+    `)
   } catch (err) {
+    await releaseClaim()
     // 23P01 — exclusion_violation. The other side of the race committed first, which is the
     // constraint doing exactly its job. Anything else is a real failure and should surface.
     if (isExclusionViolation(err)) {
@@ -257,52 +204,34 @@ export async function createBooking(_prev: BookState, formData: FormData): Promi
   }
 
   if ((booked.rows?.length ?? 0) === 0) {
+    await releaseClaim()
     return { error: 'Someone just booked that slot. Pick another time.' }
   }
 
-  // Melanite hears about every appointment the moment it takes the laser, whatever the client
-  // is or is not told next. Best effort, like every send here.
-  await notifyMelaniteBooked(bookingId)
+  if (claim) {
+    // A pack session covers the fee, so no card is touched. Recorded against the booking so
+    // cancelling it can give the session back — and so that one appointment cannot spend two.
+    await recordPackRedemption(claim, bookingId)
+  } else if (payingRent) {
+    const charged = await chargeRentalFee(bookingId)
 
-  // Send the link the moment it exists. Until now it was created and shown to nobody — the
-  // provider had no way to get it to the client, which makes the whole checkout flow
-  // unreachable in practice.
-  //
-  // Best effort by design: a booking that succeeded must not be reported as failed because an
-  // email bounced, and the link is displayed on the next screen either way.
-  // No link exists for an external payment, so there is nothing to send. Emailing "here is
-  // your payment link" to somebody who already handed over a Groupon voucher is the fastest
-  // way to be paid twice and have to refund one.
-  let emailed = false
-  if (clientEmail && !externalMethod) {
-    try {
-      const result = await sendEmail({
-        to: clientEmail,
-        ...bookingPaymentLinkEmail({
-          clientName,
-          providerName: `${user.firstName} ${user.lastName}`,
-          serviceName: svc.name,
-          when: startTime.toLocaleString('en-US', {
-            weekday: 'long',
-            month: 'long',
-            day: 'numeric',
-            hour: 'numeric',
-            minute: '2-digit',
-            timeZone: 'America/Denver',
-          }),
-          amount: `$${price.toFixed(2)}`,
-          url: `${await appOrigin()}/pay/${token}`,
-        }),
-      })
-      emailed = result.delivered
-    } catch (err) {
-      console.error('[email] booking payment link failed', err)
+    if ('error' in charged) {
+      // Ethan's rule: a declined card fails the booking. The slot goes back rather than being
+      // held against a fee nobody paid — on a single shared laser an unpaid reservation is a
+      // slot removed from everybody else for nothing.
+      //
+      // Deleting rather than cancelling, because this appointment never really existed: it was a
+      // row held for the few hundred milliseconds the charge took. A cancelled booking in the
+      // provider's history would be a record of something that did not happen.
+      await db.delete(bookings).where(eq(bookings.id, bookingId))
+      return { error: charged.error }
     }
   }
 
-  redirect(
-    externalMethod
-      ? `/app/appointments?booked=${bookingId}&external=${externalMethod}`
-      : `/app/appointments?booked=${bookingId}&emailed=${emailed ? '1' : '0'}`,
-  )
+  // Melanite hears about every appointment the moment it takes the laser. Best effort, like
+  // every send here — a booking that succeeded and was paid for must not report failure because
+  // an email bounced.
+  await notifyMelaniteBooked(bookingId)
+
+  redirect(`/app/appointments?booked=${bookingId}`)
 }

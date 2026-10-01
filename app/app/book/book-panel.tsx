@@ -2,7 +2,7 @@
 
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 
-import { BookForm, type ServiceView, type SlotView } from './book-form'
+import { BookForm, type PackView, type ServiceView, type SlotView } from './book-form'
 import type { DayView } from './month-calendar'
 
 /** Holds the service/date/month selection in the URL and lets the server recompute
@@ -21,6 +21,9 @@ export function BookPanel({
   month,
   today,
   days,
+  packs,
+  payingRent,
+  cardLast4,
 }: {
   services: ServiceView[]
   slots: SlotView[]
@@ -29,6 +32,9 @@ export function BookPanel({
   month: string
   today: string
   days: DayView[]
+  packs: PackView[]
+  payingRent: boolean
+  cardLast4: string | null
 }) {
   const router = useRouter()
   const pathname = usePathname()
@@ -49,6 +55,9 @@ export function BookPanel({
       month={month}
       today={today}
       days={days}
+      packs={packs}
+      payingRent={payingRent}
+      cardLast4={cardLast4}
       onServiceChange={(id) => set({ service: id })}
       // Picking a day keeps the calendar on that day's month, so the two can never disagree.
       onDateChange={(d) => set({ date: d, month: d.slice(0, 7) })}

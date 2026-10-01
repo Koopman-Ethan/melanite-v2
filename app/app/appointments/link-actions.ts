@@ -5,6 +5,7 @@ import { randomBytes } from 'node:crypto'
 import { and, eq } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 
+import { clientLabel } from '@/lib/booking-labels'
 import { requireProvider } from '@/lib/auth/dal'
 import { db } from '@/lib/db'
 import { bookings, checkoutLinks, providerServices, services } from '@/lib/db/schema'
@@ -80,7 +81,7 @@ export async function resendBookingLink(bookingId: string): Promise<LinkState> {
   const result = await sendEmail({
     to: booking.clientEmail,
     ...bookingPaymentLinkEmail({
-      clientName: booking.clientName,
+      clientName: clientLabel(booking.clientName),
       providerName: `${user.firstName} ${user.lastName}`,
       serviceName: booking.serviceName,
       when: appointmentWhen(booking.startTime),
@@ -142,7 +143,7 @@ export async function reissueBookingLink(bookingId: string): Promise<LinkState> 
   const result = await sendEmail({
     to: booking.clientEmail,
     ...bookingPaymentLinkEmail({
-      clientName: booking.clientName,
+      clientName: clientLabel(booking.clientName),
       providerName: `${user.firstName} ${user.lastName}`,
       serviceName: booking.serviceName,
       when: appointmentWhen(booking.startTime),

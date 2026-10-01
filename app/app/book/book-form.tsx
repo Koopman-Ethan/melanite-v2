@@ -1,11 +1,11 @@
 'use client'
 
+import Link from 'next/link'
 import { useActionState, useState } from 'react'
 import { useFormStatus } from 'react-dom'
 
 import { Button } from '@/components/ui/button'
 import { Field, Notice } from '@/components/ui/field'
-import { EmailField, PhoneField } from '@/components/ui/validated-field'
 import { cn } from '@/lib/cn'
 import { groupByCategory } from '@/lib/service-groups'
 
@@ -22,8 +22,18 @@ export interface ServiceView {
   providerServiceId: string
   category: string | null
   name: string
-  price: string
   durationMins: number
+  /** What Melanite charges for the slot, in cents. Null means no published fee, which is a
+   *  refusal rather than a free session — the form blocks it the same way the action does. */
+  rentalFeeCents: number | null
+  /** Which rental tier it falls in, for matching against a pack the provider is holding. */
+  tierKey: string | null
+}
+
+export interface PackView {
+  tierKey: string
+  label: string
+  sessionsRemaining: number
 }
 
 const time = (iso: string) =>
@@ -33,8 +43,8 @@ const time = (iso: string) =>
     timeZone: 'America/Denver',
   })
 
-const usd = (v: string | number) =>
-  Number(v).toLocaleString('en-US', { style: 'currency', currency: 'USD' })
+const usd = (cents: number) =>
+  (cents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })
 
 /** Built from the date parts as UTC, not parsed as an instant — `new Date('2026-07-27')` is
  *  midnight UTC, which is the 26th in Denver. */
@@ -48,15 +58,27 @@ const dayHeading = (date: string) => {
   })
 }
 
-function SubmitButton({ disabled }: { disabled: boolean }) {
+function SubmitButton({ disabled, label }: { disabled: boolean; label: string }) {
   const { pending } = useFormStatus()
   return (
     <Button type="submit" block disabled={disabled || pending}>
-      {pending ? 'Booking…' : 'Book appointment'}
+      {pending ? 'Booking…' : label}
     </Button>
   )
 }
 
+/** Reserving the laser.
+ *
+ *  This used to be a client-booking form: who is coming, what they are paying, how they are
+ *  paying it. None of that is Melanite's business any more — the provider bills their own
+ *  client on their own system — so the form asks only what the platform actually needs: which
+ *  service, when, and anything the provider wants recorded against the slot.
+ *
+ *  What replaced the price section is the one thing the provider needs to agree to before
+ *  pressing the button: the rental fee comes off their card the moment they book, and a decline
+ *  means no booking. Showing it at the point of commitment is the difference between a fee and
+ *  a surprise.
+ */
 export function BookForm({
   services,
   slots,
@@ -68,6 +90,9 @@ export function BookForm({
   month,
   today,
   days,
+  packs,
+  payingRent,
+  cardLast4,
 }: {
   services: ServiceView[]
   slots: SlotView[]
@@ -79,25 +104,23 @@ export function BookForm({
   month: string
   today: string
   days: DayView[]
+  packs: PackView[]
+  payingRent: boolean
+  cardLast4: string | null
 }) {
   const [state, formAction] = useActionState<BookState, FormData>(createBooking, {})
   const [selectedSlot, setSelectedSlot] = useState<string>('')
-  const [externalMethod, setExternalMethod] = useState<'' | 'groupon' | 'cash' | 'check' | 'other'>('')
-  const [discountType, setDiscountType] = useState<'none' | 'percent' | 'amount'>('none')
-  const [discountValue, setDiscountValue] = useState(0)
 
   const service = services.find((s) => s.providerServiceId === selectedServiceId)
   const openSlots = slots.filter((s) => s.available)
-  // Mirrors the server's cents arithmetic so the figure shown is the figure charged.
-  const originalCents = service ? Math.round(Number(service.price) * 100) : 0
-  const discountCents =
-    discountType === 'percent'
-      ? Math.round(originalCents * (discountValue / 100))
-      : discountType === 'amount'
-        ? Math.round(discountValue * 100)
-        : 0
-  const overDiscounted = discountCents >= originalCents && discountType !== 'none'
-  const price = Math.max(originalCents - discountCents, 0) / 100
+
+  // A pack in the same tier covers this booking, and the one with sessions left is spent first.
+  const pack = service?.tierKey
+    ? packs.find((p) => p.tierKey === service.tierKey && p.sessionsRemaining > 0)
+    : undefined
+
+  const unpriced = payingRent && service?.rentalFeeCents === null
+  const needsCard = payingRent && !pack && !cardLast4
 
   return (
     <form action={formAction} className="space-y-6">
@@ -118,7 +141,8 @@ export function BookForm({
           {groupByCategory(services).map((group) => {
             const options = group.items.map((s) => (
               <option key={s.providerServiceId} value={s.providerServiceId}>
-                {s.name} — {usd(s.price)} · {s.durationMins} min
+                {s.name} · {s.durationMins} min
+                {s.rentalFeeCents !== null ? ` · ${usd(s.rentalFeeCents)} rental` : ' · no fee set'}
               </option>
             ))
             return group.category ? (
@@ -196,14 +220,12 @@ export function BookForm({
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">Client</h2>
-        <Field id="clientName" name="clientName" label="Name" required />
-        <div className="grid gap-3 sm:grid-cols-2">
-          {/* Optional, but validated when filled — a client email with a typo is worse than
-              a blank one, because the payment link silently reaches nobody. */}
-          <PhoneField id="clientPhone" name="clientPhone" label="Phone" optional />
-          <EmailField id="clientEmail" name="clientEmail" label="Email" optional />
-        </div>
+        <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">
+          Your notes
+        </h2>
+        {/* The only two things left that are about the appointment rather than the equipment.
+            Both are the provider's own record — Melanite does not read them and there is no
+            client here to attach them to. */}
         <Field
           id="treatmentArea"
           name="treatmentArea"
@@ -213,134 +235,62 @@ export function BookForm({
         <Field id="notes" name="notes" label="Notes" hint="Optional, visible only to you" />
       </section>
 
-      <section className="space-y-3">
-        <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">Price</h2>
+      {payingRent && (
+        <section className="space-y-3">
+          <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">
+            Equipment rental
+          </h2>
 
-        <input type="hidden" name="discountType" value={discountType} />
-        <input type="hidden" name="discountValue" value={discountValue} />
-
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="flex gap-1.5">
-            {(['none', 'percent', 'amount'] as const).map((t) => (
-              <button
-                key={t}
-                type="button"
-                onClick={() => {
-                  setDiscountType(t)
-                  if (t === 'none') setDiscountValue(0)
-                }}
-                aria-pressed={discountType === t}
-                className={cn(
-                  'rounded-field border px-3 py-2 text-xs transition-colors',
-                  discountType === t
-                    ? 'border-gold bg-gold/10 text-gold'
-                    : 'border-line text-ink-muted hover:border-line-strong hover:text-ink-secondary',
-                )}
-              >
-                {t === 'none' ? 'No discount' : t === 'percent' ? '% off' : '$ off'}
-              </button>
-            ))}
-          </div>
-
-          {discountType !== 'none' && (
-            <label className="text-xs">
-              <span className="block text-ink-faint">
-                {discountType === 'percent' ? 'Percent' : 'Amount'}
-              </span>
-              <input
-                type="number"
-                min={0}
-                max={discountType === 'percent' ? 99 : undefined}
-                step={discountType === 'percent' ? 1 : 0.01}
-                value={discountValue || ''}
-                onChange={(e) => setDiscountValue(Number(e.target.value) || 0)}
-                className="w-28 rounded-field border border-line bg-surface px-3 py-2 text-sm text-ink"
-              />
-            </label>
+          {unpriced ? (
+            // The loud gap. A service with no published fee is blocked rather than booked free.
+            <Notice>
+              {service?.name} doesn’t have a rental fee set yet, so it can’t be booked. Ask Keoni
+              to price it.
+            </Notice>
+          ) : pack ? (
+            <div className="rounded-field border border-line p-3 text-xs leading-relaxed text-ink-secondary">
+              <strong className="text-ink">Covered by your pack.</strong> {pack.sessionsRemaining}{' '}
+              {pack.sessionsRemaining === 1 ? 'session' : 'sessions'} left on {pack.label}. Nothing
+              will be charged to your card.
+            </div>
+          ) : needsCard ? (
+            <Notice>
+              Add a card before booking — the rental fee is charged when you reserve the laser.{' '}
+              <Link href="/app/account" className="underline underline-offset-4">
+                Add one now
+              </Link>
+              .
+            </Notice>
+          ) : (
+            <div className="rounded-field border border-line p-3 text-xs leading-relaxed text-ink-secondary">
+              <strong className="text-ink">
+                {service?.rentalFeeCents !== null && service?.rentalFeeCents !== undefined
+                  ? usd(service.rentalFeeCents)
+                  : ''}{' '}
+                charged now
+              </strong>{' '}
+              to the card ending {cardLast4}, for the equipment and the room. What you charge your
+              client is between you and them.
+              <br />
+              If the card is declined the slot isn’t held — the laser is shared, so an unpaid
+              reservation would take the time away from everyone else for nothing.
+            </div>
           )}
-
-          <div className="pb-1">
-            <div className="text-2xl font-semibold tabular-nums">{usd(price)}</div>
-            {discountType !== 'none' && discountValue > 0 && service && (
-              <div className="text-xs text-ink-faint tabular-nums line-through">
-                {usd(service.price)}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Refused rather than clamped: a free appointment is a comp, which is a different
-            payment source, and silently zeroing the price would hide the mistake. */}
-        {overDiscounted && (
-          <p className="text-xs text-danger">
-            That discount is more than the price. Book it as comped if it&rsquo;s free.
-          </p>
-        )}
-      </section>
-
-      <section className="space-y-3">
-        <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">
-          How is this being paid?
-        </h2>
-
-        <input type="hidden" name="externalMethod" value={externalMethod} />
-
-        <div className="flex flex-wrap gap-1.5">
-          {(
-            [
-              ['', 'Payment link'],
-              ['groupon', 'Groupon'],
-              // No Cherry. Cherry is patient financing for a PACKAGE — the client applies,
-              // Cherry pays Melanite directly, and Melanite owes the provider their half. It
-              // is the only external method where the money moves toward Melanite rather than
-              // toward the provider, so recording it against a single appointment would put a
-              // provider on the collections list for money they never touched.
-              ['cash', 'Cash'],
-              ['check', 'Check'],
-              ['other', 'Other'],
-            ] as const
-          ).map(([value, label]) => (
-            <button
-              key={value || 'link'}
-              type="button"
-              onClick={() => setExternalMethod(value)}
-              aria-pressed={externalMethod === value}
-              className={cn(
-                'rounded-field border px-3 py-2 text-xs transition-colors',
-                externalMethod === value
-                  ? 'border-gold bg-gold/10 text-gold'
-                  : 'border-line text-ink-muted hover:border-line-strong hover:text-ink-secondary',
-              )}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
-        {externalMethod === '' ? (
-          <p className="text-xs text-ink-faint">
-            A checkout link is created and emailed to the client.
-          </p>
-        ) : (
-          // Said plainly, because the consequence is invisible otherwise: no link is created,
-          // so nothing is emailed, so nobody can pay twice by accident.
-          <div className="rounded-field border border-line p-3 text-xs leading-relaxed text-ink-secondary">
-            <strong className="text-ink">No payment link.</strong> The client pays outside the
-            app, so nothing is emailed. Make sure the price above is what they are actually
-            paying — Melanite works out its share from that figure
-            , and collects it from you rather than paying you out — every method here is one
-            the client hands to you, not to Melanite.
-          </div>
-        )}
-      </section>
+        </section>
+      )}
 
       {state.error && <Notice>{state.error}</Notice>}
 
-      <SubmitButton disabled={!selectedSlot || overDiscounted} />
-
-      <p className="text-center text-xs text-ink-faint">
-        A payment link is created with the booking and expires in 7 days.
-      </p>
+      <SubmitButton
+        disabled={!selectedSlot || unpriced || needsCard}
+        label={
+          !payingRent || pack
+            ? 'Book appointment'
+            : service?.rentalFeeCents
+              ? `Book and pay ${usd(service.rentalFeeCents)}`
+              : 'Book appointment'
+        }
+      />
     </form>
   )
 }

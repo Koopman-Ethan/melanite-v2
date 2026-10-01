@@ -239,6 +239,13 @@
       "when": 1790865953832,
       "tag": "0033_last_nicolaos",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1790866445734,
+      "tag": "0034_wise_corsair",
+      "breakpoints": true
     }
   ]
 }

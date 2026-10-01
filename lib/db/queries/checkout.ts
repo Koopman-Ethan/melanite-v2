@@ -2,6 +2,7 @@ import 'server-only'
 
 import { eq } from 'drizzle-orm'
 
+import { clientLabel } from '@/lib/booking-labels'
 import { db } from '@/lib/db'
 import {
   bookings,
@@ -154,7 +155,7 @@ export async function getBookingCheckout(token: string): Promise<BookingCheckout
     state,
     linkId: row.linkId,
     bookingId: row.bookingId,
-    clientName: row.clientName,
+    clientName: clientLabel(row.clientName),
     clientEmail: row.clientEmail,
     treatmentArea: row.treatmentArea,
     serviceName: row.serviceName,

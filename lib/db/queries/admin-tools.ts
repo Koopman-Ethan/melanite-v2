@@ -2,6 +2,7 @@ import 'server-only'
 
 import { and, asc, desc, eq, isNotNull, isNull, sql } from 'drizzle-orm'
 
+import { clientLabel } from '@/lib/booking-labels'
 import { db } from '@/lib/db'
 import {
   bookings,
@@ -44,7 +45,7 @@ export interface UnpaidBooking {
  *  and in v1 there was no way to tell those apart or even to notice.
  */
 export async function getUnpaidBookings(limit = 50): Promise<UnpaidBooking[]> {
-  return db
+  const rows = await db
     .select({
       id: bookings.id,
       clientName: bookings.clientName,
@@ -82,6 +83,11 @@ export async function getUnpaidBookings(limit = 50): Promise<UnpaidBooking[]> {
     )
     .orderBy(desc(bookings.startTime))
     .limit(limit)
+
+  // A rental booking is filtered out above and cannot reach here, but the column is nullable
+  // now and this list is read by somebody chasing money — a blank where a name goes reads as
+  // missing data rather than as a booking that never had one.
+  return rows.map((r) => ({ ...r, clientName: clientLabel(r.clientName) }))
 }
 
 export interface CherryHandoff {

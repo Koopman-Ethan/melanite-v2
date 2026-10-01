@@ -2,6 +2,7 @@ import 'server-only'
 
 import { eq } from 'drizzle-orm'
 
+import { clientLabel } from '@/lib/booking-labels'
 import { db } from '@/lib/db'
 import {
   bookings,
@@ -86,7 +87,7 @@ async function notifyBooking(bookingId: string, event: 'booked' | 'cancelled'): 
       to: MELANITE_NOTIFY_EMAIL,
       ...deskBookingEmail({
         event,
-        clientName: row.clientName,
+        clientName: clientLabel(row.clientName),
         providerName: `${row.providerFirst} ${row.providerLast}`,
         serviceName: row.serviceName,
         when: appointmentWhen(row.startTime),

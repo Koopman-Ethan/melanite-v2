@@ -3,6 +3,7 @@
 import { and, eq, isNull, sql } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 
+import { clientLabel } from '@/lib/booking-labels'
 import { requireProvider } from '@/lib/auth/dal'
 import { db } from '@/lib/db'
 import { getCheckoutSettings } from '@/lib/db/queries/checkout'
@@ -175,7 +176,7 @@ async function notifyCancelled(
     await sendEmail({
       to: row.clientEmail,
       ...bookingCancelledEmail({
-        clientName: row.clientName,
+        clientName: clientLabel(row.clientName),
         providerName: `${row.providerFirst} ${row.providerLast}`,
         serviceName: row.serviceName,
         when: appointmentWhen(row.startTime),

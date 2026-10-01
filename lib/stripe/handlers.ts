@@ -2,6 +2,7 @@ import 'server-only'
 
 import { and, eq, ne, sql } from 'drizzle-orm'
 
+import { clientLabel } from '@/lib/booking-labels'
 import { db } from '@/lib/db'
 import { isUniqueViolation } from '@/lib/db/errors'
 import {
@@ -345,7 +346,7 @@ async function confirmBooking(bookingId: string): Promise<BookingEmailDetail | n
     if (!row) return null
 
     const detail: BookingEmailDetail = {
-      clientName: row.clientName,
+      clientName: clientLabel(row.clientName),
       startTime: row.startTime,
       serviceName: row.serviceName,
       providerName: `${row.providerFirst} ${row.providerLast}`,
@@ -356,7 +357,7 @@ async function confirmBooking(bookingId: string): Promise<BookingEmailDetail | n
     await sendEmail({
       to: row.clientEmail,
       ...bookingConfirmedEmail({
-        clientName: row.clientName,
+        clientName: clientLabel(row.clientName),
         providerName: `${row.providerFirst} ${row.providerLast}`,
         serviceName: row.serviceName,
         when: appointmentWhen(row.startTime),

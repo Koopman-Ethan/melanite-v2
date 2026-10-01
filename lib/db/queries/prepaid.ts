@@ -2,6 +2,7 @@ import 'server-only'
 
 import { and, asc, desc, eq, sql } from 'drizzle-orm'
 
+import { clientLabel } from '@/lib/booking-labels'
 import { db } from '@/lib/db'
 import {
   bookings,
@@ -97,7 +98,7 @@ export interface PrepaidDraw {
 /** What a balance has been spent on. Voided draws are returned rather than filtered — "that
  *  appointment was cancelled and the money came back" is the question this list answers. */
 export async function getPrepaidDraws(balanceId: string): Promise<PrepaidDraw[]> {
-  return db
+  const rows = await db
     .select({
       bookingId: prepaidRedemptions.bookingId,
       amountApplied: prepaidRedemptions.amountApplied,
@@ -111,6 +112,8 @@ export async function getPrepaidDraws(balanceId: string): Promise<PrepaidDraw[]>
     .innerJoin(bookings, eq(prepaidRedemptions.bookingId, bookings.id))
     .where(eq(prepaidRedemptions.prepaidBalanceId, balanceId))
     .orderBy(desc(prepaidRedemptions.redeemedAt))
+
+  return rows.map((r) => ({ ...r, clientName: clientLabel(r.clientName) }))
 }
 
 export interface PendingPrepaidLink {

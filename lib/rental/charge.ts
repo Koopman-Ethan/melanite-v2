@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { and, eq } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
 import { bookings, ledgerEntries, providerServices, providers, services } from '@/lib/db/schema'
@@ -185,6 +185,57 @@ export async function chargeRentalFee(bookingId: string): Promise<RentalChargeRe
     .returning({ id: ledgerEntries.id })
 
   return { charged: { amountCents, ledgerEntryId: entry.id } }
+}
+
+/**
+ * Rental bookings nobody was billed for.
+ *
+ * The booking path takes the slot before it takes the money, because the exclusion constraint can
+ * only arbitrate a shared laser once a row exists. That leaves one window: a crash between the
+ * insert and the charge. It cannot be closed without a transaction the neon-http driver does not
+ * have, so it is detected instead.
+ *
+ * Re-charging one of these is safe. `chargeRentalFee` is keyed on the booking id at Stripe as well
+ * as here, so a booking whose charge actually succeeded before the crash gets its ledger row
+ * written rather than a second payment taken.
+ *
+ * Excludes bookings covered by a pack session, which are paid for and have no ledger row by
+ * design, and Melanite's own appointments, which owe no rent.
+ */
+export async function unchargedRentalBookings(): Promise<
+  { bookingId: string; providerId: string; serviceName: string; startTime: Date }[]
+> {
+  const rows = await db.execute<{
+    id: string
+    provider_id: string
+    service_name: string
+    start_time: string
+  }>(sql`
+    SELECT b.id, b.provider_id, s.name AS service_name, b.start_time
+      FROM bookings b
+      JOIN provider_services ps ON ps.id = b.provider_service_id
+      JOIN services s           ON s.id = ps.service_id
+      JOIN providers p          ON p.id = b.provider_id
+     WHERE b.payment_source = 'rental'
+       AND p.revenue_model <> 'house'
+       AND NOT EXISTS (
+         SELECT 1 FROM ledger_entries le
+          WHERE le.subject_type = 'booking' AND le.subject_id = b.id
+            AND le.source = 'rental_fee' AND le.entry_type = 'purchase'
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM provider_pack_redemptions r
+          WHERE r.booking_id = b.id AND r.voided_at IS NULL
+       )
+     ORDER BY b.start_time
+  `)
+
+  return (rows.rows ?? []).map((r) => ({
+    bookingId: r.id,
+    providerId: r.provider_id,
+    serviceName: r.service_name,
+    startTime: new Date(r.start_time),
+  }))
 }
 
 /**

@@ -2,6 +2,7 @@ import 'server-only'
 
 import { and, asc, eq, isNotNull, isNull, sql } from 'drizzle-orm'
 
+import { clientLabel } from '@/lib/booking-labels'
 import { db } from '@/lib/db'
 import {
   bookings,
@@ -120,7 +121,7 @@ async function failedFees(): Promise<QueueItem[]> {
     since: r.failedAt ?? r.startTime,
     waitingDays: 0,
     amount: r.price,
-    who: r.clientName,
+    who: clientLabel(r.clientName),
     detail: `${r.status === 'no_show' ? 'No-show' : 'Late cancellation'} · ${r.serviceName} with ${r.firstName} ${r.lastName} on ${dateLabel(r.startTime.toISOString().slice(0, 10))} — ${r.error ?? 'the charge did not go through'}`,
     meta: { bookingStatus: r.status },
   }))

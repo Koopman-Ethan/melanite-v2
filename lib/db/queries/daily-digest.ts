@@ -2,6 +2,7 @@ import 'server-only'
 
 import { and, asc, eq, gte, lt, ne, sql } from 'drizzle-orm'
 
+import { clientLabel } from '@/lib/booking-labels'
 import { db } from '@/lib/db'
 import { splitClientPayment, toCents } from '@/lib/money'
 import { PROVIDER_ALREADY_HOLDS } from '@/lib/payments/direction'
@@ -67,6 +68,8 @@ function asDigestAppointment(row: RawDigestAppointment): DigestAppointment {
   const { closeoutItems, closeoutItemCount, closeoutDeviceIssue, ...rest } = row
   return {
     ...rest,
+    // A rental booking has no client — see `lib/booking-labels.ts`.
+    clientName: clientLabel(row.clientName),
     closeout:
       closeoutItemCount === null
         ? null
@@ -79,7 +82,10 @@ function asDigestAppointment(row: RawDigestAppointment): DigestAppointment {
   }
 }
 
-type RawDigestAppointment = Omit<DigestAppointment, 'closeout'> & {
+type RawDigestAppointment = Omit<DigestAppointment, 'closeout' | 'clientName'> & {
+  /** Null on a rental booking. Resolved by `asDigestAppointment`, so the digest template never
+   *  has to decide what to print for a client Melanite deliberately does not know about. */
+  clientName: string | null
   closeoutItems: string[] | null
   closeoutItemCount: number | null
   closeoutDeviceIssue: boolean | null

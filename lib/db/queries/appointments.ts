@@ -2,6 +2,7 @@ import 'server-only'
 
 import { and, asc, desc, eq, gte, sql, type SQL } from 'drizzle-orm'
 
+import { clientLabel } from '@/lib/booking-labels'
 import { db } from '@/lib/db'
 import {
   bookings,
@@ -172,6 +173,8 @@ function asAppointment(row: RawAppointment): Appointment {
   const { closeoutItems, closeoutItemCount, closeoutDeviceIssue, ...rest } = row
   return {
     ...rest,
+    // A rental booking has no client — Melanite never asked for one. See `lib/booking-labels.ts`.
+    clientName: clientLabel(row.clientName),
     // The left join produces nulls across all three when no close-out exists. `itemCount` is the
     // one that decides: it is NOT NULL on the table, so a non-null value means there is a row.
     closeout:
@@ -185,7 +188,10 @@ function asAppointment(row: RawAppointment): Appointment {
   }
 }
 
-type RawAppointment = Omit<Appointment, 'closeout'> & {
+type RawAppointment = Omit<Appointment, 'closeout' | 'clientName'> & {
+  /** Null on a rental booking, where there is no client to name. `asAppointment` resolves it;
+   *  `Appointment` stays a string so no view has to decide what to print for an absent one. */
+  clientName: string | null
   closeoutItems: string[] | null
   closeoutItemCount: number | null
   closeoutDeviceIssue: boolean | null
@@ -346,7 +352,69 @@ export async function getNextAppointment(providerId: string): Promise<NextAppoin
     .orderBy(asc(bookings.startTime))
     .limit(1)
 
-  return row ?? null
+  return row ? { ...row, clientName: clientLabel(row.clientName) } : null
+}
+
+export interface RentalBookingSummary {
+  serviceName: string
+  startTime: Date
+  /** What was taken off the card, in cents. Null when nothing was — a pack session covered it,
+   *  or this is Melanite's own appointment. */
+  chargedCents: number | null
+  /** "Session 4 of 6", when a pack paid for it. */
+  packSession: { index: number; total: number } | null
+}
+
+/** What to tell a provider who has just reserved the laser.
+ *
+ *  Replaces the payment-link banner, which had nothing to say under the rental model: there is no
+ *  client, no link and nothing to send. What a provider needs to see is that the slot is theirs
+ *  and what it cost them — money left their card a second ago and the confirmation should say so
+ *  rather than leaving them to find it on a statement.
+ *
+ *  Scoped to the provider, for the same reason the link query was.
+ */
+export async function getRentalBookingSummary(
+  bookingId: string,
+  providerId: string,
+): Promise<RentalBookingSummary | null> {
+  const [row] = await db
+    .select({
+      serviceName: services.name,
+      startTime: bookings.startTime,
+      charged: sql<string | null>`(
+        SELECT le.gross_amount FROM ledger_entries le
+         WHERE le.subject_type = 'booking' AND le.subject_id = ${bookings.id}
+           AND le.source = 'rental_fee' AND le.entry_type = 'purchase'
+         LIMIT 1
+      )`,
+      packIndex: sql<number | null>`(
+        SELECT r.session_index FROM provider_pack_redemptions r
+         WHERE r.booking_id = ${bookings.id} AND r.voided_at IS NULL LIMIT 1
+      )`,
+      packTotal: sql<number | null>`(
+        SELECT p.sessions_total FROM provider_pack_redemptions r
+          JOIN provider_packs p ON p.id = r.provider_pack_id
+         WHERE r.booking_id = ${bookings.id} AND r.voided_at IS NULL LIMIT 1
+      )`,
+    })
+    .from(bookings)
+    .innerJoin(providerServices, eq(bookings.providerServiceId, providerServices.id))
+    .innerJoin(services, eq(providerServices.serviceId, services.id))
+    .where(and(eq(bookings.id, bookingId), eq(bookings.providerId, providerId)))
+    .limit(1)
+
+  if (!row) return null
+
+  return {
+    serviceName: row.serviceName,
+    startTime: row.startTime,
+    chargedCents: row.charged === null ? null : Math.round(Number(row.charged) * 100),
+    packSession:
+      row.packIndex === null || row.packTotal === null
+        ? null
+        : { index: Number(row.packIndex), total: Number(row.packTotal) },
+  }
 }
 
 /** The payment link for a booking the provider just made, for the confirmation banner.

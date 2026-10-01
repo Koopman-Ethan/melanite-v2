@@ -2,6 +2,7 @@ import 'server-only'
 
 import { and, asc, eq, gte, lt, sql } from 'drizzle-orm'
 
+import { clientLabel } from '@/lib/booking-labels'
 import { db } from '@/lib/db'
 import {
   bookings,
@@ -334,7 +335,7 @@ export async function getCalendarWeek(weekStart: string): Promise<CalendarWeek> 
       endMinutes,
       lane: 0,
       lanes: 1,
-      clientName: r.clientName,
+      clientName: clientLabel(r.clientName),
       providerId: r.providerId,
       providerName: `${r.firstName} ${r.lastName}`,
       serviceName: r.serviceName,
