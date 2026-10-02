@@ -72,7 +72,7 @@ describe('a path that does exist', () => {
     // `next=/onboarding/license` — and was sent to the dashboard, which is a page they are not
     // allowed to open yet.
     expect(safeNextPath('/onboarding/license')).toBe('/onboarding/license')
-    expect(safeNextPath('/onboarding/stripe')).toBe('/onboarding/stripe')
+    expect(safeNextPath('/onboarding/billing')).toBe('/onboarding/billing')
   })
 
   it('tolerates the shapes a real URL arrives in', () => {

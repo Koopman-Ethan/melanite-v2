@@ -1,0 +1,176 @@
+'use client'
+
+import { useState, useTransition } from 'react'
+
+import { Button } from '@/components/ui/button'
+import { Notice } from '@/components/ui/field'
+
+import { acceptRentalTerms, startRentalCardSetup } from '@/app/app/account/billing-actions'
+import { completeBillingStep } from '../actions'
+
+export interface TierView {
+  key: string
+  label: string
+  singleCents: number
+  packs: { sessions: number; cents: number }[]
+}
+
+const usd = (cents: number) =>
+  (cents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })
+
+/** Step 4 — the card Melanite charges, and what it will be charged for.
+ *
+ *  The fee schedule is shown in full here rather than linked. A provider is agreeing to pay
+ *  these amounts; putting them one click away makes "I didn't know what it cost" a reasonable
+ *  thing for somebody to say later.
+ */
+export function BillingStepForm({
+  card,
+  termsAccepted,
+  terms,
+  tiers,
+}: {
+  card: { brand: string | null; last4: string; expMonth: number | null; expYear: number | null } | null
+  termsAccepted: boolean
+  terms: { key: string; text: string }[]
+  tiers: TierView[]
+}) {
+  const [error, setError] = useState<string | null>(null)
+  const [checked, setChecked] = useState(termsAccepted)
+  const [pending, start] = useTransition()
+
+  return (
+    <div className="mt-6 space-y-5">
+      <div>
+        <h1 className="text-2xl font-semibold leading-tight">
+          A card for <span className="text-gold">equipment rental</span>.
+        </h1>
+        <p className="mt-3 text-sm text-ink-muted">
+          Melanite charges a flat fee each time you book the laser, taken when you reserve the
+          time. You bill your own clients, at your own prices — none of that comes through here.
+        </p>
+      </div>
+
+      <details className="rounded-card border border-line p-5">
+        <summary className="cursor-pointer text-sm font-medium">
+          What each session costs
+        </summary>
+        <div className="mt-4 space-y-3">
+          {tiers.map((tier) => (
+            <div key={tier.key} className="flex flex-wrap items-baseline justify-between gap-2">
+              <span className="text-xs text-ink-secondary">{tier.label}</span>
+              <span className="text-xs tabular-nums">
+                <strong>{usd(tier.singleCents)}</strong>
+                {tier.packs.length > 0 && (
+                  <span className="text-ink-faint">
+                    {' '}
+                    ·{' '}
+                    {tier.packs
+                      .map((p) => `${p.sessions} for ${usd(p.cents)}`)
+                      .join(' · ')}
+                  </span>
+                )}
+              </span>
+            </div>
+          ))}
+          <p className="text-xs text-ink-faint">
+            A few services don&rsquo;t have a fee set yet and can&rsquo;t be booked until they
+            do. The booking form says which.
+          </p>
+        </div>
+      </details>
+
+      <div className="rounded-card border border-line p-5">
+        <h2 className="text-sm font-medium">The terms</h2>
+        <ul className="mt-3 space-y-2">
+          {terms.map((t) => (
+            <li key={t.key} className="text-xs leading-relaxed text-ink-secondary">
+              {t.text}
+            </li>
+          ))}
+        </ul>
+
+        <label className="mt-4 flex cursor-pointer items-start gap-3 text-sm">
+          <input
+            type="checkbox"
+            checked={checked}
+            disabled={pending}
+            onChange={(e) => {
+              const next = e.target.checked
+              setChecked(next)
+              setError(null)
+              // Recorded the moment it is ticked, not on submit. The acknowledgement is a fact
+              // about what somebody agreed to and when — losing it because they closed the tab
+              // before pressing a button would mean asking again with no record either way.
+              if (next) {
+                start(async () => {
+                  const result = await acceptRentalTerms()
+                  if (result.error) {
+                    setChecked(false)
+                    setError(result.error)
+                  }
+                })
+              }
+            }}
+            className="mt-0.5 size-4 shrink-0"
+          />
+          <span className="text-ink-secondary">
+            I&rsquo;ve read and accept the rental terms and the fee schedule above.
+          </span>
+        </label>
+      </div>
+
+      {card ? (
+        <Notice tone="success">
+          {card.brand ? `${card.brand} ` : 'Card '}ending {card.last4}
+          {card.expMonth && card.expYear
+            ? ` · expires ${String(card.expMonth).padStart(2, '0')}/${String(card.expYear).slice(-2)}`
+            : ''}
+          . You can continue.
+        </Notice>
+      ) : (
+        <div className="rounded-field border border-warning/40 bg-warning/10 p-3 text-xs text-ink-secondary">
+          <strong className="text-warning">A card is required.</strong> The rental fee is charged
+          when you reserve the laser, so without one you can&rsquo;t book.
+        </div>
+      )}
+
+      {error && <Notice>{error}</Notice>}
+
+      <div className="space-y-2">
+        <Button
+          block
+          variant={card ? 'outline' : 'gold'}
+          disabled={pending}
+          onClick={() =>
+            start(async () => {
+              const result = await startRentalCardSetup()
+              if (result.url) {
+                window.location.href = result.url
+                return
+              }
+              setError(result.error ?? 'Could not open Stripe. Try again shortly.')
+            })
+          }
+        >
+          {pending ? 'Opening Stripe…' : card ? 'Use a different card' : 'Add a card with Stripe'}
+        </Button>
+
+        {card && (
+          <Button
+            block
+            disabled={pending || !checked}
+            onClick={() =>
+              start(async () => {
+                const result = await completeBillingStep()
+                if (result?.error) setError(result.error)
+              })
+            }
+          >
+            Next step
+          </Button>
+        )}
+      </div>
+    </div>
+  )
+}

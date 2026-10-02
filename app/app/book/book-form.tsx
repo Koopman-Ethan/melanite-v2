@@ -93,6 +93,7 @@ export function BookForm({
   packs,
   payingRent,
   cardLast4,
+  termsAccepted,
 }: {
   services: ServiceView[]
   slots: SlotView[]
@@ -107,6 +108,7 @@ export function BookForm({
   packs: PackView[]
   payingRent: boolean
   cardLast4: string | null
+  termsAccepted: boolean
 }) {
   const [state, formAction] = useActionState<BookState, FormData>(createBooking, {})
   const [selectedSlot, setSelectedSlot] = useState<string>('')
@@ -121,6 +123,9 @@ export function BookForm({
 
   const unpriced = payingRent && service?.rentalFeeCents === null
   const needsCard = payingRent && !pack && !cardLast4
+  // A pack does NOT excuse this one. The terms cover what the fee schedule is and what happens
+  // on a no-show, which apply just as much to a session drawn from a pack.
+  const needsTerms = payingRent && !termsAccepted
 
   return (
     <form action={formAction} className="space-y-6">
@@ -247,6 +252,14 @@ export function BookForm({
               {service?.name} doesn’t have a rental fee set yet, so it can’t be booked. Ask Keoni
               to price it.
             </Notice>
+          ) : needsTerms ? (
+            <Notice>
+              The rental terms have changed since you last accepted them.{' '}
+              <Link href="/app/account" className="underline underline-offset-4">
+                Review and accept them
+              </Link>{' '}
+              to carry on booking.
+            </Notice>
           ) : pack ? (
             <div className="rounded-field border border-line p-3 text-xs leading-relaxed text-ink-secondary">
               <strong className="text-ink">Covered by your pack.</strong> {pack.sessionsRemaining}{' '}
@@ -282,7 +295,7 @@ export function BookForm({
       {state.error && <Notice>{state.error}</Notice>}
 
       <SubmitButton
-        disabled={!selectedSlot || unpriced || needsCard}
+        disabled={!selectedSlot || unpriced || needsCard || needsTerms}
         label={
           !payingRent || pack
             ? 'Book appointment'

@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { webhookEvents } from '@/lib/db/schema'
 import { planFromMetadata } from '@/lib/stripe/config'
+import { saveRentalCard } from '@/lib/stripe/billing-card'
 import { dispatch, linkSubscriptionCustomer } from '@/lib/stripe/handlers'
 import { verifyStripeSignature } from '@/lib/stripe/signature'
 import type { StripeCheckoutSessionObject, StripeEvent } from '@/lib/stripe/types'
@@ -105,6 +106,16 @@ export async function POST(request: Request) {
           session.subscription,
           planFromMetadata(session.metadata),
         )
+      } else if (session.mode === 'setup' && providerId) {
+        // A card being put on file for rental fees. No money moved, so unlike the subscription
+        // path there is no invoice event to wait for — this event is the whole of it.
+        const saved = await saveRentalCard(providerId, session.setup_intent, session.customer)
+        if ('error' in saved) {
+          // Thrown rather than logged, so the catch below records it and returns a 500. Stripe
+          // retries, and the provider is sitting on a screen that says their card is saved —
+          // swallowing this would leave them unable to book with no sign of why.
+          throw new Error(`rental card setup failed: ${saved.error}`)
+        }
       }
     } else {
       const outcome = await dispatch(event)

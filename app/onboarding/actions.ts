@@ -9,6 +9,7 @@ import { SUPERVISED_PROCEDURES, requiresMedicalDirection } from '@/lib/room-proc
 import { providerServices, providers } from '@/lib/db/schema'
 import { toCents, toMoney } from '@/lib/money'
 import { nextStepSlug } from '@/lib/onboarding'
+import { hasAcceptedRentalTerms } from '@/lib/rental-terms'
 import { phoneError } from '@/lib/validation'
 
 export interface StepState {
@@ -116,32 +117,36 @@ export async function saveLicense(input: {
     malpracticeInsurance,
   })
 
-  redirect('/onboarding/stripe')
+  redirect('/onboarding/billing')
 }
 
-/** Step 4 — Stripe must be connected before anything else happens.
+/** Step 4 — the card Melanite charges for laser time, and the terms that go with it.
  *
- *  The gate is "an account exists", not "payouts are enabled". Those are different questions:
- *  the first is entirely within the provider's control and takes three minutes, the second is
- *  Stripe verifying them in the background and can take days. Blocking on the second would
- *  strand someone at step 4 with nothing they can do about it, so `stripeOnboardingComplete`
- *  — set only by the `account.updated` webhook — gates BOOKING instead, which is where it
- *  belongs.
+ *  Both are checked here and not only in the form. The button is disabled without them, which
+ *  is a courtesy rather than a control: this is the step that decides whether somebody can be
+ *  charged at all, and a provider who reaches booking without a card gets an error instead of
+ *  an appointment.
  *
- *  Checked here rather than only in the form. The button that calls this is hidden until an
- *  account exists, but a hidden button is not a gate: a server action is a public endpoint.
+ *  Replaces the Stripe Connect step. That one existed to pay money OUT; this is the opposite
+ *  direction and asks for far less — a card, not a bank account, an SSN and an identity check.
  */
-export async function completeStripeStep(): Promise<StepState> {
+export async function completeBillingStep(): Promise<StepState> {
   const user = await requireProvider()
 
   const [row] = await db
-    .select({ stripeAccountId: providers.stripeAccountId })
+    .select({
+      billingPaymentMethodId: providers.billingPaymentMethodId,
+      rentalTermsVersion: providers.rentalTermsVersion,
+    })
     .from(providers)
     .where(eq(providers.id, user.id))
     .limit(1)
 
-  if (!row?.stripeAccountId) {
-    return { error: 'Connect your bank account with Stripe before continuing.' }
+  if (!row?.billingPaymentMethodId) {
+    return { error: 'Add a card before continuing — the rental fee is charged when you book.' }
+  }
+  if (!hasAcceptedRentalTerms(row)) {
+    return { error: 'Accept the rental terms before continuing.' }
   }
 
   await completeStep(user.id, 4, {})

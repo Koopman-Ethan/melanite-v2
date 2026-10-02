@@ -48,12 +48,12 @@ export const APP_DESTINATIONS: readonly string[] = [
   '/app/room-rental',
   '/app/services',
   '/onboarding',
+  '/onboarding/billing',
   '/onboarding/director',
   '/onboarding/done',
   '/onboarding/license',
   '/onboarding/profile',
   '/onboarding/services',
-  '/onboarding/stripe',
 ] as const
 
 /** Routes with a dynamic segment, matched by prefix rather than exactly. */

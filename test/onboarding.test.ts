@@ -55,7 +55,7 @@ describe('nextStepSlug', () => {
 
   it('resumes at the step after the last one completed', () => {
     expect(nextStepSlug(2)).toBe('license')
-    expect(nextStepSlug(3)).toBe('stripe')
+    expect(nextStepSlug(3)).toBe('billing')
     expect(nextStepSlug(4)).toBe('director')
     expect(nextStepSlug(5)).toBe('services')
   })
@@ -82,7 +82,7 @@ describe('canOpenStep', () => {
     // Someone who has only set a password cannot jump straight to picking services and
     // activating their own account.
     expect(canOpenStep('services', 1)).toBe(false)
-    expect(canOpenStep('stripe', 1)).toBe(false)
+    expect(canOpenStep('billing', 1)).toBe(false)
     expect(canOpenStep('director', 3)).toBe(false)
   })
 

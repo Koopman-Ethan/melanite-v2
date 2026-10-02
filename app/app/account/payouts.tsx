@@ -9,6 +9,11 @@ import { openStripeDashboard, startStripeOnboarding, type StripeRedirect } from 
 
 /** Getting paid.
  *
+ *  NO LONGER MOUNTED. Melanite does not pay providers — they bill their own clients — so the
+ *  account page shows `rental-card.tsx` here instead, which answers the opposite question.
+ *  Kept with the rest of the Connect code until it is removed as one revertible commit.
+ *
+ *
  *  Separated from the rest of Account because the consequence is different in kind: without a
  *  connected account a provider can still work, still book, still be owed money — and simply
  *  never receive any of it. Nothing else on this page can cost them that.

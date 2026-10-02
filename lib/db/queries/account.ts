@@ -20,6 +20,14 @@ export interface AccountProfile {
   policyAckAt: Date | null
   policyAckVersion: string | null
   stripeOnboardingComplete: boolean
+  /** The card Melanite charges for laser time. Null last4 means none on file, which blocks
+   *  booking — see `createBooking`. */
+  billingCardBrand: string | null
+  billingCardLast4: string | null
+  billingCardExpMonth: number | null
+  billingCardExpYear: number | null
+  rentalTermsVersion: string | null
+  rentalTermsAckAt: Date | null
   notifyBookingConfirmed: boolean
   notifyPayoutDeposited: boolean
   notifyAppointmentReminders: boolean
@@ -44,6 +52,12 @@ export async function getAccount(providerId: string): Promise<AccountProfile | n
       policyAckAt: providers.policyAckAt,
       policyAckVersion: providers.policyAckVersion,
       stripeOnboardingComplete: providers.stripeOnboardingComplete,
+      billingCardBrand: providers.billingCardBrand,
+      billingCardLast4: providers.billingCardLast4,
+      billingCardExpMonth: providers.billingCardExpMonth,
+      billingCardExpYear: providers.billingCardExpYear,
+      rentalTermsVersion: providers.rentalTermsVersion,
+      rentalTermsAckAt: providers.rentalTermsAckAt,
       notifyBookingConfirmed: providers.notifyBookingConfirmed,
       notifyPayoutDeposited: providers.notifyPayoutDeposited,
       notifyAppointmentReminders: providers.notifyAppointmentReminders,

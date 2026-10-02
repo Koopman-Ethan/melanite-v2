@@ -2,10 +2,11 @@ import type { Metadata } from 'next'
 
 import { requireProvider } from '@/lib/auth/dal'
 import { licenseMessage, licenseStatus } from '@/lib/license'
+import { hasAcceptedRentalTerms } from '@/lib/rental-terms'
 import { getAccount, getActiveSessions, getDocuments } from '@/lib/db/queries/account'
 
 import { NotificationsForm, PasswordForm, ProfileForm } from './forms'
-import { Payouts } from './payouts'
+import { RentalCard } from './rental-card'
 
 export const metadata: Metadata = { title: 'Account · Melanite' }
 export const dynamic = 'force-dynamic'
@@ -98,10 +99,23 @@ export default async function AccountPage() {
       </Section>
 
       <Section
-        title="Getting paid"
-        description="Bookings use destination charges, so your share needs somewhere to land."
+        title="Equipment rental"
+        description="Melanite charges this card when you reserve the laser. What you charge your own clients never comes through here."
       >
-        <Payouts connected={account.stripeOnboardingComplete} />
+        <RentalCard
+          card={
+            account.billingCardLast4
+              ? {
+                  brand: account.billingCardBrand,
+                  last4: account.billingCardLast4,
+                  expMonth: account.billingCardExpMonth,
+                  expYear: account.billingCardExpYear,
+                }
+              : null
+          }
+          termsAccepted={hasAcceptedRentalTerms(account)}
+          termsAckAt={account.rentalTermsAckAt}
+        />
       </Section>
 
       <Section

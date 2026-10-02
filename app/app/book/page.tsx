@@ -14,6 +14,7 @@ import {
 } from '@/lib/db/queries/availability'
 import { packBalancesFor } from '@/lib/rental/packs'
 import { rentalFeeFor, tierForService } from '@/lib/rental-fees'
+import { hasAcceptedRentalTerms } from '@/lib/rental-terms'
 
 import { BookPanel } from './book-panel'
 
@@ -83,6 +84,7 @@ export default async function BookPage({
       .select({
         revenueModel: providers.revenueModel,
         cardLast4: providers.billingCardLast4,
+        rentalTermsVersion: providers.rentalTermsVersion,
       })
       .from(providers)
       .where(eq(providers.id, user.id))
@@ -122,6 +124,7 @@ export default async function BookPage({
         }))}
         payingRent={payingRent}
         cardLast4={provider?.cardLast4 ?? null}
+        termsAccepted={hasAcceptedRentalTerms(provider)}
         slots={slots.map((s) => ({
           startTime: s.startTime.toISOString(),
           available: s.available,

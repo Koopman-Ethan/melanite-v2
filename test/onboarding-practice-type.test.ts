@@ -55,7 +55,7 @@ describe('which steps apply', () => {
 describe('where a provider is sent next', () => {
   it('walks a laser provider through in order', () => {
     expect(nextStepSlug(2, 'laser')).toBe('license')
-    expect(nextStepSlug(3, 'laser')).toBe('stripe')
+    expect(nextStepSlug(3, 'laser')).toBe('billing')
     expect(nextStepSlug(4, 'laser')).toBe('director')
     expect(nextStepSlug(5, 'laser')).toBe('services')
   })
@@ -75,10 +75,10 @@ describe('where a provider is sent next', () => {
 
 describe('what a provider may open', () => {
   it('refuses a step that does not apply, whatever the number says', () => {
-    // Typing the URL is the attack here. A room renter who reached the Connect step would
-    // create an Express account nobody will ever pay into, and then be asked to finish
-    // onboarding for it.
-    expect(canOpenStep('stripe', 5, 'room_only')).toBe(false)
+    // Typing the URL is the attack here. A room renter who reached the card step would hand
+    // over a card for laser time they never book — and before the rental model, would have
+    // created an Express account nobody will ever pay into.
+    expect(canOpenStep('billing', 5, 'room_only')).toBe(false)
     expect(canOpenStep('services', 5, 'room_only')).toBe(false)
   })
 

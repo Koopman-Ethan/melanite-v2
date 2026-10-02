@@ -80,6 +80,8 @@ export interface StripeCheckoutSessionObject {
   mode: string
   customer: string | null
   subscription: string | null
+  /** Set when `mode` is 'setup' — a card being put on file rather than a payment. */
+  setup_intent: string | null
   metadata: Record<string, string> | null
 }
 

@@ -11,7 +11,7 @@ export const ONBOARDING_STEPS = [
   { n: 1, slug: 'password', title: 'Create Password', blurb: 'Secure your account' },
   { n: 2, slug: 'profile', title: 'Personal Profile', blurb: 'Name, phone, credentials' },
   { n: 3, slug: 'license', title: 'License & Compliance', blurb: 'Verify your credentials' },
-  { n: 4, slug: 'stripe', title: 'Connect Stripe', blurb: 'For automatic payouts' },
+  { n: 4, slug: 'billing', title: 'Card on File', blurb: 'For equipment rental' },
   { n: 5, slug: 'director', title: 'Medical Director', blurb: 'Physician oversight' },
   { n: 6, slug: 'services', title: 'Select Services', blurb: 'Set pricing and duration' },
 ] as const
@@ -32,18 +32,19 @@ export type PracticeType = 'laser' | 'room_only'
 
 /** Steps that do not apply to somebody who only rents the room.
  *
- *  `stripe` is a CONNECT account — the rail that pays a provider their share of what a client
- *  paid Melanite. A room renter brings their own clients and bills them directly, so there is
- *  no share and nothing to pay them; the room itself they pay for out of pocket at checkout,
- *  which needs nothing set up in advance.
+ *  `billing` is the card Melanite charges to rent the LASER. A room renter never books laser
+ *  time, and the room itself they pay for out of pocket at checkout, which needs nothing set up
+ *  in advance — so there is nothing for a card on file to be charged for. This step used to be
+ *  the Stripe Connect account that paid them their share of a client's payment; it was excluded
+ *  then for the mirror-image reason, that there was no share to pay.
  *
- *  `services` is the Melanite laser catalogue, priced for the booking flow. What a room renter
- *  does in that room never touches this system, so the question does not apply — asking them to
- *  pick from a laser menu would record something untrue.
+ *  `services` is the Melanite laser catalogue. What a room renter does in that room never
+ *  touches this system, so the question does not apply — asking them to pick from a laser menu
+ *  would record something untrue.
  *
  *  The medical director step is NOT here. Whether they need one depends on what they perform,
  *  which the app cannot know, so it is asked rather than assumed. */
-const NOT_FOR_ROOM_ONLY = new Set<OnboardingSlug>(['stripe', 'services'])
+const NOT_FOR_ROOM_ONLY = new Set<OnboardingSlug>(['billing', 'services'])
 
 export function stepApplies(slug: OnboardingSlug, practice: PracticeType): boolean {
   return practice === 'laser' || !NOT_FOR_ROOM_ONLY.has(slug)
@@ -91,8 +92,8 @@ export function canOpenStep(
   practice: PracticeType = 'laser',
 ): boolean {
   // A step that does not apply is never openable, whatever the number says. Otherwise a room
-  // renter could reach the Connect step by typing the URL and create an account nobody will
-  // ever pay into.
+  // renter could reach the card step by typing the URL and hand over a card for laser time they
+  // will never book.
   if (!stepApplies(slug, practice)) return false
 
   // Measured against the step they would be SENT to, not against `onboardingStep + 1`.

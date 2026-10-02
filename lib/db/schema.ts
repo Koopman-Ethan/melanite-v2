@@ -397,6 +397,18 @@ export const providers = pgTable('providers', {
   billingCardExpMonth: integer(),
   billingCardExpYear: integer(),
 
+  /** When this provider accepted the rental terms, and WHICH ones.
+   *
+   *  The version is the load-bearing half. Storing only a timestamp would answer "did they
+   *  agree" but not "to what", and the fee schedule they agreed to is the whole point —
+   *  `hasAcceptedRentalTerms` compares against `RENTAL_TERMS_VERSION` so a substantive change
+   *  asks everybody again instead of silently applying to people who never saw it.
+   *
+   *  Same shape as `bookings.policyAckAt`/`policyAckVersion`, which records the equipment
+   *  policy a provider acknowledged on a particular appointment. */
+  rentalTermsAckAt: timestamp({ withTimezone: true }),
+  rentalTermsVersion: text(),
+
   medicalDirectorType: medicalDirectorType(),
   medicalDirectorStatus: medicalDirectorStatus().notNull().default('none'),
 

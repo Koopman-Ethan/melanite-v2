@@ -17,6 +17,7 @@ import {
   type PackClaim,
 } from '@/lib/rental/packs'
 import { rentalFeeFor } from '@/lib/rental-fees'
+import { hasAcceptedRentalTerms } from '@/lib/rental-terms'
 
 export interface BookState {
   error?: string
@@ -106,6 +107,7 @@ export async function createBooking(_prev: BookState, formData: FormData): Promi
       revenueModel: providers.revenueModel,
       customerId: providers.stripeBillingCustomerId,
       paymentMethodId: providers.billingPaymentMethodId,
+      rentalTermsVersion: providers.rentalTermsVersion,
     })
     .from(providers)
     .where(eq(providers.id, user.id))
@@ -129,6 +131,15 @@ export async function createBooking(_prev: BookState, formData: FormData): Promi
   if (payingRent && (!provider?.customerId || !provider?.paymentMethodId)) {
     return {
       error: 'Add a card before booking — Melanite charges the rental fee when you reserve the laser.',
+    }
+  }
+
+  // The rental terms say in as many words that a provider will be asked to accept a new fee
+  // schedule before their next booking. This is what makes that true rather than aspirational —
+  // a term the code does not implement is a term that quietly becomes false.
+  if (payingRent && !hasAcceptedRentalTerms(provider)) {
+    return {
+      error: 'The rental terms have changed. Accept them on your account page before booking.',
     }
   }
 

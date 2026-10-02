@@ -24,6 +24,7 @@ export function BookPanel({
   packs,
   payingRent,
   cardLast4,
+  termsAccepted,
 }: {
   services: ServiceView[]
   slots: SlotView[]
@@ -35,6 +36,7 @@ export function BookPanel({
   packs: PackView[]
   payingRent: boolean
   cardLast4: string | null
+  termsAccepted: boolean
 }) {
   const router = useRouter()
   const pathname = usePathname()
@@ -58,6 +60,7 @@ export function BookPanel({
       packs={packs}
       payingRent={payingRent}
       cardLast4={cardLast4}
+      termsAccepted={termsAccepted}
       onServiceChange={(id) => set({ service: id })}
       // Picking a day keeps the calendar on that day's month, so the two can never disagree.
       onDateChange={(d) => set({ date: d, month: d.slice(0, 7) })}
