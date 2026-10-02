@@ -46,10 +46,22 @@ export async function sendDigestPreview(
       }
     }
 
+    // Leads with rent, because that is what an ordinary day now consists of. The other two are
+    // mentioned only when they are not zero: "$0.00 to collect" every evening is how a line
+    // stops being read, and the unbilled count needs to stand out on the one day it is not
+    // zero.
+    const notes = [
+      `$${result.rent} rent`,
+      ...(Number(result.toCollect) > 0 ? [`$${result.toCollect} to collect`] : []),
+      ...(result.unbilled > 0
+        ? [`${result.unbilled} NOT BILLED`]
+        : []),
+    ]
+
     return {
       success: `Sent ${result.day}: ${result.appointments} ${
         result.appointments === 1 ? 'appointment' : 'appointments'
-      }, $${result.toCollect} to collect. Redirected — check the address in EMAIL_REDIRECT_TO.`,
+      }, ${notes.join(', ')}. Redirected — check the address in EMAIL_REDIRECT_TO.`,
     }
   } catch (error) {
     console.error('[digest] the rehearsal send failed', error)

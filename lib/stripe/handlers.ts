@@ -417,7 +417,11 @@ async function notifyProviderPaid(input: {
         charged: `$${toMoney(input.grossCents + input.tipCents)}`,
         tip: input.tipCents > 0 ? `$${toMoney(input.tipCents)}` : null,
         payout: `$${toMoney(input.payoutCents)}`,
-        url: `${await appOrigin()}/app/earnings`,
+        // Points at Charges rather than Earnings: this email only fires for a client payment
+        // made before the rental model, and the earnings page is no longer in the navigation.
+        // The page itself survives until the client-payment code is removed, but a link in an
+        // email outlives the release that sent it.
+        url: `${await appOrigin()}/app/charges`,
       }),
     })
   } catch (err) {

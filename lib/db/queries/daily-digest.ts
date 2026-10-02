@@ -48,6 +48,18 @@ export interface DigestAppointment {
   /** The method on the purchase row, when there is one: how it was ACTUALLY paid, which can
    *  differ from what the booking predicted. Null until somebody records it. */
   recordedMethod: string | null
+  /** Rent Melanite kept for this session, in cents. Nets off a refund, so a no-show that was
+   *  given back reads as zero rather than as income. Null when no rental fee was ever charged. */
+  rentalCents: number | null
+  /** A pack session covered it, so nothing was charged and nothing is missing. */
+  paidFromPack: boolean
+  /** A rental booking that was never billed and no pack paid for.
+   *
+   *  This is the crash window from `app/app/book/actions.ts` showing up where somebody will
+   *  actually see it. Zero rent on a session that used the laser is the one thing in this email
+   *  that means a bug rather than a quiet day.
+   */
+  unbilled: boolean
   /** How the suite was signed off after this session, or null if nobody did.
    *
    *  A left join rather than a correlated subquery: `end_of_use_checklists` is unique on
@@ -65,9 +77,15 @@ export interface DigestAppointment {
  *  to check rather than three that can disagree. `itemCount` is NOT NULL on the table, so a
  *  non-null value is what proves a row exists. */
 function asDigestAppointment(row: RawDigestAppointment): DigestAppointment {
-  const { closeoutItems, closeoutItemCount, closeoutDeviceIssue, ...rest } = row
+  const { closeoutItems, closeoutItemCount, closeoutDeviceIssue, hasRentalRow, ...rest } = row
   return {
     ...rest,
+    rentalCents: row.rentalCents === null ? null : Number(row.rentalCents),
+    // Decided on whether a ledger row EXISTS, not on whether it sums to something. A refunded
+    // no-show nets to zero and was billed perfectly correctly; treating that as unbilled would
+    // put a false alarm in the email every time somebody did not turn up.
+    unbilled:
+      row.paymentSource === 'rental' && !row.isHouse && !row.paidFromPack && !hasRentalRow,
     // A rental booking has no client — see `lib/booking-labels.ts`.
     clientName: clientLabel(row.clientName),
     closeout:
@@ -82,7 +100,13 @@ function asDigestAppointment(row: RawDigestAppointment): DigestAppointment {
   }
 }
 
-type RawDigestAppointment = Omit<DigestAppointment, 'closeout' | 'clientName'> & {
+type RawDigestAppointment = Omit<
+  DigestAppointment,
+  'closeout' | 'clientName' | 'unbilled' | 'rentalCents'
+> & {
+  rentalCents: number | null
+  /** Whether any rental_fee row exists at all, refund included. */
+  hasRentalRow: boolean
   /** Null on a rental booking. Resolved by `asDigestAppointment`, so the digest template never
    *  has to decide what to print for a client Melanite deliberately does not know about. */
   clientName: string | null
@@ -166,6 +190,22 @@ export async function getDigestDay(day: string): Promise<DigestDay> {
         closeoutItems: endOfUseChecklists.completedItems,
         closeoutItemCount: endOfUseChecklists.itemCount,
         closeoutDeviceIssue: endOfUseChecklists.deviceIssue,
+        // Summed rather than read off one row, so a purchase and its later refund net to what
+        // Melanite actually kept for the day.
+        rentalCents: sql<number | null>`(
+          select round(sum(l.gross_amount) * 100)::int from ledger_entries l
+          where l.subject_type = 'booking' and l.subject_id = ${bookings.id}
+            and l.source = 'rental_fee'
+        )`,
+        hasRentalRow: sql<boolean>`exists (
+          select 1 from ledger_entries l
+          where l.subject_type = 'booking' and l.subject_id = ${bookings.id}
+            and l.source = 'rental_fee'
+        )`,
+        paidFromPack: sql<boolean>`exists (
+          select 1 from provider_pack_redemptions r
+          where r.booking_id = ${bookings.id} and r.voided_at is null
+        )`,
         recordedMethod: sql<string | null>`(
           select l.payment_method from ledger_entries l
           where l.subject_type = 'booking' and l.subject_id = ${bookings.id}

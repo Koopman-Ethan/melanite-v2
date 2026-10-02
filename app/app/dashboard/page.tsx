@@ -4,8 +4,9 @@ import Link from 'next/link'
 import { BookingGates } from '@/components/booking-gates'
 import { bookingBlockedReasons, canBook, requireProvider } from '@/lib/auth/dal'
 import { getAppointmentCounts, getNextAppointment } from '@/lib/db/queries/appointments'
-import { getEarningsTotals } from '@/lib/db/queries/earnings'
+import { getChargeTotals } from '@/lib/db/queries/charges'
 import { getOutstandingPackageLinks } from '@/lib/db/queries/packages'
+import { packBalancesFor } from '@/lib/rental/packs'
 
 export const metadata: Metadata = { title: 'Dashboard · Melanite' }
 export const dynamic = 'force-dynamic'
@@ -52,14 +53,17 @@ export default async function DashboardPage() {
   // Only queried once the provider is actually cleared. Someone still in setup has no
   // appointments and no earnings, and four zeroes read as a broken page rather than an empty
   // one — the gates above are the answer they need.
-  const [next, counts, earnings, links] = cleared
+  const [next, counts, charges, links, packs] = cleared
     ? await Promise.all([
         getNextAppointment(user.id),
         getAppointmentCounts(user.id),
-        getEarningsTotals(user.id),
+        getChargeTotals(user.id),
         getOutstandingPackageLinks(user.id),
+        packBalancesFor(user.id),
       ])
-    : [null, null, null, []]
+    : [null, null, null, [], []]
+
+  const packSessionsLeft = packs.reduce((n, p) => n + p.sessionsRemaining, 0)
 
   const cherry = links.filter((l) => l.cherryStartedAt)
 
@@ -75,7 +79,7 @@ export default async function DashboardPage() {
           the answer was usually a support message rather than something on screen. */}
       <BookingGates gates={gates} heading="Booking is not available yet" />
 
-      {cleared && counts && earnings && (
+      {cleared && counts && charges && (
         <>
           <section className="space-y-3">
             <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">
@@ -109,28 +113,29 @@ export default async function DashboardPage() {
               This month
             </h2>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              {/* Earned and prepaid stay apart, for the reason the earnings page exists to
-                  preserve: package money arrives before the work does, so adding the two
-                  would overstate what has actually been earned. */}
-              <Stat
-                label="Earned"
-                value={usd(earnings.earnedMonth)}
-                sub="work delivered"
-              />
-              <Stat
-                label="Awaiting payout"
-                value={usd(earnings.pendingPayout)}
-                sub="not yet sent to your bank"
-              />
-              <Stat
-                label="Package sales"
-                value={usd(earnings.prepaidMonth)}
-                sub="paid up front"
-              />
+              {/* What this app can honestly tell a provider about their month. It used to
+                  lead with what they earned; under the rental model Melanite does not know
+                  that — they bill their own clients — so showing an earnings figure would
+                  mean showing a wrong one. What it does know is what it charged them. */}
               <Stat
                 label="Upcoming"
                 value={String(counts.upcoming)}
                 sub={counts.upcoming === 1 ? 'appointment' : 'appointments'}
+              />
+              <Stat
+                label="Laser rental"
+                value={usd(charges.rentalMonth)}
+                sub={`${charges.sessionsMonth} ${charges.sessionsMonth === 1 ? 'session' : 'sessions'} this month`}
+              />
+              <Stat
+                label="Pack sessions left"
+                value={String(packSessionsLeft)}
+                sub={packSessionsLeft > 0 ? 'already paid for' : 'no packs'}
+              />
+              <Stat
+                label="Paid Melanite"
+                value={usd(charges.allMonth)}
+                sub="this month, everything"
               />
             </div>
           </section>

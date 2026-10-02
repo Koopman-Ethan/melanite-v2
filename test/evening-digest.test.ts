@@ -114,6 +114,11 @@ describe('what the email says', () => {
     closeoutExpected: true,
     closeout: { itemsDone: 25, itemCount: 25, deviceIssue: false },
     missingLabels: [],
+    // The default row predates the rental model — a client booking with a share to collect.
+    // Rental rows are opted into by the tests that are about them, so every assertion written
+    // before the change keeps describing the day it was written about.
+    rent: null,
+    unbilled: false,
   }
 
   const build = (over: Partial<Parameters<typeof eveningDigestEmail>[0]> = {}) =>
@@ -121,9 +126,9 @@ describe('what the email says', () => {
       dayLabel: 'Tuesday, September 1',
       rows: [row],
       cancelled: 0,
-      grossTotal: '200.00',
       toCollectTotal: '100.00',
       toCollectCount: 1,
+      rentTotal: '0.00',
       url: 'https://app.melanitesuite.com/app/admin/revenue',
       ...over,
     })
@@ -137,12 +142,44 @@ describe('what the email says', () => {
       'No appointments · Tuesday, September 1',
     )
 
+    // On an ordinary rental day there is nothing to collect by definition — the rent was taken
+    // when the slot was booked. So the subject reports what the day MADE rather than repeating
+    // "nothing to collect" every night until it stops being read.
     const quiet = build({
-      rows: [{ ...row, toCollect: null }],
+      rows: [{ ...row, toCollect: null, rent: '40.00' }],
       toCollectTotal: '0.00',
       toCollectCount: 0,
+      rentTotal: '40.00',
     })
-    expect(quiet.subject).toBe('Nothing to collect · 1 appointment · Tuesday, September 1')
+    expect(quiet.subject).toBe('1 appointment · $40.00 rent · Tuesday, September 1')
+  })
+
+  it('leads with an unbilled session above everything else', () => {
+    // The only line in this email that means something is broken rather than something needs
+    // doing, so it outranks the money.
+    const broken = build({
+      rows: [{ ...row, toCollect: null, rent: null, unbilled: true }],
+      toCollectTotal: '0.00',
+      toCollectCount: 0,
+      rentTotal: '0.00',
+    })
+    expect(broken.subject).toBe('1 session not billed · Tuesday, September 1')
+    expect(broken.text).toContain('NOT BILLED')
+    expect(broken.html).toContain('No rent was taken for this session.')
+  })
+
+  it('still shows a pre-cutover collection alongside the rent', () => {
+    // Bookings made before the change take months to work through. An email that stopped
+    // mentioning them would quietly lose Keoni money.
+    const mixed = build({
+      rows: [row, { ...row, toCollect: null, rent: '90.00' }],
+      toCollectTotal: '100.00',
+      toCollectCount: 1,
+      rentTotal: '90.00',
+    })
+    expect(mixed.subject).toBe('1 to collect ($100.00) · Tuesday, September 1')
+    expect(mixed.text).toContain('TO COLLECT')
+    expect(mixed.text).toContain('$90.00 rent taken')
   })
 
   it('still sends on an empty evening, so silence means the job is broken', () => {

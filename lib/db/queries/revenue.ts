@@ -256,6 +256,104 @@ export async function getOwedByProvider(): Promise<OwedByProvider[]> {
   return rows
 }
 
+export interface LaserUse {
+  providerId: string
+  providerName: string
+  /** Sessions this month and all time, counted off bookings rather than ledger rows so a
+   *  pack-covered session is still a session. */
+  sessionsMonth: number
+  sessionsLifetime: number
+  /** Rent actually taken for those sessions. Nets off refunds, so a no-show that was given
+   *  back does not inflate it. */
+  rentMonth: string
+  rentLifetime: string
+  /** Sessions drawn from a pack this month. These produce no per-booking charge, so without
+   *  this column a provider working through a pack looks like one using the laser for free. */
+  packSessionsMonth: number
+}
+
+/**
+ * Who is using the laser, and what it brought in.
+ *
+ * The question the rental model makes central. Under the split, "revenue by provider" meant
+ * whose clients spent the most, which was really a measure of their pricing. Now the machine is
+ * the product and the useful question is how much of it each provider is taking — one booking a
+ * week at $40 and twelve at $130 are the same line on a revenue chart and completely different
+ * businesses to be renting to.
+ *
+ * Rent and sessions are counted SEPARATELY and from different places on purpose. Sessions come
+ * from `bookings`, rent from `ledger_entries`. A provider halfway through an eight-pack shows
+ * eight sessions and no rent for the month, which is correct — the money arrived when the pack
+ * was bought — and the pack column is what stops that reading as a hole.
+ */
+export async function getLaserUse(): Promise<LaserUse[]> {
+  const rows = await db.execute<{
+    provider_id: string
+    provider_name: string
+    sessions_month: number
+    sessions_lifetime: number
+    rent_month: string
+    rent_lifetime: string
+    pack_sessions_month: number
+  }>(sql`
+    WITH denver_month AS (
+      SELECT to_char(now() AT TIME ZONE 'America/Denver', 'YYYY-MM') AS ym
+    ),
+    sessions AS (
+      SELECT b.provider_id,
+             count(*)::int AS lifetime,
+             count(*) FILTER (
+               WHERE to_char(b.start_time AT TIME ZONE 'America/Denver', 'YYYY-MM')
+                   = (SELECT ym FROM denver_month)
+             )::int AS month,
+             count(*) FILTER (
+               WHERE to_char(b.start_time AT TIME ZONE 'America/Denver', 'YYYY-MM')
+                   = (SELECT ym FROM denver_month)
+                 AND EXISTS (
+                   SELECT 1 FROM provider_pack_redemptions r
+                    WHERE r.booking_id = b.id AND r.voided_at IS NULL
+                 )
+             )::int AS pack_month
+        FROM bookings b
+       WHERE b.payment_source = 'rental' AND b.status <> 'cancelled'
+       GROUP BY b.provider_id
+    ),
+    rent AS (
+      SELECT l.provider_id,
+             coalesce(sum(l.melanite_cut), 0) AS lifetime,
+             coalesce(sum(l.melanite_cut) FILTER (
+               WHERE to_char(l.created_at AT TIME ZONE 'America/Denver', 'YYYY-MM')
+                   = (SELECT ym FROM denver_month)
+             ), 0) AS month
+        FROM ledger_entries l
+       WHERE l.source = 'rental_fee'
+       GROUP BY l.provider_id
+    )
+    SELECT p.id                                              AS provider_id,
+           p.first_name || ' ' || p.last_name                AS provider_name,
+           coalesce(s.month, 0)                              AS sessions_month,
+           coalesce(s.lifetime, 0)                           AS sessions_lifetime,
+           coalesce(r.month, 0)::text                        AS rent_month,
+           coalesce(r.lifetime, 0)::text                     AS rent_lifetime,
+           coalesce(s.pack_month, 0)                         AS pack_sessions_month
+      FROM providers p
+      LEFT JOIN sessions s ON s.provider_id = p.id
+      LEFT JOIN rent r     ON r.provider_id = p.id
+     WHERE coalesce(s.lifetime, 0) > 0 OR coalesce(r.lifetime, 0) <> 0
+     ORDER BY coalesce(r.month, 0) DESC, coalesce(s.month, 0) DESC
+  `)
+
+  return (rows.rows ?? []).map((r) => ({
+    providerId: r.provider_id,
+    providerName: r.provider_name,
+    sessionsMonth: Number(r.sessions_month),
+    sessionsLifetime: Number(r.sessions_lifetime),
+    rentMonth: r.rent_month,
+    rentLifetime: r.rent_lifetime,
+    packSessionsMonth: Number(r.pack_sessions_month),
+  }))
+}
+
 export interface ServiceRevenue {
   serviceId: string | null
   serviceName: string
@@ -316,7 +414,7 @@ export async function getRecentEntries(limit = 15): Promise<RecentEntry[]> {
 
 /** Everything the admin revenue page needs, in parallel. */
 export async function getAdminRevenue() {
-  const [totals, bySource, byMethod, byProvider, byService, series, recent, owed] =
+  const [totals, bySource, byMethod, byProvider, byService, series, recent, owed, laserUse] =
     await Promise.all([
       getRevenueTotals(),
       getRevenueBySource(),
@@ -326,7 +424,8 @@ export async function getAdminRevenue() {
       getMonthlySeries(),
       getRecentEntries(),
       getOwedByProvider(),
+      getLaserUse(),
     ])
 
-  return { totals, bySource, byMethod, byProvider, byService, series, recent, owed }
+  return { totals, bySource, byMethod, byProvider, byService, series, recent, owed, laserUse }
 }

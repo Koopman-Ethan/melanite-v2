@@ -14,6 +14,13 @@ import {
 
 // Provider earnings.
 //
+// NOT SURFACED ANYWHERE SINCE THE RENTAL MODEL. Melanite no longer collects on a provider's
+// behalf, so there is no share to report and no payout to wait for; `/app/charges` replaced the
+// page this served. Kept, with its tests, until the client-payment code is removed as one
+// revertible commit — the figures it computes are still the truth about every booking made
+// before the change, and `test/earnings-payer.test.ts` is what proves the `payer` filter below
+// still holds.
+//
 // THE DISTINCTION THIS PAGE EXISTS TO PRESERVE, from v1's own note on GET /earnings:
 //
 //   "the 50/50 split settles at PURCHASE, so package payout is money received for sessions

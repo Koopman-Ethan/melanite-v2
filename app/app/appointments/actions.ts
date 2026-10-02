@@ -3,6 +3,8 @@
 import { and, eq, isNull, sql } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 
+import { releaseRentalForBooking, type RentalReleaseResult } from '@/lib/rental/release'
+
 import { clientLabel } from '@/lib/booking-labels'
 import { requireProvider } from '@/lib/auth/dal'
 import { db } from '@/lib/db'
@@ -42,6 +44,21 @@ export interface ActionState {
  *  paid for. That guard is kept — the UI picks the right action from `paymentSource`, but the
  *  server must not depend on the UI having got it right. It fails closed.
  */
+/** How a returned rental fee is reported back to the provider.
+ *
+ *  Said out loud rather than left to the charges page, because money coming back is the half of
+ *  a refund people do not check for. An empty string when nothing moved — most appointments
+ *  before the rental model, and Melanite's own.
+ */
+function rentalReleaseNote(result: RentalReleaseResult): string {
+  if ('returnedSession' in result) return ' The pack session has gone back on your pack.'
+  if ('refundedCents' in result) {
+    return ` The $${(result.refundedCents / 100).toFixed(2)} rental fee has been refunded.`
+  }
+  if ('error' in result) return ` The rental fee could not be refunded: ${result.error}`
+  return ''
+}
+
 export async function cancelBooking(
   bookingId: string,
   chargeLateFee = false,
@@ -104,24 +121,31 @@ export async function cancelBooking(
   // common case and the one most likely to be forgotten.
   await notifyCancelled(bookingId, false)
 
+  // The slot goes back, so the rent for it does too. See `lib/rental/release.ts` for why a
+  // cancellation is treated the same as a no-show here.
+  const released = await releaseRentalForBooking(bookingId)
+  const rentNote = rentalReleaseNote(released)
+
   // The fee is opt-in per cancellation, never automatic. Charging a card without the provider
   // deciding to is not a default anyone should be able to stumble into.
-  if (!chargeLateFee) return { success: 'Appointment cancelled.' }
+  if (!chargeLateFee) return { success: `Appointment cancelled.${rentNote}` }
 
   const settings = await getCheckoutSettings()
   const hoursOut = (booking.startTime.getTime() - Date.now()) / 3_600_000
   if (hoursOut > settings.lateCancellationHours) {
     return {
-      success: 'Appointment cancelled.',
+      success: `Appointment cancelled.${rentNote}`,
       feeNote: `No fee charged — this was cancelled more than ${settings.lateCancellationHours} hours ahead.`,
     }
   }
 
   const fee = await chargeBookingFee(bookingId, 'late_cancellation_fee')
   if (fee.charged) {
-    return { success: `Appointment cancelled. $${fee.amount} late cancellation fee charged.` }
+    return {
+      success: `Appointment cancelled.${rentNote} $${fee.amount} late cancellation fee charged.`,
+    }
   }
-  return { success: 'Appointment cancelled.', feeNote: fee.error ?? fee.skipped }
+  return { success: `Appointment cancelled.${rentNote}`, feeNote: fee.error ?? fee.skipped }
 }
 
 /** Cancel a package redemption and give the session back.
@@ -399,13 +423,18 @@ export async function markNoShow(
 
   revalidatePath('/app/appointments')
 
-  if (!chargeFee) return { success: 'Marked as a no-show.' }
+  // Keoni's rule: a provider does not owe the rental fee when their client does not turn up.
+  // The fee was taken when the slot was reserved, so honouring that means giving it back.
+  const released = await releaseRentalForBooking(bookingId)
+  const rentNote = rentalReleaseNote(released)
+
+  if (!chargeFee) return { success: `Marked as a no-show.${rentNote}` }
 
   const fee = await chargeBookingFee(bookingId, 'no_show_fee')
   if (fee.charged) {
-    return { success: `Marked as a no-show. $${fee.amount} fee charged.` }
+    return { success: `Marked as a no-show.${rentNote} $${fee.amount} fee charged.` }
   }
-  return { success: 'Marked as a no-show.', feeNote: fee.error ?? fee.skipped }
+  return { success: `Marked as a no-show.${rentNote}`, feeNote: fee.error ?? fee.skipped }
 }
 
 /** Mark a past appointment as completed. v1 had no such endpoint — bookings simply stayed

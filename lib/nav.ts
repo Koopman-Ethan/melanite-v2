@@ -68,7 +68,7 @@ const ITEMS: NavItem[] = [
   { label: 'Book Laser Time', href: '/app/book', providerOnly: true },
   { label: 'Dashboard', href: '/app/dashboard' },
   { label: 'Appointments', href: '/app/appointments', providerOnly: true },
-  { label: 'Earnings', href: '/app/earnings', providerOnly: true },
+  { label: 'Charges', href: '/app/charges', providerOnly: true },
   { label: 'Packages', href: '/app/packages', providerOnly: true },
   { label: 'Prepaid', href: '/app/prepaid', providerOnly: true },
   { label: 'Daily Room Rental', href: '/app/room-rental', providerOnly: true },

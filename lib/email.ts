@@ -705,10 +705,26 @@ export function bookingPaymentSummary(input: {
   externalMethod: string | null
   /** The `money()` column, so a string like '180.00'. */
   price: string
+  /** Rent Melanite kept, for a `rental` booking. Null when no rental fee row exists at all,
+   *  which is NOT the same as zero — see the case below. */
+  rentCents?: number | null
+  /** A pack session covered it, so nothing was charged and nothing is missing. */
+  paidFromPack?: boolean
 }): string {
   const amount = `$${Number(input.price).toFixed(2)}`
 
   switch (input.paymentSource) {
+    case 'rental': {
+      // There is no client payment to describe. What Melanite needs to know about a rental
+      // booking is whether it collected the rent, which is a different question from the one
+      // every other branch here answers.
+      if (input.paidFromPack) return 'Laser rental, covered by a pack session — nothing charged'
+      if (input.rentCents === null || input.rentCents === undefined) {
+        return 'Laser rental — NO FEE RECORDED'
+      }
+      if (input.rentCents === 0) return 'Laser rental, refunded — nothing kept'
+      return `$${(input.rentCents / 100).toFixed(2)} rent charged to the provider`
+    }
     case 'external': {
       const raw = input.externalMethod ?? ''
       const method = EXTERNAL_METHOD_LABELS[raw] ?? 'an external method'
@@ -774,8 +790,15 @@ export interface DigestEmailRow {
   providerName: string
   /** `bookingPaymentSummary(...)` — the one sentence about what happens about money. */
   paying: string
-  /** Melanite's half, when somebody has to go and get it. Null when there is nothing to chase. */
+  /** Melanite's half, when somebody has to go and get it. Null when there is nothing to chase.
+   *
+   *  Only ever set for a booking made before the rental model. Kept because those take months
+   *  to work through and an email that stopped mentioning them would lose Keoni money. */
   toCollect: string | null
+  /** Rent kept for this session. Null when none was charged. */
+  rent: string | null
+  /** A rental session nobody was billed for. The one line in this email that means a bug. */
+  unbilled: boolean
   isHouse: boolean
   status: string
   /** Was a close-out owed for this session at all? False for a no-show — nobody touched the room,
@@ -804,23 +827,30 @@ export function eveningDigestEmail(input: {
   dayLabel: string
   rows: DigestEmailRow[]
   cancelled: number
-  grossTotal: string
   toCollectTotal: string
   toCollectCount: number
+  /** Rent taken across the day. */
+  rentTotal: string
   url: string
 }): Omit<EmailMessage, 'to'> {
-  const { dayLabel, rows, cancelled, grossTotal, toCollectTotal, toCollectCount, url } = input
+  const { dayLabel, rows, cancelled, toCollectTotal, toCollectCount, rentTotal, url } = input
   const owed = rows.filter((r) => r.toCollect !== null)
+  const unbilled = rows.filter((r) => r.unbilled)
   const appts = `${rows.length} ${rows.length === 1 ? 'appointment' : 'appointments'}`
 
   // The count and the money come before the date: on a phone lock screen that is the only
   // part she reads, and it is what decides whether the email needs opening at all.
+  //
+  // An unbilled session outranks everything else: it is the only line that means something is
+  // broken rather than something needs doing.
   const subject =
     rows.length === 0
       ? `No appointments · ${dayLabel}`
-      : toCollectCount > 0
-        ? `${toCollectCount} to collect (${usd(toCollectTotal)}) · ${dayLabel}`
-        : `Nothing to collect · ${appts} · ${dayLabel}`
+      : unbilled.length > 0
+        ? `${unbilled.length} session${unbilled.length === 1 ? '' : 's'} not billed · ${dayLabel}`
+        : toCollectCount > 0
+          ? `${toCollectCount} to collect (${usd(toCollectTotal)}) · ${dayLabel}`
+          : `${appts} · ${usd(rentTotal)} rent · ${dayLabel}`
 
   const cancelledLine =
     cancelled > 0
@@ -833,6 +863,14 @@ export function eveningDigestEmail(input: {
   if (rows.length === 0) {
     textLines.push('No appointments today. Nothing to chase.', '')
   } else {
+    if (unbilled.length > 0) {
+      textLines.push('NOT BILLED — these used the laser and no rent was taken', '')
+      for (const r of unbilled) {
+        textLines.push(`  ${r.providerName} — ${r.serviceName}  (${r.when})`)
+      }
+      textLines.push('')
+    }
+
     if (owed.length > 0) {
       textLines.push(`TO COLLECT — ${usd(toCollectTotal)}`, '')
       for (const r of owed) {
@@ -841,7 +879,7 @@ export function eveningDigestEmail(input: {
       textLines.push('')
     }
 
-    textLines.push(`THE DAY — ${appts}, ${usd(grossTotal)} charged`, '')
+    textLines.push(`THE DAY — ${appts}, ${usd(rentTotal)} rent taken`, '')
     for (const r of rows) {
       textLines.push(`  ${r.when}  ${r.serviceName}`)
       textLines.push(`    Client:   ${r.clientName}`)
@@ -876,6 +914,11 @@ export function eveningDigestEmail(input: {
        </div>
        <div style="font-size:13px;margin-top:4px">${esc(r.paying)}</div>
        ${
+         r.unbilled
+           ? `<div style="font-size:12px;color:#C2554D;margin-top:4px">No rent was taken for this session.</div>`
+           : ''
+       }
+       ${
          r.status === 'upcoming'
            ? `<div style="font-size:12px;color:#B8965A;margin-top:4px">Still marked upcoming — nobody closed this out.</div>`
            : ''
@@ -895,7 +938,19 @@ export function eveningDigestEmail(input: {
   const body =
     rows.length === 0
       ? p('No appointments today. Nothing to chase.')
-      : (owed.length > 0
+      : (unbilled.length > 0
+          ? p('<strong style="color:#C2554D">Not billed — the laser was used and no rent was taken</strong>') +
+            unbilled
+              .map(
+                (r) =>
+                  `<div style="padding:8px 0;font-size:14px">
+                     <strong>${esc(r.providerName)}</strong> — ${esc(r.serviceName)}
+                     <span style="color:#666">(${esc(r.when)})</span>
+                   </div>`,
+              )
+              .join('')
+          : '') +
+        (owed.length > 0
           ? p(`<strong>To collect — ${usd(toCollectTotal)}</strong>`) +
             owed
               .map(
@@ -909,8 +964,8 @@ export function eveningDigestEmail(input: {
             p(
               '<span style="font-size:13px;color:#666">Recording the payment under Tools clears these.</span>',
             )
-          : p('<strong>Nothing to collect today.</strong>')) +
-        p(`<strong>The day</strong> — ${appts}, ${usd(grossTotal)} charged`) +
+          : '') +
+        p(`<strong>The day</strong> — ${appts}, ${usd(rentTotal)} rent taken`) +
         rows.map(row).join('')
 
   const footer = cancelledLine

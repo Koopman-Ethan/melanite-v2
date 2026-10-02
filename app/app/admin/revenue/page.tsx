@@ -13,6 +13,7 @@ export const metadata: Metadata = { title: 'Revenue · Melanite Admin' }
 export const dynamic = 'force-dynamic'
 
 const SOURCE_LABELS: Record<string, string> = {
+  rental_fee: 'Laser rental',
   booking: 'Laser bookings',
   package: 'Packages',
   room_rental: 'Room rental',
@@ -22,7 +23,8 @@ const SOURCE_LABELS: Record<string, string> = {
 }
 
 const SOURCE_COLORS: Record<string, string> = {
-  booking: 'bg-gold',
+  rental_fee: 'bg-gold',
+  booking: 'bg-gold-dim',
   package: 'bg-info',
   room_rental: 'bg-warning',
   membership: 'bg-success',
@@ -64,7 +66,7 @@ const METHOD_LABELS: Record<string, string> = {
 export default async function AdminRevenuePage() {
   // Authorization happens here, not in proxy.ts — the DAL is the boundary.
   await requireAdmin()
-  const { totals, bySource, byMethod, byProvider, byService, series, recent, owed } =
+  const { totals, bySource, byMethod, byProvider, byService, series, recent, owed, laserUse } =
     await getAdminRevenue()
 
   const lifetime = Number(totals.lifetimeRevenue)
@@ -213,6 +215,60 @@ export default async function AdminRevenuePage() {
               ))}
             </div>
           </div>
+        </section>
+      )}
+
+      {laserUse.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">
+            Who is using the laser
+          </h2>
+          <div
+            tabIndex={0}
+            role="region"
+            aria-label="Scrollable table"
+            className="overflow-x-auto rounded-card border border-line"
+          >
+            <table className="w-full text-sm">
+              <thead className="text-xs uppercase tracking-wide text-ink-muted">
+                <tr className="border-b border-line">
+                  <th className="p-3 text-left font-medium">Provider</th>
+                  <th className="p-3 text-right font-medium">Sessions this month</th>
+                  <th className="p-3 text-right font-medium">Rent this month</th>
+                  <th className="p-3 text-right font-medium">Sessions all time</th>
+                  <th className="p-3 text-right font-medium">Rent all time</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-line">
+                {laserUse.map((row) => (
+                  <tr key={row.providerId}>
+                    <td className="p-3">{row.providerName}</td>
+                    <td className="p-3 text-right tabular-nums">
+                      {row.sessionsMonth}
+                      {/* Said out loud, because otherwise a provider working through a pack
+                          reads as somebody using the machine for nothing. The money for those
+                          sessions arrived when the pack was bought. */}
+                      {row.packSessionsMonth > 0 && (
+                        <span className="text-ink-faint"> ({row.packSessionsMonth} on a pack)</span>
+                      )}
+                    </td>
+                    <td className="p-3 text-right tabular-nums font-medium">{usd(row.rentMonth)}</td>
+                    <td className="p-3 text-right tabular-nums text-ink-muted">
+                      {row.sessionsLifetime}
+                    </td>
+                    <td className="p-3 text-right tabular-nums text-ink-muted">
+                      {usd(row.rentLifetime)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-xs text-ink-faint">
+            Sessions are counted from appointments, rent from the ledger, so they answer
+            different questions. A month of pack sessions with no rent against it is correct —
+            that money came in when the pack was sold.
+          </p>
         </section>
       )}
 

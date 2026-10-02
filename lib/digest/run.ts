@@ -16,7 +16,7 @@ import {
   sendEmail,
   type DigestEmailRow,
 } from '@/lib/email'
-import { toCents, toMoney } from '@/lib/money'
+import { toMoney } from '@/lib/money'
 import { digestDayFor } from '@/lib/validation'
 import { appOrigin } from '@/lib/stripe/config'
 
@@ -36,6 +36,10 @@ export interface DigestRunResult {
   appointments: number
   cancelled: number
   toCollect: string
+  /** Rent taken across the day. */
+  rent: string
+  /** Sessions that used the laser with no rent recorded — a bug, not a quiet day. */
+  unbilled: number
   delivered: boolean
   /** Set when nothing was sent because this day had already gone out. */
   skipped?: 'already-sent'
@@ -86,6 +90,8 @@ export async function runEveningDigest(
         appointments: 0,
         cancelled: 0,
         toCollect: '0.00',
+        rent: '0.00',
+        unbilled: 0,
         delivered: false,
         skipped: 'already-sent',
       }
@@ -94,13 +100,13 @@ export async function runEveningDigest(
 
   const data = await getDigestDay(denverDay)
 
-  let grossCents = 0
   let owedCents = 0
+  let rentCents = 0
 
   const rows: DigestEmailRow[] = data.appointments.map((a) => {
     const cents = toCollectCents(a, data.providerSharePct)
-    grossCents += toCents(a.price)
     owedCents += cents
+    rentCents += a.rentalCents ?? 0
 
     return {
       when: denverTimeLabel(a.startTime),
@@ -113,8 +119,12 @@ export async function runEveningDigest(
         paymentSource: a.paymentSource,
         externalMethod: a.externalMethod,
         price: a.price,
+        rentCents: a.rentalCents,
+        paidFromPack: a.paidFromPack,
       }),
       toCollect: cents > 0 ? toMoney(cents) : null,
+      rent: a.rentalCents === null ? null : toMoney(a.rentalCents),
+      unbilled: a.unbilled,
       isHouse: a.isHouse,
       status: a.status,
       // A no-show never touched the room, so there is nothing to account for and flagging it as
@@ -136,9 +146,9 @@ export async function runEveningDigest(
       dayLabel: roomDateLabel(denverDay),
       rows,
       cancelled: data.cancelled,
-      grossTotal: toMoney(grossCents),
       toCollectTotal: toCollect,
       toCollectCount: rows.filter((r) => r.toCollect !== null).length,
+      rentTotal: toMoney(rentCents),
       url: `${origin}/app/admin/revenue`,
     }),
   })
@@ -148,6 +158,8 @@ export async function runEveningDigest(
     appointments: rows.length,
     cancelled: data.cancelled,
     toCollect,
+    rent: toMoney(rentCents),
+    unbilled: rows.filter((r) => r.unbilled).length,
     delivered: result.delivered,
     ...(result.detail ? { reason: result.detail } : {}),
   }
