@@ -65,8 +65,9 @@ export default async function BillingStep() {
         tiers={RENTAL_TIERS.map((t) => ({
           key: t.key,
           label: t.label,
-          singleCents: t.fee.singleCents,
-          packs: t.fee.packs.map((p) => ({ sessions: p.sessions, cents: p.cents })),
+          singleCents: t.singleCents,
+          suggestedLowCents: t.suggestedLowCents,
+          suggestedHighCents: t.suggestedHighCents,
         }))}
       />
     </StepShell>

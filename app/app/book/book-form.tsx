@@ -262,9 +262,9 @@ export function BookForm({
             </Notice>
           ) : pack ? (
             <div className="rounded-field border border-line p-3 text-xs leading-relaxed text-ink-secondary">
-              <strong className="text-ink">Covered by your pack.</strong> {pack.sessionsRemaining}{' '}
-              {pack.sessionsRemaining === 1 ? 'session' : 'sessions'} left on {pack.label}. Nothing
-              will be charged to your card.
+              <strong className="text-ink">Covered by a credited session.</strong>{' '}
+              {pack.sessionsRemaining} {pack.sessionsRemaining === 1 ? 'session' : 'sessions'} left
+              on {pack.label}. Nothing will be charged to your card.
             </div>
           ) : needsCard ? (
             <Notice>

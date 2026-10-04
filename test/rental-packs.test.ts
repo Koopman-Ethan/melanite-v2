@@ -4,17 +4,20 @@ import {
   claimPackSession,
   grantPack,
   packBalancesFor,
-  purchasePack,
   recordPackRedemption,
   releasePackSession,
   returnPackSession,
 } from '@/lib/rental/packs'
 import { tierByKey } from '@/lib/rental-fees'
 
-// Laser time bought in advance.
+// Fee-free laser sessions a provider has been granted.
 //
-// A pack is a balance of something valuable, so the tests that matter are the ones about it
-// changing by exactly one: a session spent twice is a session the provider paid for and lost, and
+// Packs are no longer SOLD — Keoni withdrew the rates on 3 October — so there is nothing here
+// about buying one. What is left is the entitlement, which the cutover depends on: Karly is owed
+// the sessions her clients already paid for, and this is the mechanism that honours them.
+//
+// A grant is a balance of something valuable, so the tests that matter are the ones about it
+// changing by exactly one: a session spent twice is a session the provider is owed and lost, and
 // a session returned twice is one Melanite gave away. Both are silent — nothing throws, the
 // counter just reads wrong a month later.
 //
@@ -288,27 +291,6 @@ describe('granting a pack', () => {
   it('refuses a free pack with no note, before the database has to', async () => {
     const out = await grantPack({ providerId, tierKey: 'lhr_xs', sessions: 6, note: '  ' })
     expect(out).toHaveProperty('error')
-  })
-})
-
-describe('selling a pack, refusals before Stripe', () => {
-  it('refuses a tier that does not exist', async () => {
-    const out = await purchasePack({ providerId, tierKey: 'nonsense', sessions: 6 })
-    expect(out).toHaveProperty('error')
-  })
-
-  it('refuses a block size that tier does not publish', async () => {
-    // Hair removal sells 6 and 8. A 5-pack has no published price, and inventing one by
-    // multiplying the single rate would sell a pack at no discount.
-    const out = await purchasePack({ providerId, tierKey: 'lhr_xs', sessions: 5 })
-    expect(out).toHaveProperty('error')
-    if ('error' in out) expect(out.error).toMatch(/not sold in blocks of 5/i)
-  })
-
-  it('refuses a provider with no card on file', async () => {
-    const out = await purchasePack({ providerId, tierKey: 'lhr_xs', sessions: 6 })
-    expect(out).toHaveProperty('error')
-    if ('error' in out) expect(out.error).toMatch(/no card on file/i)
   })
 })
 

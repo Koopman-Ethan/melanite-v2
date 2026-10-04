@@ -267,8 +267,8 @@ export interface LaserUse {
    *  back does not inflate it. */
   rentMonth: string
   rentLifetime: string
-  /** Sessions drawn from a pack this month. These produce no per-booking charge, so without
-   *  this column a provider working through a pack looks like one using the laser for free. */
+  /** Credited sessions used this month. These produce no charge, so without this column a
+   *  provider working through a grant looks like one using the laser for free. */
   packSessionsMonth: number
 }
 
@@ -282,9 +282,9 @@ export interface LaserUse {
  * businesses to be renting to.
  *
  * Rent and sessions are counted SEPARATELY and from different places on purpose. Sessions come
- * from `bookings`, rent from `ledger_entries`. A provider halfway through an eight-pack shows
- * eight sessions and no rent for the month, which is correct — the money arrived when the pack
- * was bought — and the pack column is what stops that reading as a hole.
+ * from `bookings`, rent from `ledger_entries`. A provider working through credited sessions
+ * shows use and no rent, which is correct — nothing was charged for them, by arrangement — and
+ * the credited column is what stops that reading as a hole.
  */
 export async function getLaserUse(): Promise<LaserUse[]> {
   const rows = await db.execute<{

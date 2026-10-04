@@ -4,9 +4,8 @@ import {
   RENTAL_TIERS,
   SERVICE_TIER,
   UNPRICED,
-  packFeeFor,
-  packsFor,
   rentalFeeFor,
+  tierByKey,
   tierForService,
 } from '@/lib/rental-fees'
 
@@ -20,61 +19,65 @@ import {
 /** Every fee in Keoni's guide, written out by hand ON PURPOSE.
  *
  *  Deriving these from the module would make the test pass for any set of numbers, which is the
- *  one thing it must not do. If this fails, check the guide before touching the expectation. */
+ *  one thing it must not do. If this fails, check the guide before touching the expectation.
+ *
+ *  Revised 3 October 2026 — the second schedule. XS hair removal came down from $40 to $35,
+ *  medium went $90 to $95, large $130 to $120, and the tattoo sizes lost their odd cents. The
+ *  four services that had no fee at all now have one. */
 const FROZEN_SINGLES: Record<string, number> = {
-  lhr_xs: 4000,
+  lhr_xs: 3500,
   lhr_small: 6000,
-  lhr_medium: 9000,
-  lhr_large: 13000,
+  lhr_medium: 9500,
+  lhr_large: 12000,
+
   tattoo_xxs: 5000,
-  tattoo_xs: 8700,
-  tattoo_small: 11200,
+  tattoo_xs: 8500,
+  tattoo_small: 11000,
   tattoo_medium: 15000,
   tattoo_large: 20000,
-  clearlift_face: 18500,
-  clearlift_lip: 7000,
-}
 
-const FROZEN_PACKS: Record<string, Record<number, number>> = {
-  lhr_xs: { 6: 18500, 8: 26500 },
-  lhr_small: { 6: 24500, 8: 29500 },
-  lhr_medium: { 6: 39500, 8: 45000 },
-  lhr_large: { 6: 62500, 8: 77500 },
-  tattoo_xxs: { 8: 32500 },
-  tattoo_xs: { 8: 57500 },
-  tattoo_small: { 8: 72500 },
-  tattoo_medium: { 8: 100000 },
-  tattoo_large: { 8: 130000 },
-  clearlift_face: { 3: 50000, 6: 90000 },
-  clearlift_lip: {},
+  ipl_face: 15000,
+  ipl_neck: 10000,
+  ipl_chest: 13500,
+  ipl_hands: 7500,
+  vascupen: 4500,
+
+  clearlift_face: 17500,
+  clearlift_neck: 9500,
+  clearlift_hands: 8500,
+  clearlift_lip: 7000,
+  sunspots: 4500,
 }
 
 describe('the fee schedule, frozen', () => {
   it('charges what the guide says for one session', () => {
-    const actual = Object.fromEntries(RENTAL_TIERS.map((t) => [t.key, t.fee.singleCents]))
+    const actual = Object.fromEntries(RENTAL_TIERS.map((t) => [t.key, t.singleCents]))
     expect(actual).toEqual(FROZEN_SINGLES)
   })
 
-  it('charges what the guide says for a pack', () => {
-    const actual = Object.fromEntries(
-      RENTAL_TIERS.map((t) => [
-        t.key,
-        Object.fromEntries(t.fee.packs.map((p) => [p.sessions, p.cents])),
-      ]),
-    )
-    expect(actual).toEqual(FROZEN_PACKS)
+  it('sells no packs', () => {
+    // Keoni withdrew pack rates on 3 October — packages are the provider's business. A pack
+    // rate reappearing here would put Melanite back in the middle of a pricing decision, so it
+    // has to be a deliberate change rather than a quiet one.
+    for (const tier of RENTAL_TIERS) {
+      expect(Object.keys(tier)).not.toContain('packs')
+    }
   })
 
-  it('never prices a pack at or above buying the sessions singly', () => {
-    // A pack exists to be cheaper. One priced the wrong way round would be a data-entry slip that
-    // no other test would catch, and a provider would find it before we did.
+  it('keeps every fee below the price the guide suggests charging', () => {
+    // The whole model: the fee is roughly half of market, and what the provider charges above
+    // it is theirs. A fee at or above the suggested price would mean renting at a loss, which
+    // is the kind of data-entry slip a provider finds before we do.
     for (const tier of RENTAL_TIERS) {
-      for (const pack of tier.fee.packs) {
-        expect(
-          pack.cents,
-          `${tier.key} ${pack.sessions}-pack costs more than ${pack.sessions} singles`,
-        ).toBeLessThan(tier.fee.singleCents * pack.sessions)
-      }
+      expect(tier.singleCents, `${tier.key} costs more to rent than the guide says to charge`)
+        .toBeLessThan(tier.suggestedLowCents)
+    }
+  })
+
+  it('states a suggested range the right way round', () => {
+    for (const tier of RENTAL_TIERS) {
+      expect(tier.suggestedHighCents, `${tier.key} has a backwards range`)
+        .toBeGreaterThanOrEqual(tier.suggestedLowCents)
     }
   })
 
@@ -88,6 +91,14 @@ describe('the fee schedule, frozen', () => {
     for (const [service, key] of Object.entries(SERVICE_TIER)) {
       expect(keys.has(key), `${service} points at unknown tier ${key}`).toBe(true)
     }
+  })
+
+  it('has no tier nothing maps to', () => {
+    // A tier with no service is a fee that can never be charged — either a service is missing
+    // from the catalogue or the tier is left over from a schedule nobody uses.
+    const used = new Set(Object.values(SERVICE_TIER))
+    const orphaned = RENTAL_TIERS.filter((t) => !used.has(t.key)).map((t) => t.key)
+    expect(orphaned).toEqual([])
   })
 })
 
@@ -113,29 +124,51 @@ describe('the service mapping, frozen', () => {
 
   it('maps the five tattoo sizes one to one', () => {
     expect(rentalFeeFor('Tattoo Removal (XXSmall)')).toBe(5000)
-    expect(rentalFeeFor('Tattoo Removal (XSmall)')).toBe(8700)
-    expect(rentalFeeFor('Tattoo Removal (Small)')).toBe(11200)
+    expect(rentalFeeFor('Tattoo Removal (XSmall)')).toBe(8500)
+    expect(rentalFeeFor('Tattoo Removal (Small)')).toBe(11000)
     expect(rentalFeeFor('Tattoo Removal (Medium)')).toBe(15000)
     expect(rentalFeeFor('Tattoo Removal (Large)')).toBe(20000)
+  })
+
+  it('prices each IPL area separately', () => {
+    // The reason the catalogue was split. One generic IPL at one price was the thing Keoni
+    // specifically asked not to have: "people charge different prices for each area".
+    expect(rentalFeeFor('IPL — Full Face')).toBe(15000)
+    expect(rentalFeeFor('IPL — Neck')).toBe(10000)
+    expect(rentalFeeFor('IPL — Chest')).toBe(13500)
+    expect(rentalFeeFor('IPL — Hands')).toBe(7500)
+  })
+
+  it('prices each ClearLift area separately', () => {
+    expect(rentalFeeFor('ClearLift')).toBe(17500)
+    expect(rentalFeeFor('ClearLift — Neck')).toBe(9500)
+    expect(rentalFeeFor('ClearLift — Hands')).toBe(8500)
+    expect(rentalFeeFor('ClearLift Lip Plumper')).toBe(7000)
+  })
+
+  it('charges the same for carbon as for ClearLift', () => {
+    // Keoni, 3 October: "the carbon laser treatment can be the same price as the clearlift
+    // treatment". The same TIER rather than the same number typed twice, so the two cannot
+    // drift apart when one of them is repriced.
+    expect(SERVICE_TIER['Carbon Laser Treatment']).toBe(SERVICE_TIER['ClearLift'])
+    expect(rentalFeeFor('Carbon Laser Treatment')).toBe(rentalFeeFor('ClearLift'))
+  })
+
+  it('prices the two that were guesses until Keoni confirmed them', () => {
+    // Facial vein removal was "possibly the guide's 20 min VascuPen, but that is an inference".
+    // Sunspots were not in the guide at all. Both were listed as UNPRICED and refused at the
+    // booking form until 3 October.
+    expect(rentalFeeFor('Facial Vein Removal')).toBe(4500)
+    expect(rentalFeeFor('Sunspot Removal')).toBe(4500)
   })
 })
 
 describe('services the guide does not price', () => {
-  it('returns null rather than zero', () => {
-    // The distinction this whole module turns on. A null is "cannot be booked yet" and the booking
-    // path must refuse; a zero would be a free session nobody notices until the month's takings
-    // are short.
-    for (const service of Object.keys(UNPRICED)) {
-      expect(rentalFeeFor(service), `${service} should have no fee`).toBeNull()
-      expect(tierForService(service)).toBeNull()
-    }
-  })
-
-  it('explains what is missing for each one', () => {
-    // An unpriced service with no reason attached is a question nobody can answer later.
-    for (const [service, why] of Object.entries(UNPRICED)) {
-      expect(why.length, `${service} has no explanation`).toBeGreaterThan(30)
-    }
+  it('has none left', () => {
+    // Empty since 3 October. The mechanism stays — see the note on UNPRICED — but every
+    // bookable service now has a fee, which is what unblocked the four that could not be
+    // booked at all.
+    expect(UNPRICED).toEqual({})
   })
 
   it('never lists a service as both priced and unpriced', () => {
@@ -145,28 +178,26 @@ describe('services the guide does not price', () => {
   })
 
   it('returns null for a service that does not exist at all', () => {
+    // The distinction the whole module turns on. A null is "cannot be booked" and the booking
+    // path must refuse; a zero would be a free session nobody notices until the month's takings
+    // are short.
     expect(rentalFeeFor('Massage')).toBeNull()
-    expect(packFeeFor('Massage', 6)).toBeNull()
-    expect(packsFor('Massage')).toEqual([])
+    expect(tierForService('Massage')).toBeNull()
+  })
+
+  it('returns null for the retired generic IPL', () => {
+    // Replaced by the four areas and retired from the catalogue. If it somehow came back as a
+    // bookable service it must refuse rather than pick an area's price.
+    expect(rentalFeeFor('IPL')).toBeNull()
   })
 })
 
-describe('pack lookups', () => {
-  it('finds a published pack', () => {
-    expect(packFeeFor('Laser Hair Removal — Brazilian', 6)).toBe(39500)
-    expect(packFeeFor('Tattoo Removal (Medium)', 8)).toBe(100000)
-    expect(packFeeFor('ClearLift', 3)).toBe(50000)
+describe('tier lookup by key', () => {
+  it('finds a tier that exists', () => {
+    expect(tierByKey('lhr_small')?.singleCents).toBe(6000)
   })
 
-  it('returns null for a pack size that tier does not publish', () => {
-    // Hair removal has 6 and 8, not 3. Falling back to a nearby size would invent a price.
-    expect(packFeeFor('Laser Hair Removal — Brazilian', 3)).toBeNull()
-    expect(packFeeFor('ClearLift Lip Plumper', 3)).toBeNull()
-  })
-
-  it('lists the sizes a service can be pre-bought in', () => {
-    expect(packsFor('Laser Hair Removal — Upper Lip').map((p) => p.sessions)).toEqual([6, 8])
-    expect(packsFor('ClearLift').map((p) => p.sessions)).toEqual([3, 6])
-    expect(packsFor('ClearLift Lip Plumper')).toEqual([])
+  it('returns null for one that does not', () => {
+    expect(tierByKey('lhr_enormous')).toBeNull()
   })
 })

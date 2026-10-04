@@ -16,7 +16,7 @@ import {
 describe('the version', () => {
   it('is the one currently in force', () => {
     // Change this deliberately, at the same time as the terms themselves, and never for a typo.
-    expect(RENTAL_TERMS_VERSION).toBe('2026-10-02.v1')
+    expect(RENTAL_TERMS_VERSION).toBe('2026-10-04.v2')
   })
 
   it('sorts after an earlier version', () => {
@@ -57,14 +57,14 @@ describe('the terms themselves', () => {
     //   fee_per_session      chargeRentalFee, from createBooking
     //   decline_no_booking   createBooking deletes the booking on a declined card
     //   no_show_refund       releaseRentalForBooking, from markNoShow and cancelBooking
-    //   packs                claimPackSession, oldest first
+    //   granted_sessions     claimPackSession, oldest first
     //   fee_changes          hasAcceptedRentalTerms gates createBooking
     const keys = RENTAL_TERMS.map((t) => t.key)
     for (const required of [
       'fee_per_session',
       'decline_no_booking',
       'no_show_refund',
-      'packs',
+      'granted_sessions',
       'fee_changes',
     ]) {
       expect(keys, `${required} is enforced in code but no longer stated`).toContain(required)

@@ -59,11 +59,50 @@ const AREAS: [name: string, suggested: number, min: number, max: number, fromKeo
   ['Full Legs', 60, 45, 90, true],
 ]
 
+const SKIN = 'Skin treatments'
+
+/** Skin-treatment areas, added 2026-10-03.
+ *
+ *  The rental fee schedule prices IPL and ClearLift BY AREA — "people charge different prices
+ *  for each area", in Keoni's words — but the catalogue carried one generic `IPL` with the area
+ *  typed into `bookings.treatmentArea` as free text. A free-text area cannot be priced, so the
+ *  service had no rental fee and could not be booked at all once the rental model landed.
+ *
+ *  The same split migration 0024 did for hair removal, and for the same reason: an area is a
+ *  different treatment at a different price, so it is a different service.
+ *
+ *  Durations follow the parent service, scaled down for the smaller areas. Only the full-face
+ *  ones are inherited rather than proposed; the rest are marked, exactly as the hair removal
+ *  areas are, so a guess can be corrected without re-deriving which ones were guessed.
+ *
+ *  `ClearLift` itself is the full-face treatment and keeps its name — renaming a service five
+ *  providers already offer is a decision for Keoni, not a tidy-up. `Carbon Laser Treatment`
+ *  stays its own service at the same price, and `ClearLift Lip Plumper` is the guide's "Lip". */
+const SKIN_AREAS: [
+  name: string,
+  suggested: number,
+  min: number,
+  max: number,
+  colour: string,
+  fromKeoni: boolean,
+][] = [
+  ['IPL — Full Face', 70, 45, 90, '#ce93d8', true], // the old generic IPL's own durations
+  ['IPL — Neck', 30, 15, 45, '#ce93d8', false],
+  ['IPL — Chest', 45, 30, 60, '#ce93d8', false],
+  ['IPL — Hands', 25, 15, 30, '#ce93d8', false],
+  ['ClearLift — Neck', 30, 15, 45, '#a5d6a7', false],
+  ['ClearLift — Hands', 25, 15, 30, '#a5d6a7', false],
+]
+
 const RETIRED = [
   'Laser Hair Removal (XSmall)',
   'Laser Hair Removal (Small)',
   'Laser Hair Removal (Medium)',
   'Laser Hair Removal (Large)',
+  // Replaced by the four area services above. Retired rather than deleted, like the hair
+  // removal brackets: three past appointments reference it through `provider_services`, and
+  // the record of what a client was actually treated for has to survive.
+  'IPL',
 ]
 
 async function main() {
@@ -103,7 +142,32 @@ async function main() {
     console.log(`  added    ${name}${note}`)
   }
 
-  // ---- retire the size brackets ----
+  // ---- the skin-treatment areas ----
+  for (const [name, suggested, min, max, colour, fromKeoni] of SKIN_AREAS) {
+    const [existing] = (await sql.query(`SELECT id FROM services WHERE name = $1`, [name])) as {
+      id: string
+    }[]
+
+    if (existing) continue
+
+    changes += 1
+    const note = fromKeoni ? '' : '  (duration proposed, not from Keoni)'
+    if (checkOnly) {
+      console.log(`  missing  ${name}${note}`)
+      continue
+    }
+
+    await sql.query(
+      `INSERT INTO services (name, category, suggested_duration_mins, min_duration_mins,
+                             max_duration_mins, package_eligible, advanced_tier_required,
+                             color_hex, active)
+       VALUES ($1, $2, $3, $4, $5, true, false, $6, true)`,
+      [name, SKIN, suggested, min, max, colour],
+    )
+    console.log(`  added    ${name}${note}`)
+  }
+
+  // ---- retire what has been replaced ----
   //
   // Retired, never deleted: `provider_services.service_id` is ON DELETE RESTRICT and
   // appointments reference the provider service, so removing these would either fail or destroy

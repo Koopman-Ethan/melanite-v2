@@ -32,7 +32,7 @@ export interface ChargeTotals {
   /** Everything the provider has paid Melanite, all sources. */
   allLifetime: string
   allMonth: string
-  /** Laser rent specifically — per-session fees and packs. */
+  /** Laser rent specifically. */
   rentalLifetime: string
   rentalMonth: string
   /** The standing costs: room rental, medical direction, Epicutis. Separated because they
@@ -56,8 +56,8 @@ export async function getChargeTotals(providerId: string): Promise<ChargeTotals>
       rentalMonth: sql<string>`coalesce(sum(${ledgerEntries.grossAmount}) filter (where ${RENTAL} and ${MONTH} = ${CURRENT_MONTH}), 0)`,
       recurringLifetime: sql<string>`coalesce(sum(${ledgerEntries.grossAmount}) filter (where ${RECURRING}), 0)`,
       recurringMonth: sql<string>`coalesce(sum(${ledgerEntries.grossAmount}) filter (where ${RECURRING} and ${MONTH} = ${CURRENT_MONTH}), 0)`,
-      // Counted off the booking subject rather than the row count, so a pack purchase — one row
-      // covering several sessions — does not read as one session.
+      // Counted off the booking subject, so only sessions are counted — a rental_fee row with
+      // any other subject would otherwise inflate it.
       sessionsMonth: sql<number>`count(*) filter (
         where ${RENTAL} and ${ledgerEntries.subjectType} = 'booking'
           and ${ledgerEntries.entryType} = 'purchase' and ${MONTH} = ${CURRENT_MONTH}
@@ -99,10 +99,9 @@ export interface ServiceCharges {
 
 /** Rent paid per service — which treatments the laser time actually went on.
  *
- *  Pack purchases are left out: a pack is bought against a TIER rather than a service, so
- *  attributing it to one would invent a figure. The sessions it pays for show up here as
- *  bookings with no charge of their own, which is why this reports what was paid separately from
- *  how many sessions were rented.
+ *  Credited sessions contribute nothing here, which is correct: nothing was charged for them,
+ *  so there is no figure to attribute. They still show as laser use on the admin side — see
+ *  `getLaserUse` — which is where the two have to be read together.
  */
 export async function getChargesByService(providerId: string): Promise<ServiceCharges[]> {
   return db

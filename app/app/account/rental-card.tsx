@@ -58,7 +58,7 @@ export function RentalCard({
             )}
           </div>
           <p className="mt-2 text-xs text-ink-muted">
-            Charged when you reserve the laser. Sessions covered by a pack don&rsquo;t touch it.
+            Charged when you reserve the laser. Sessions Melanite has credited you don&rsquo;t touch it.
           </p>
         </div>
       ) : (

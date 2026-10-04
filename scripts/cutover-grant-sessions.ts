@@ -10,8 +10,8 @@ import { db } from './db'
 
 // Honouring sessions clients already paid for, after the model changes under them.
 //
-//   npx tsx --tsconfig scripts/tsconfig.json scripts/cutover-grant-packs.ts            (dry run)
-//   npx tsx --tsconfig scripts/tsconfig.json scripts/cutover-grant-packs.ts --apply
+//   npx tsx --tsconfig scripts/tsconfig.json scripts/cutover-grant-sessions.ts            (dry run)
+//   npx tsx --tsconfig scripts/tsconfig.json scripts/cutover-grant-sessions.ts --apply
 //
 // THE PROBLEM THIS SOLVES
 //
@@ -21,9 +21,13 @@ import { db } from './db'
 // so every unworked session becomes one the provider must now pay rent on, out of money Melanite
 // has already been paid half of. Charging for those would be charging twice.
 //
-// The fix is a comped pack: the outstanding sessions, granted at zero cost, drawn down by the
-// booking path exactly like a pack they bought. One mechanism, not a special case in the billing
-// path that somebody has to remember to remove afterwards.
+// The fix is a credit: the outstanding sessions, granted at zero cost, drawn down by the booking
+// path automatically. One mechanism, not a special case in the billing path that somebody has to
+// remember to remove afterwards.
+//
+// Melanite does not SELL session packs — Keoni withdrew those rates on 3 October, because
+// packaging is the provider's business to run with their own clients. This grants them, which is
+// a different thing: nobody is buying anything, Melanite is honouring what it already owes.
 //
 // COUNTS ARE COMPUTED, NEVER TYPED. The number was 11 when this was first discussed and 10 two
 // weeks later, because a session got worked in between. It will be different again on the day.
@@ -108,8 +112,8 @@ async function main() {
     return
   }
 
-  // Group by tier, because a pack is a tier's worth of laser time. Two services in the same
-  // bracket become one pack rather than two the provider has to think about.
+  // Grouped by tier, because that is the unit a credited session is spent in. Two services in
+  // the same bracket become one balance rather than two the provider has to think about.
   const byTier = new Map<string, { providerName: string; sessions: number; from: string[] }>()
   const blocked: Outstanding[] = []
 
@@ -163,7 +167,7 @@ async function main() {
   }
 
   if (!apply) {
-    console.log('\nDry run. Re-run with --apply to create the packs above.')
+    console.log('\nDry run. Re-run with --apply to credit the sessions above.')
     return
   }
 

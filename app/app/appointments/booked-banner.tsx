@@ -74,7 +74,7 @@ export function RentalBookedBanner({
 
       <p className="mt-1 text-xs text-ink-secondary">
         {packSession
-          ? `Session ${packSession.index} of ${packSession.total} from your pack. Nothing was charged to your card.`
+          ? `Session ${packSession.index} of ${packSession.total} of your credited sessions. Nothing was charged to your card.`
           : chargedCents !== null
             ? `$${(chargedCents / 100).toFixed(2)} rental fee charged to your card on file.`
             : 'No rental fee for this appointment.'}

@@ -100,7 +100,7 @@ export default async function ChargesPage() {
 
       {packs.length > 0 && (
         <section className="rounded-card border border-success/30 bg-success/10 p-5">
-          <h2 className="text-sm font-medium">Laser time you&rsquo;ve already bought</h2>
+          <h2 className="text-sm font-medium">Sessions Melanite has credited you</h2>
           <ul className="mt-3 space-y-2">
             {packs.map((p) => (
               <li
@@ -114,8 +114,8 @@ export default async function ChargesPage() {
                   {p.singleCents !== null && (
                     <span className="text-ink-faint">
                       {' '}
-                      · worth {usd((p.sessionsRemaining * p.singleCents) / 100)} at the
-                      single-session rate
+                      · {usd((p.sessionsRemaining * p.singleCents) / 100)} of rent you won&rsquo;t
+                      be charged
                     </span>
                   )}
                 </span>
@@ -123,8 +123,8 @@ export default async function ChargesPage() {
             ))}
           </ul>
           <p className="mt-3 text-xs text-ink-faint">
-            These are spent automatically, oldest pack first, when you book a service in that
-            bracket. Nothing is charged to your card while a session is left.
+            These are used automatically, oldest first, when you book a service in that bracket.
+            Nothing is charged to your card while a session is left.
           </p>
         </section>
       )}
@@ -205,9 +205,8 @@ export default async function ChargesPage() {
           </table>
         </div>
         <p className="text-xs text-ink-faint">
-          Sessions covered by a pack aren&rsquo;t listed here — a pack is bought against a
-          bracket rather than one service, so putting its cost against a single service would be
-          a figure nobody charged you.
+          Credited sessions aren&rsquo;t listed here — they&rsquo;re granted against a bracket
+          rather than one service, and nothing was charged for them to attribute.
         </p>
       </section>
 

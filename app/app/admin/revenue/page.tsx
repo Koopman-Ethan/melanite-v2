@@ -245,11 +245,11 @@ export default async function AdminRevenuePage() {
                     <td className="p-3">{row.providerName}</td>
                     <td className="p-3 text-right tabular-nums">
                       {row.sessionsMonth}
-                      {/* Said out loud, because otherwise a provider working through a pack
-                          reads as somebody using the machine for nothing. The money for those
-                          sessions arrived when the pack was bought. */}
+                      {/* Said out loud, because otherwise a provider working through credited
+                          sessions reads as somebody using the machine for nothing. Nothing was
+                          charged for these, by arrangement — see the cutover grant. */}
                       {row.packSessionsMonth > 0 && (
-                        <span className="text-ink-faint"> ({row.packSessionsMonth} on a pack)</span>
+                        <span className="text-ink-faint"> ({row.packSessionsMonth} credited)</span>
                       )}
                     </td>
                     <td className="p-3 text-right tabular-nums font-medium">{usd(row.rentMonth)}</td>
@@ -266,8 +266,8 @@ export default async function AdminRevenuePage() {
           </div>
           <p className="text-xs text-ink-faint">
             Sessions are counted from appointments, rent from the ledger, so they answer
-            different questions. A month of pack sessions with no rent against it is correct —
-            that money came in when the pack was sold.
+            different questions. A month of credited sessions with no rent against it is
+            correct — those were granted rather than charged for.
           </p>
         </section>
       )}

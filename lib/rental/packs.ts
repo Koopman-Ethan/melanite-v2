@@ -3,18 +3,25 @@ import 'server-only'
 import { and, eq, sql } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
-import { providerPackRedemptions, providerPacks, providers } from '@/lib/db/schema'
-import { toMoney } from '@/lib/money'
+import { providerPackRedemptions, providerPacks } from '@/lib/db/schema'
 import { tierByKey, tierForService } from '@/lib/rental-fees'
-import { StripeApiError, stripePost, stripeWritesEnabled } from '@/lib/stripe/client'
 
-// Laser time bought in advance.
+// Fee-free laser sessions a provider has been granted.
 //
-// A provider pre-buys sessions in a tier at the pack rate and spends them as they book. It is the
-// same idea as a client package and the mechanics are deliberately the same shape — a counter pair
-// with a check constraint, plus an append-only redemption row per session spent — because that
-// shape has already been debugged here. The comment in `app/app/packages/actions.ts` records what
-// it cost to learn: reading a count early and acting on it later handed out a free treatment.
+// NOT SOLD. Melanite published pack rates for about a fortnight and Keoni withdrew them on
+// 3 October: packages are the provider's business to run with their own clients, and selling a
+// discounted block of rental put Melanite back in the middle of a pricing decision it had just
+// got out of. `purchasePack` is gone with the rates.
+//
+// What remains is the entitlement, which is a different thing and still needed: the cutover owes
+// Karly the sessions her clients paid for under the old model, and the honest way to honour them
+// is a balance of sessions she is not charged for rather than a special case in the billing path
+// that somebody has to remember to remove. `scripts/cutover-grant-packs.ts` creates them.
+//
+// The mechanics are deliberately the same shape as a client package — a counter pair with a check
+// constraint, plus an append-only redemption row per session spent — because that shape has
+// already been debugged here. The comment in `app/app/packages/actions.ts` records what it cost
+// to learn: reading a count early and acting on it later handed out a free treatment.
 //
 // Two rules carry over, and both matter more here than they look:
 //
@@ -51,10 +58,10 @@ export interface PackBalance {
 }
 
 /**
- * Takes one session out of the oldest pack that still has one.
+ * Takes one session out of the oldest grant that still has one.
  *
- * Returns null when the provider has no pack for this service's tier, or none with a session left
- * — which is not an error, it just means the booking gets charged the single-session fee instead.
+ * Returns null when the provider has no grant for this service's tier, or none with a session left
+ * — which is not an error, it is the ordinary case: the booking gets charged the fee instead.
  *
  * Oldest first, so a pack bought in March is spent before one bought in June. The alternative
  * leaves the old pack to rot while the new one is spent, and the provider finds out when the pack
@@ -181,7 +188,7 @@ export async function packBalancesFor(providerId: string): Promise<PackBalance[]
       label: tier?.label ?? r.tierKey,
       sessionsRemaining: Number(r.remaining),
       sessionsTotal: Number(r.total),
-      singleCents: tier?.fee.singleCents ?? null,
+      singleCents: tier?.singleCents ?? null,
     }
   })
 }
@@ -220,111 +227,4 @@ export async function grantPack(input: {
     .returning({ id: providerPacks.id })
 
   return { packId: pack.id }
-}
-
-/**
- * Sells a provider a pack at the published pack rate.
- *
- * Same discipline as `lib/rental/charge.ts`: every refusal happens before the Stripe call, so the
- * refusals are testable against real rows without a network.
- *
- * The pack and its ledger row are written in ONE statement after the charge succeeds. Writing the
- * pack first would mean a declined card leaves free sessions behind; writing them separately would
- * mean a failure between the two leaves money taken with no pack to show for it. A CTE gives both
- * or neither without needing a transaction the driver does not have.
- */
-export async function purchasePack(input: {
-  providerId: string
-  tierKey: string
-  sessions: number
-}): Promise<{ packId: string; amountCents: number } | { error: string }> {
-  if (!stripeWritesEnabled()) {
-    return { error: 'Payments are not configured in this environment.' }
-  }
-
-  const tier = tierByKey(input.tierKey)
-  if (!tier) return { error: `No rental tier named ${input.tierKey}.` }
-
-  const pack = tier.fee.packs.find((p) => p.sessions === input.sessions)
-  if (!pack) {
-    // Never interpolate a price for an unpublished block size. Multiplying the single rate would
-    // sell a "pack" at no discount; scaling the nearest one would invent a rate nobody set.
-    return { error: `${tier.label} is not sold in blocks of ${input.sessions}.` }
-  }
-
-  const [provider] = await db
-    .select({
-      firstName: providers.firstName,
-      lastName: providers.lastName,
-      revenueModel: providers.revenueModel,
-      customerId: providers.stripeBillingCustomerId,
-      paymentMethodId: providers.billingPaymentMethodId,
-    })
-    .from(providers)
-    .where(eq(providers.id, input.providerId))
-    .limit(1)
-
-  if (!provider) return { error: 'That provider does not exist.' }
-  if (provider.revenueModel === 'house') {
-    return { error: 'Melanite does not buy laser time from itself.' }
-  }
-  if (!provider.customerId || !provider.paymentMethodId) {
-    return {
-      error: `${provider.firstName} ${provider.lastName} has no card on file for rental fees.`,
-    }
-  }
-
-  // Generated up front so it can key the idempotent charge as well as the row. A retried purchase
-  // therefore reaches the same Stripe intent rather than buying a second pack.
-  const packId = crypto.randomUUID()
-
-  let intentId: string
-  try {
-    const intent = await stripePost<{ id: string }>(
-      '/payment_intents',
-      {
-        amount: pack.cents,
-        currency: 'usd',
-        customer: provider.customerId,
-        payment_method: provider.paymentMethodId,
-        off_session: true,
-        confirm: true,
-        description: `Laser rental pack — ${input.sessions} × ${tier.label}`,
-        metadata: {
-          type: 'rental_pack',
-          pack_id: packId,
-          provider_id: input.providerId,
-          tier_key: tier.key,
-        },
-      },
-      { idempotencyKey: `rental-pack:${packId}` },
-    )
-    intentId = intent.id
-  } catch (err) {
-    if (err instanceof StripeApiError) {
-      return { error: `The card was declined: ${err.message}` }
-    }
-    throw err
-  }
-
-  await db.execute(sql`
-    WITH p AS (
-      INSERT INTO provider_packs
-        (id, provider_id, tier_key, sessions_total, amount_paid, purchased_at,
-         stripe_payment_intent_id)
-      VALUES (${packId}::uuid, ${input.providerId}::uuid, ${tier.key}, ${input.sessions},
-              ${toMoney(pack.cents)}, now(), ${intentId})
-      RETURNING id, provider_id
-    )
-    INSERT INTO ledger_entries
-      (source, payer, entry_type, subject_type, subject_id, provider_id,
-       gross_amount, tip_amount, provider_payout, melanite_cut, payment_method,
-       stripe_payment_intent_id, payout_status)
-    SELECT 'rental_fee', 'provider', 'purchase', 'provider_pack', p.id, p.provider_id,
-           ${toMoney(pack.cents)}, '0.00', '0.00', ${toMoney(pack.cents)}, 'stripe',
-           ${intentId}, 'paid'
-      FROM p
-  `)
-
-  return { packId, amountCents: pack.cents }
 }

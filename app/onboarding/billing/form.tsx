@@ -12,7 +12,9 @@ export interface TierView {
   key: string
   label: string
   singleCents: number
-  packs: { sessions: number; cents: number }[]
+  /** What the guide suggests charging a client. Advisory — see `RentalTier`. */
+  suggestedLowCents: number
+  suggestedHighCents: number
 }
 
 const usd = (cents: number) =>
@@ -61,21 +63,21 @@ export function BillingStepForm({
               <span className="text-xs text-ink-secondary">{tier.label}</span>
               <span className="text-xs tabular-nums">
                 <strong>{usd(tier.singleCents)}</strong>
-                {tier.packs.length > 0 && (
-                  <span className="text-ink-faint">
-                    {' '}
-                    ·{' '}
-                    {tier.packs
-                      .map((p) => `${p.sessions} for ${usd(p.cents)}`)
-                      .join(' · ')}
-                  </span>
-                )}
+                {/* What the market charges, so the fee reads as a share rather than a cost.
+                    Advisory only — the guide is emphatic that providers set their own prices. */}
+                <span className="text-ink-faint">
+                  {' '}
+                  · typically sells for{' '}
+                  {tier.suggestedLowCents === tier.suggestedHighCents
+                    ? usd(tier.suggestedLowCents)
+                    : `${usd(tier.suggestedLowCents)}–${usd(tier.suggestedHighCents)}`}
+                </span>
               </span>
             </div>
           ))}
           <p className="text-xs text-ink-faint">
-            A few services don&rsquo;t have a fee set yet and can&rsquo;t be booked until they
-            do. The booking form says which.
+            The right-hand figure is what the guide found local clinics charging. It&rsquo;s a
+            reference, not a price you have to use — what you charge is yours to decide.
           </p>
         </div>
       </details>

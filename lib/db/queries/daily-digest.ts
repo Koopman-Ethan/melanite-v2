@@ -51,7 +51,7 @@ export interface DigestAppointment {
   /** Rent Melanite kept for this session, in cents. Nets off a refund, so a no-show that was
    *  given back reads as zero rather than as income. Null when no rental fee was ever charged. */
   rentalCents: number | null
-  /** A pack session covered it, so nothing was charged and nothing is missing. */
+  /** A credited session covered it, so nothing was charged and nothing is missing. */
   paidFromPack: boolean
   /** A rental booking that was never billed and no pack paid for.
    *

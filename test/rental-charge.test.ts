@@ -23,9 +23,14 @@ const unpriced = { providerServiceId: '', bookingId: '' }
 let houseBookingId = ''
 const bookingIds: string[] = []
 
-/** A provider_service for a named catalogue service, so the fee lookup has something to find. */
+/** A provider_service for a named catalogue service, so the fee lookup has something to find.
+ *
+ *  Deliberately does NOT require the service to be active. The unpriced fixture below is a
+ *  RETIRED service, which is the only way that case still exists now that every bookable
+ *  service has a fee — and it is the realistic shape of it too: a service is retired, and the
+ *  appointments already made against it still have to be chargeable or refusable. */
 async function providerServiceFor(providerId: string, serviceName: string): Promise<string> {
-  const [svc] = (await sql.query(`SELECT id FROM services WHERE name = $1 AND active`, [
+  const [svc] = (await sql.query(`SELECT id FROM services WHERE name = $1`, [
     serviceName,
   ])) as { id: string }[]
   if (!svc) throw new Error(`${serviceName} is not in the catalogue`)
@@ -77,10 +82,11 @@ beforeAll(async () => {
   )) as { id: string }[]
   priced.providerId = prov.id
 
-  // "Laser Hair Removal — Chin" is XS, $40. "Carbon Laser Treatment" is in the catalogue and
-  // deliberately has no published fee.
+  // "Laser Hair Removal — Chin" is XS, $35 since the October schedule. The generic "IPL" was
+  // retired when the catalogue split into areas and never had a fee of its own, which makes it
+  // the one service left that the schedule refuses to price.
   priced.providerServiceId = await providerServiceFor(prov.id, 'Laser Hair Removal — Chin')
-  unpriced.providerServiceId = await providerServiceFor(prov.id, 'Carbon Laser Treatment')
+  unpriced.providerServiceId = await providerServiceFor(prov.id, 'IPL')
 
   priced.bookingId = await book(prov.id, priced.providerServiceId)
   unpriced.bookingId = await book(prov.id, unpriced.providerServiceId)
@@ -101,7 +107,7 @@ afterAll(async () => {
 
 describe('what a session costs', () => {
   it('reads the fee off the service', async () => {
-    expect(await rentalFeeForBooking(priced.bookingId)).toBe(4000)
+    expect(await rentalFeeForBooking(priced.bookingId)).toBe(3500)
   })
 
   it('is null for a service with no published fee', async () => {
@@ -150,7 +156,7 @@ describe('refusals, all of them before Stripe is called', () => {
           gross_amount, tip_amount, provider_payout, melanite_cut, payment_method,
           stripe_payment_intent_id, payout_status)
        VALUES ('rental_fee','provider','purchase','booking',$1,$2,
-               '40.00','0.00','0.00','40.00','stripe','pi_zz_rental','paid')`,
+               '35.00','0.00','0.00','35.00','stripe','pi_zz_rental','paid')`,
       [priced.bookingId, priced.providerId],
     )
 
@@ -176,7 +182,7 @@ describe('giving the fee back', () => {
           gross_amount, tip_amount, provider_payout, melanite_cut, payment_method,
           stripe_payment_intent_id, payout_status)
        VALUES ('rental_fee','provider','refund','booking',$1,$2,
-               '-40.00','0.00','0.00','-40.00','stripe','pi_zz_rental','paid')`,
+               '-35.00','0.00','0.00','-35.00','stripe','pi_zz_rental','paid')`,
       [priced.bookingId, priced.providerId],
     )
 

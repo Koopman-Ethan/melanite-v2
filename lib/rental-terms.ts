@@ -13,8 +13,13 @@
 // provider is asked again, which is correct for a change in what they owe and merely annoying
 // for a comma. `test/rental-terms.test.ts` pins the current version so a change is deliberate.
 
-/** Date-stamped, like `END_OF_USE_VERSION`, so the order of two versions is readable. */
-export const RENTAL_TERMS_VERSION = '2026-10-02.v1'
+/** Date-stamped, like `END_OF_USE_VERSION`, so the order of two versions is readable.
+ *
+ *  v2, 4 October 2026: Melanite stopped selling session packs, so the term describing them was
+ *  replaced by one about credited sessions, and a term was added saying that packaging and
+ *  promotions are the provider's own business. Both change what somebody is agreeing to, which
+ *  is what a version bump is for. */
+export const RENTAL_TERMS_VERSION = '2026-10-04.v2'
 
 export interface RentalTerm {
   /** Stable key. Survives rewording, so a change in phrasing is not a change in substance. */
@@ -55,11 +60,17 @@ export const RENTAL_TERMS: readonly RentalTerm[] = [
       'for that session is refunded. The same applies if you cancel.',
   },
   {
-    key: 'packs',
+    key: 'granted_sessions',
     text:
-      'Sessions bought in advance as a pack are spent automatically, oldest pack first, and ' +
-      'nothing is charged to your card while a session remains. Packs are not refundable for ' +
-      'cash and do not expire.',
+      'If Melanite has credited you fee-free sessions — for work your clients paid for before ' +
+      'the rental model, for instance — they are used automatically, oldest first, and nothing ' +
+      'is charged to your card while one remains. They do not expire.',
+  },
+  {
+    key: 'your_own_packages',
+    text:
+      'Selling your clients packages, memberships or promotions is entirely your decision. ' +
+      'Melanite charges the same rental fee per session however you have priced it.',
   },
   {
     key: 'closeout',

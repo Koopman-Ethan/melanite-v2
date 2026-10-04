@@ -708,7 +708,7 @@ export function bookingPaymentSummary(input: {
   /** Rent Melanite kept, for a `rental` booking. Null when no rental fee row exists at all,
    *  which is NOT the same as zero — see the case below. */
   rentCents?: number | null
-  /** A pack session covered it, so nothing was charged and nothing is missing. */
+  /** A credited session covered it, so nothing was charged and nothing is missing. */
   paidFromPack?: boolean
 }): string {
   const amount = `$${Number(input.price).toFixed(2)}`
@@ -718,7 +718,7 @@ export function bookingPaymentSummary(input: {
       // There is no client payment to describe. What Melanite needs to know about a rental
       // booking is whether it collected the rent, which is a different question from the one
       // every other branch here answers.
-      if (input.paidFromPack) return 'Laser rental, covered by a pack session — nothing charged'
+      if (input.paidFromPack) return 'Laser rental, covered by a credited session — nothing charged'
       if (input.rentCents === null || input.rentCents === undefined) {
         return 'Laser rental — NO FEE RECORDED'
       }
