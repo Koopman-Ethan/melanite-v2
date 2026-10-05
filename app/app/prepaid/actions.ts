@@ -11,6 +11,7 @@ import { isExclusionViolation } from '@/lib/db/errors'
 import {
   denverInstant,
   getLaserHours,
+  overlapsBlockedTime,
   overlapsTrainingCourse,
 } from '@/lib/db/queries/availability'
 import { getSpendableBalances } from '@/lib/db/queries/prepaid'
@@ -323,6 +324,9 @@ export async function bookFromPrepaid(input: {
                   AND b.end_time   > ${startTime.toISOString()}::timestamptz
               )
               AND NOT ${overlapsTrainingCourse(startTime.toISOString(), endTime.toISOString())}
+              -- ...and not inside time Melanite has taken out of service. Same statement
+              -- again, for the same reason.
+              AND NOT ${overlapsBlockedTime(startTime.toISOString(), endTime.toISOString())}
               RETURNING id
             )
             INSERT INTO checkout_links (booking_id, token, status, expires_at)
@@ -350,6 +354,9 @@ export async function bookFromPrepaid(input: {
                 AND b.end_time   > ${startTime.toISOString()}::timestamptz
             )
             AND NOT ${overlapsTrainingCourse(startTime.toISOString(), endTime.toISOString())}
+            -- ...and not inside time Melanite has taken out of service. Same statement
+            -- again, for the same reason.
+            AND NOT ${overlapsBlockedTime(startTime.toISOString(), endTime.toISOString())}
             RETURNING id
           `)
   } catch (err) {

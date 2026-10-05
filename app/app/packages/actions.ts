@@ -13,7 +13,13 @@ import {
 import { canBook, bookingBlockedReasons, requireProvider } from '@/lib/auth/dal'
 import { db } from '@/lib/db'
 import { isExclusionViolation } from '@/lib/db/errors'
-import { denverInstant, getAvailability, getLaserHours, overlapsTrainingCourse } from '@/lib/db/queries/availability'
+import {
+  denverInstant,
+  getAvailability,
+  getLaserHours,
+  overlapsBlockedTime,
+  overlapsTrainingCourse,
+} from '@/lib/db/queries/availability'
 import {
   clientPackageItems,
   clientPackages,
@@ -423,6 +429,9 @@ export async function bookFromPackage(input: {
     -- ...and not inside a training course. Same statement as the booking check on
     -- purpose: two separate reads could each pass against a different snapshot.
     AND NOT ${overlapsTrainingCourse(startTime.toISOString(), endTime.toISOString())}
+    -- ...and not inside time Melanite has taken out of service. Same statement
+    -- again, for the same reason.
+    AND NOT ${overlapsBlockedTime(startTime.toISOString(), endTime.toISOString())}
     RETURNING id
   `)
   } catch (err) {

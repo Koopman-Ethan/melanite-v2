@@ -1345,6 +1345,44 @@ export const roomBookings = pgTable('room_bookings', {
 ])
 
 // ---------------------------------------------------------------------------
+// Blocked time
+// ---------------------------------------------------------------------------
+
+/** Laser time Melanite has taken out of service.
+ *
+ *  Until this existed there was no way to say "nobody can book this hour". Time was unavailable
+ *  for exactly four reasons — outside operating hours, in the past, an `upcoming`/`completed`
+ *  booking, or a `scheduled` training course — and none of them meant "reserved". Closing an
+ *  afternoon meant booking a fake appointment, or scheduling a fake training course, which is
+ *  worse: a course is publicly enrollable and a stranger can pay a deposit against it.
+ *
+ *  NOT A BOOKING. It has no provider, no service and no money, which is the whole point — those
+ *  are the three things a fake appointment had to invent, and each one lied to a different
+ *  report.
+ *
+ *  NO EXCLUSION CONSTRAINT. Two blocks overlapping each other is harmless — closing 12:00-14:00
+ *  and then 13:00-15:00 means the laser is shut from 12:00 to 15:00, which is what somebody
+ *  doing that meant. What must not overlap is a block and a BOOKING, and that cannot be a
+ *  constraint because they are different tables. It is enforced the way training courses are:
+ *  `overlapsBlockedTime` fused into every insert that takes laser time. */
+export const blockedTime = pgTable('blocked_time', {
+  id: uuid().primaryKey().defaultRandom(),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  /** Who closed it. Kept for the audit rather than shown to providers — `onDelete: 'set null'`
+   *  because losing who blocked an hour is not a reason to lose the block. */
+  createdBy: uuid().references(() => providers.id, { onDelete: 'set null' }),
+  startTime: timestamp({ withTimezone: true }).notNull(),
+  endTime: timestamp({ withTimezone: true }).notNull(),
+  /** Why, for Melanite's own eyes. NEVER shown to a provider: they see an unavailable slot with
+   *  the same wording as any other, which is a deliberate choice — the reason a room is shut is
+   *  often nobody else's business. */
+  reason: text(),
+}, (t) => [
+  index().on(t.startTime, t.endTime),
+  check('blocked_time_order', sql`${t.endTime} > ${t.startTime}`),
+])
+
+// ---------------------------------------------------------------------------
 // Training
 // ---------------------------------------------------------------------------
 

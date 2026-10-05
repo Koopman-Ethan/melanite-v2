@@ -10,7 +10,9 @@ import {
   nextBooking,
   weekStartOf,
 } from '@/lib/db/queries/admin-calendar'
+import { getUpcomingBlocks } from '@/lib/db/queries/blocked-time'
 
+import { BlockTime } from './block-time'
 import { WeekGrid } from './week-grid'
 
 export const metadata: Metadata = { title: 'Calendar · Melanite Admin' }
@@ -70,7 +72,7 @@ export default async function AdminCalendarPage({
   const requested = /^\d{4}-\d{2}-\d{2}$/.test(params.week ?? '') ? params.week! : today
   const weekStart = weekStartOf(requested)
 
-  const week = await getCalendarWeek(weekStart)
+  const [week, blocks] = await Promise.all([getCalendarWeek(weekStart), getUpcomingBlocks()])
   const { stats } = week
 
   const now = currentBooking(week)
@@ -114,6 +116,29 @@ export default async function AdminCalendarPage({
           </Link>
         </nav>
       </header>
+
+      <BlockTime
+        today={today}
+        blocks={blocks.map((b) => ({
+          id: b.id,
+          // Formatted here, in Denver. A client component reading the browser's timezone would
+          // show a provider in another state the wrong hour for the business they are in.
+          when: `${b.startTime.toLocaleString('en-US', {
+            weekday: 'short',
+            month: 'short',
+            day: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+            timeZone: 'America/Denver',
+          })} – ${b.endTime.toLocaleString('en-US', {
+            hour: 'numeric',
+            minute: '2-digit',
+            timeZone: 'America/Denver',
+          })}`,
+          reason: b.reason,
+          createdByName: b.createdByName,
+        }))}
+      />
 
       {/* Answers "who has it right now" without reading the grid — the question an admin
           actually walks up to this page with. Only meaningful on the current week. */}

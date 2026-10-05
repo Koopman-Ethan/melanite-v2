@@ -11,7 +11,12 @@ import { bookingHasPayment, getProviderSharePct } from '@/lib/db/queries/admin-t
 import { INVITE_TTL_DAYS, providerExists } from '@/lib/db/queries/invites'
 import { splitClientPayment, toCents, toMoney } from '@/lib/money'
 import { PROVIDER_ALREADY_HOLDS } from '@/lib/payments/direction'
-import { denverInstant, getLaserHours, overlapsTrainingCourse } from '@/lib/db/queries/availability'
+import {
+  denverInstant,
+  getLaserHours,
+  overlapsBlockedTime,
+  overlapsTrainingCourse,
+} from '@/lib/db/queries/availability'
 import {
   bookings,
   clients,
@@ -358,6 +363,9 @@ export async function createManualBooking(input: {
     -- ...and not inside a training course. Same statement as the booking check on
     -- purpose: two separate reads could each pass against a different snapshot.
     AND NOT ${overlapsTrainingCourse(startTime.toISOString(), endTime.toISOString())}
+    -- ...and not inside time Melanite has taken out of service. Same statement
+    -- again, for the same reason.
+    AND NOT ${overlapsBlockedTime(startTime.toISOString(), endTime.toISOString())}
     RETURNING id
   `)
 

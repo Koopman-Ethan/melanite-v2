@@ -3,7 +3,7 @@ import 'server-only'
 import { and, asc, eq, gt, inArray, lt, sql } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
-import { bookings, platformSettings, providerServices, services } from '@/lib/db/schema'
+import { blockedTime, bookings, platformSettings, providerServices, services } from '@/lib/db/schema'
 
 // Availability for the single shared laser.
 //
@@ -100,6 +100,31 @@ export function overlapsTrainingCourse(startIso: string, endIso: string) {
   )`
 }
 
+/** True when this window runs into time Melanite has taken out of service.
+ *
+ *  The partner of `overlapsTrainingCourse`, and used the same way: fused into every insert that
+ *  takes laser time, in the same statement as the collision check, so two separate reads cannot
+ *  each pass against a different snapshot.
+ *
+ *  Strict inequalities on both sides, so a block that ENDS exactly when a slot starts does not
+ *  collide with it. A 12:00-14:00 block leaves 14:00 bookable, which is what somebody blocking
+ *  "noon to two" means. */
+export function overlapsBlockedTime(startIso: string, endIso: string) {
+  return sql`exists (
+    select 1 from blocked_time bt
+     where bt.start_time < ${endIso}::timestamptz
+       and bt.end_time   > ${startIso}::timestamptz
+  )`
+}
+
+/** Blocked windows overlapping a range, for the availability grid. */
+async function blockedBetween(from: Date, to: Date): Promise<Occupied[]> {
+  return db
+    .select({ startTime: blockedTime.startTime, endTime: blockedTime.endTime })
+    .from(blockedTime)
+    .where(and(gt(blockedTime.endTime, from), lt(blockedTime.startTime, to)))
+}
+
 /** Course blocks overlapping a window, as ranges, for the availability grid. */
 async function courseBlocksBetween(from: Date, to: Date): Promise<Occupied[]> {
   const rows = (await db.execute(sql`
@@ -193,13 +218,26 @@ export async function getAvailability(
 
   // Every booking overlapping the day's window, across ALL providers — and any training
   // course, which takes the laser out of service for everybody.
-  const [dayBookings, dayCourses] = await Promise.all([
+  const [dayBookings, dayCourses, dayBlocks] = await Promise.all([
     occupyingBetween(open, close),
     courseBlocksBetween(open, close),
+    blockedBetween(open, close),
   ])
 
   return {
-    slots: buildSlots(open, close, hours.strideMins, durationMins, dayBookings, now, dayCourses),
+    // Blocked time is folded in with the bookings rather than given a `reason` of its own, so
+    // a provider reads "already booked" and learns nothing about why Melanite shut the room.
+    // Deliberate: the reason a room is closed is often nobody else's business, and it is kept
+    // on the row for Keoni instead.
+    slots: buildSlots(
+      open,
+      close,
+      hours.strideMins,
+      durationMins,
+      [...dayBookings, ...dayBlocks],
+      now,
+      dayCourses,
+    ),
     hours,
   }
 }
@@ -244,9 +282,10 @@ export async function getMonthAvailability(
   // One query for the whole month rather than one per day, for both.
   const monthStart = denverInstant(dates[0], hours.openTime)
   const monthEnd = denverInstant(dates[dayCount - 1], hours.closeTime)
-  const [monthBookings, monthCourses] = await Promise.all([
+  const [monthBookings, monthCourses, monthBlocks] = await Promise.all([
     occupyingBetween(monthStart, monthEnd),
     courseBlocksBetween(monthStart, monthEnd),
+    blockedBetween(monthStart, monthEnd),
   ])
 
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(now)
@@ -254,7 +293,9 @@ export async function getMonthAvailability(
   const days = dates.map((date) => {
     const open = denverInstant(date, hours.openTime)
     const close = denverInstant(date, hours.closeTime)
-    const dayBookings = monthBookings.filter((b) => b.startTime < close && b.endTime > open)
+    const dayBookings = [...monthBookings, ...monthBlocks].filter(
+      (b) => b.startTime < close && b.endTime > open,
+    )
     const slots = buildSlots(open, close, hours.strideMins, durationMins, dayBookings, now, monthCourses)
 
     return {
