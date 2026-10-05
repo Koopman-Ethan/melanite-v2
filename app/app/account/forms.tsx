@@ -117,8 +117,8 @@ export interface NotificationValues {
 const NOTIFICATIONS: Array<{ name: keyof NotificationValues; label: string; hint: string }> = [
   {
     name: 'notifyBookingConfirmed',
-    label: 'Payment received',
-    hint: 'When a client pays through your checkout link',
+    label: 'Rental receipt',
+    hint: 'When your card is charged for booking the laser',
   },
   {
     name: 'notifyPayoutDeposited',

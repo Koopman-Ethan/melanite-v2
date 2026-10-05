@@ -117,14 +117,18 @@ export async function cancelBooking(
 
   revalidatePath('/app/appointments')
 
+  // The slot goes back, so the rent for it does too. See `lib/rental/release.ts` for why a
+  // cancellation is treated the same as a no-show here.
+  //
+  // BEFORE the notification, so the email describes the state it is announcing. The other way
+  // round it said "$60.00 rent charged to the provider" about a booking whose rent was refunded
+  // a few milliseconds later.
+  const released = await releaseRentalForBooking(bookingId)
+  const rentNote = rentalReleaseNote(released)
+
   // Before the fee branch, so the ordinary no-fee cancellation notifies too — that is the
   // common case and the one most likely to be forgotten.
   await notifyCancelled(bookingId, false)
-
-  // The slot goes back, so the rent for it does too. See `lib/rental/release.ts` for why a
-  // cancellation is treated the same as a no-show here.
-  const released = await releaseRentalForBooking(bookingId)
-  const rentNote = rentalReleaseNote(released)
 
   // The fee is opt-in per cancellation, never automatic. Charging a card without the provider
   // deciding to is not a default anyone should be able to stumble into.

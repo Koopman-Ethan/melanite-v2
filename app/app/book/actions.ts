@@ -8,7 +8,7 @@ import { denverInstant, getLaserHours, overlapsTrainingCourse } from '@/lib/db/q
 import { db } from '@/lib/db'
 import { isExclusionViolation } from '@/lib/db/errors'
 import { bookings, providerServices, providers, services } from '@/lib/db/schema'
-import { notifyMelaniteBooked } from '@/lib/notify-melanite'
+import { notifyMelaniteBooked, notifyProviderCharged } from '@/lib/notify-melanite'
 import { chargeRentalFee } from '@/lib/rental/charge'
 import {
   claimPackSession,
@@ -237,6 +237,22 @@ export async function createBooking(_prev: BookState, formData: FormData): Promi
       // provider's history would be a record of something that did not happen.
       await db.delete(bookings).where(eq(bookings.id, bookingId))
       return { error: charged.error }
+    }
+
+    // The receipt, to the person whose card it was. Only here — a credited session charges
+    // nothing, and a $0.00 receipt teaches somebody to stop reading this sender.
+    //
+    // Takes the amount the charge reported rather than re-reading the ledger, so the figure in
+    // the email is the one Stripe actually took.
+    // `skipped` is a deliberate non-charge — an already-billed retry, or Melanite's own
+    // appointment — so there is nothing to send a receipt for.
+    if ('charged' in charged) {
+      await notifyProviderCharged({
+        providerId: user.id,
+        serviceName: svc.name,
+        when: startTime,
+        amountCents: charged.charged.amountCents,
+      })
     }
   }
 

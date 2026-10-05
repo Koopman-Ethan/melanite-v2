@@ -610,6 +610,68 @@ export function providerPaidEmail(input: {
   }
 }
 
+/** The receipt for a provider who has just been charged to use the laser.
+ *
+ *  The rental counterpart to `providerPaidEmail`, which told a provider that a client had paid
+ *  and cannot fire any more — there is no client and no checkout link. The money now moves the
+ *  other way, and the person it moves from is the one who should hear about it. It honours the
+ *  same preference, `providers.notifyBookingConfirmed`, because it is the same question asked
+ *  about the opposite direction.
+ *
+ *  Names the card. A provider with two cards, or one who has forgotten which is on file, cannot
+ *  reconcile a statement line against "a $60 charge" — and the card is the thing most likely to
+ *  be wrong at the moment it matters, because an expired one fails the booking outright.
+ *
+ *  Says how to get it back. A no-show refund that nobody knows about is a refund nobody claims,
+ *  and this is the message they will still have in their inbox when the client does not turn up.
+ */
+export function rentalChargedEmail(input: {
+  firstName: string
+  serviceName: string
+  when: string
+  charged: string
+  /** Last four of the card on file, or null if it is somehow unknown. */
+  cardLast4: string | null
+  url: string
+}): Omit<EmailMessage, 'to'> {
+  const card = input.cardLast4 ? ` to your card ending ${input.cardLast4}` : ''
+
+  return {
+    subject: `${input.charged} laser rental — ${input.serviceName}`,
+    text: [
+      `Hi ${input.firstName},`,
+      '',
+      `You have booked the laser for ${input.serviceName}.`,
+      input.when,
+      '',
+      `Charged${card}: ${input.charged}`,
+      '',
+      'That is the equipment rental. What you charge your client is yours, and does not come',
+      'through Melanite.',
+      '',
+      'If your client does not turn up, mark the appointment as a no-show and this comes back.',
+      '',
+      'See it against everything else here:',
+      input.url,
+    ].join('\n'),
+    html: wrap(
+      'Laser booked',
+      p(`Hi ${input.firstName},`) +
+        p(`You have booked the laser for <strong>${esc(input.serviceName)}</strong>.<br>${esc(input.when)}`) +
+        p(`Charged${esc(card)}: <strong>${esc(input.charged)}</strong>`) +
+        p(
+          '<span style="font-size:13px;color:#666">That is the equipment rental. What you charge ' +
+            'your client is yours, and does not come through Melanite.</span>',
+        ) +
+        p(
+          '<span style="font-size:13px;color:#666">If your client does not turn up, mark the ' +
+            'appointment as a no-show and this comes back.</span>',
+        ),
+      { label: 'View your charges', url: input.url },
+    ),
+  }
+}
+
 export function providerInviteEmail(input: {
   invitedBy: string
   url: string

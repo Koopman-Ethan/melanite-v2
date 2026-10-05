@@ -432,6 +432,10 @@ export const providers = pgTable('providers', {
 
   // Notification preferences. Kept inline rather than split out: they are 1:1, always
   // present, and cheap. The sparse `md_*` credential block is what got its own table.
+  /** The provider's own receipts. Named for what it gated under the split model — "a client
+   *  paid your checkout link" — and now gates `notifyProviderCharged`, which is the same
+   *  question about money going the other way. The column keeps its name because renaming it
+   *  would rewrite every provider's stored preference for a word. */
   notifyBookingConfirmed: boolean().notNull().default(true),
   notifyPayoutDeposited: boolean().notNull().default(true),
   notifyAppointmentReminders: boolean().notNull().default(true),

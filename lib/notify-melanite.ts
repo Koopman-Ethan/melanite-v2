@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 
 import { clientLabel } from '@/lib/booking-labels'
 import { db } from '@/lib/db'
@@ -26,6 +26,7 @@ import {
   deskPaymentReceivedEmail,
   deskProviderAccessEmail,
   deskRoomRentalEmail,
+  rentalChargedEmail,
   roomDateLabel,
   sendEmail,
 } from '@/lib/email'
@@ -64,6 +65,18 @@ async function bookingDetail(bookingId: string) {
       price: bookings.price,
       paymentSource: bookings.paymentSource,
       externalMethod: bookings.externalMethod,
+      // The only money on a rental booking. Without these `bookingPaymentSummary` has nothing
+      // to report and says "NO FEE RECORDED" — which is meant to be the alarm for a session
+      // that slipped through uncharged, and was firing on every successful booking instead.
+      rentalCents: sql<number | null>`(
+        select round(sum(l.gross_amount) * 100)::int from ledger_entries l
+        where l.subject_type = 'booking' and l.subject_id = ${bookings.id}
+          and l.source = 'rental_fee'
+      )`,
+      paidFromPack: sql<boolean>`exists (
+        select 1 from provider_pack_redemptions r
+        where r.booking_id = ${bookings.id} and r.voided_at is null
+      )`,
       serviceName: services.name,
       providerFirst: providers.firstName,
       providerLast: providers.lastName,
@@ -96,6 +109,8 @@ async function notifyBooking(bookingId: string, event: 'booked' | 'cancelled'): 
           paymentSource: row.paymentSource,
           externalMethod: row.externalMethod,
           price: row.price,
+          rentCents: row.rentalCents === null ? null : Number(row.rentalCents),
+          paidFromPack: row.paidFromPack,
         }),
         url: `${await appOrigin()}/app/admin/calendar`,
       }),
@@ -255,6 +270,59 @@ export async function notifyBookingAccessChanged(
  *
  *  Best effort and never throws, like the rest of this file: a webhook that fails on an email is
  *  one Stripe replays, and the money is already recorded. */
+/** Tells a PROVIDER what their card was just charged to book the laser.
+ *
+ *  The counterpart to `notifyProviderPaid`, which told them a client had paid and cannot fire
+ *  any more. Gated on the same `providers.notifyBookingConfirmed` preference, because it is the
+ *  same question about the opposite direction of money — and like that one, a provider is
+ *  allowed to switch their own receipts off.
+ *
+ *  Takes the AMOUNT rather than re-deriving it, for the reason `notifyMelanitePaid` states: the
+ *  caller is holding the figure the charge was actually built from, and a second query could
+ *  disagree with what Stripe really took.
+ *
+ *  Only called when money moved. A session covered by a credited grant charges nothing, and a
+ *  receipt for $0.00 is a message that teaches somebody to ignore this sender.
+ *
+ *  Best effort and never throws. The booking is made and the card is charged by the time this
+ *  runs; a bounced email must not undo either.
+ */
+export async function notifyProviderCharged(input: {
+  providerId: string
+  serviceName: string
+  when: Date
+  amountCents: number
+}): Promise<void> {
+  try {
+    const [provider] = await db
+      .select({
+        email: providers.email,
+        firstName: providers.firstName,
+        cardLast4: providers.billingCardLast4,
+        wants: providers.notifyBookingConfirmed,
+      })
+      .from(providers)
+      .where(eq(providers.id, input.providerId))
+      .limit(1)
+
+    if (!provider?.wants) return
+
+    await sendEmail({
+      to: provider.email,
+      ...rentalChargedEmail({
+        firstName: provider.firstName,
+        serviceName: input.serviceName,
+        when: appointmentWhen(input.when),
+        charged: `$${toMoney(input.amountCents)}`,
+        cardLast4: provider.cardLast4,
+        url: `${await appOrigin()}/app/charges`,
+      }),
+    })
+  } catch (err) {
+    console.error('[email] rental charge receipt failed for provider', input.providerId, err)
+  }
+}
+
 export async function notifyMelanitePaid(input: {
   kind: 'booking' | 'package' | 'prepaid'
   clientName: string | null
