@@ -69,10 +69,18 @@ const ITEMS: NavItem[] = [
   { label: 'Dashboard', href: '/app/dashboard' },
   { label: 'Appointments', href: '/app/appointments', providerOnly: true },
   { label: 'Charges', href: '/app/charges', providerOnly: true },
-  { label: 'Packages', href: '/app/packages', providerOnly: true },
-  { label: 'Prepaid', href: '/app/prepaid', providerOnly: true },
+  // Packages, Prepaid and My Services are GONE from here, and the pages are not. All three are
+  // client-payment features that stop meaning anything under the rental model: a package and a
+  // prepaid balance are a client paying Melanite in advance, which Melanite no longer does, and
+  // My Services curated a menu that nobody browses now — every active service is bookable by
+  // everybody and `provider_services` is just where a remembered length lives.
+  //
+  // Unlinked rather than deleted, because they still hold real history: Karly's clients have
+  // ten sessions outstanding, honoured at cutover as credited sessions. The pages go with the
+  // rest of the client-payment code in one revertible commit; until then they are reachable by
+  // URL and by the dashboard panel that chases an unpaid package link, which is the one place
+  // somebody might still need them.
   { label: 'Daily Room Rental', href: '/app/room-rental', providerOnly: true },
-  { label: 'My Services', href: '/app/services', providerOnly: true },
   { label: 'Membership', href: '/app/membership', providerOnly: true },
   { label: 'Calendar', href: '/app/admin/calendar', adminOnly: true },
   { label: 'Equipment', href: '/app/admin/equipment', adminOnly: true },
