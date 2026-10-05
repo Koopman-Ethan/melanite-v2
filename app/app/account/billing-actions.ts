@@ -64,6 +64,10 @@ export async function startRentalCardSetup(): Promise<BillingRedirect> {
       '/checkout/sessions',
       {
         mode: 'setup',
+        // Required in setup mode, and easy to miss because nothing is being charged — there are
+        // no line items to carry it. Stripe rejects the session with "Missing required param:
+        // currency", which says nothing about which currency or why a card setup needs one.
+        currency: 'usd',
         success_url: `${base}${back}?card=saved`,
         cancel_url: `${base}${back}`,
         // The webhook has no other way to know whose card this is.
