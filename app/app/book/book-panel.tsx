@@ -17,6 +17,7 @@ export function BookPanel({
   services,
   slots,
   selectedServiceId,
+  durationMins,
   date,
   month,
   today,
@@ -30,6 +31,7 @@ export function BookPanel({
   services: ServiceView[]
   slots: SlotView[]
   selectedServiceId: string
+  durationMins: number
   date: string
   month: string
   today: string
@@ -46,9 +48,10 @@ export function BookPanel({
   const pathname = usePathname()
   const params = useSearchParams()
 
-  const set = (values: Record<string, string>) => {
+  const set = (values: Record<string, string>, drop: string[] = []) => {
     const next = new URLSearchParams(params)
     for (const [key, value] of Object.entries(values)) next.set(key, value)
+    for (const key of drop) next.delete(key)
     router.push(`${pathname}?${next}`, { scroll: false })
   }
 
@@ -57,6 +60,7 @@ export function BookPanel({
       services={services}
       slots={slots}
       selectedServiceId={selectedServiceId}
+      durationMins={durationMins}
       date={date}
       month={month}
       today={today}
@@ -66,7 +70,11 @@ export function BookPanel({
       cardLast4={cardLast4}
       hasCard={hasCard}
       termsAccepted={termsAccepted}
-      onServiceChange={(id) => set({ service: id })}
+      // Changing the service drops any duration from the URL: the new service has its own
+      // remembered length, and carrying the old number over would silently book 75 minutes of
+      // underarms because that is how long their legs take.
+      onServiceChange={(id) => set({ service: id }, ['mins'])}
+      onDurationChange={(mins) => set({ mins: String(mins) })}
       // Picking a day keeps the calendar on that day's month, so the two can never disagree.
       onDateChange={(d) => set({ date: d, month: d.slice(0, 7) })}
       onMonthChange={(m) => set({ month: m })}

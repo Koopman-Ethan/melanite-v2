@@ -1,6 +1,5 @@
 import { eq } from 'drizzle-orm'
 import type { Metadata } from 'next'
-import Link from 'next/link'
 
 import { BookingGates } from '@/components/booking-gates'
 import { bookingBlockedReasons, canBook, requireProvider } from '@/lib/auth/dal'
@@ -26,7 +25,7 @@ export const dynamic = 'force-dynamic'
 export default async function BookPage({
   searchParams,
 }: {
-  searchParams: Promise<{ date?: string; service?: string; month?: string }>
+  searchParams: Promise<{ date?: string; service?: string; month?: string; mins?: string }>
 }) {
   const user = await requireProvider()
   const params = await searchParams
@@ -55,22 +54,27 @@ export default async function BookPage({
           <h1 className="text-2xl font-semibold">Book laser time</h1>
         </header>
         <div className="rounded-card border border-dashed border-line p-8 text-center">
+          {/* Previously "you have no services yet", with a link to go and tick some. There is
+              nothing to tick any more — every active service is bookable by everybody — so an
+              empty list means the catalogue itself is empty, which is Melanite's problem. */}
           <p className="text-sm text-ink-muted">
-            You don&rsquo;t have any active services yet.
+            There are no bookable services right now. Melanite needs to add some.
           </p>
-          <Link
-            href="/app/services"
-            className="mt-3 inline-block text-sm text-gold underline-offset-4 hover:underline"
-          >
-            Set up your services →
-          </Link>
         </div>
       </main>
     )
   }
 
-  const selected =
-    services.find((s) => s.providerServiceId === params.service) ?? services[0]
+  // Keyed on the SERVICE, not on a provider_services row — there may not be one until they
+  // book it for the first time.
+  const selected = services.find((s) => s.serviceId === params.service) ?? services[0]
+
+  // How long they want, which decides which slots fit. Defaults to what they took last time,
+  // clamped to what the service allows so a hand-edited URL cannot book 10 hours of laser.
+  const requestedMins = Number(params.mins)
+  const durationMins = Number.isInteger(requestedMins)
+    ? Math.min(Math.max(requestedMins, selected.minDurationMins), selected.maxDurationMins)
+    : selected.durationMins
   const today = todayInDenver()
   const date = /^\d{4}-\d{2}-\d{2}$/.test(params.date ?? '') ? params.date! : today
   // The calendar can be browsed ahead of the selected day, so the month is its own parameter
@@ -78,8 +82,8 @@ export default async function BookPage({
   const month = /^\d{4}-\d{2}$/.test(params.month ?? '') ? params.month! : date.slice(0, 7)
 
   const [{ slots, hours }, monthAvailability, packs, schedule, [provider]] = await Promise.all([
-    getAvailability(date, selected.durationMins),
-    getMonthAvailability(month, selected.durationMins),
+    getAvailability(date, durationMins),
+    getMonthAvailability(month, durationMins),
     packBalancesFor(user.id),
     getLiveSchedule(),
     db
@@ -120,10 +124,12 @@ export default async function BookPage({
 
       <BookPanel
         services={services.map((s) => ({
-          providerServiceId: s.providerServiceId,
+          serviceId: s.serviceId,
           name: s.name,
           category: s.category,
           durationMins: s.durationMins,
+          minDurationMins: s.minDurationMins,
+          maxDurationMins: s.maxDurationMins,
           // What Melanite charges the provider for the slot. Null means the service has no
           // published fee and cannot be booked — the form says so rather than letting them
           // find out after picking a time.
@@ -144,7 +150,8 @@ export default async function BookPage({
           available: s.available,
           reason: s.reason,
         }))}
-        selectedServiceId={selected.providerServiceId}
+        selectedServiceId={selected.serviceId}
+        durationMins={durationMins}
         date={date}
         month={month}
         today={today}

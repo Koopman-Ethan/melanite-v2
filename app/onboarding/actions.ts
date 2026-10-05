@@ -6,8 +6,7 @@ import { redirect } from 'next/navigation'
 import { requireProvider } from '@/lib/auth/dal'
 import { db } from '@/lib/db'
 import { SUPERVISED_PROCEDURES, requiresMedicalDirection } from '@/lib/room-procedures'
-import { providerServices, providers } from '@/lib/db/schema'
-import { toCents, toMoney } from '@/lib/money'
+import { providers } from '@/lib/db/schema'
 import { nextStepSlug } from '@/lib/onboarding'
 import { hasAcceptedRentalTerms } from '@/lib/rental-terms'
 import { liveScheduleVersion } from '@/lib/rental/schedule'
@@ -192,8 +191,11 @@ export async function saveDirectorChoice(choice: 'melanite' | 'own'): Promise<St
     }
   }
 
-  await completeStep(user.id, 5, { medicalDirectorType: choice })
-  redirect('/onboarding/services')
+  // ACTIVE HERE, now that this is the last step. It used to happen at step 6 when a provider
+  // picked their services; that step is gone, and leaving the flip there would strand every
+  // laser provider as `pending` forever. The room-renter path below has always done it here.
+  await completeStep(user.id, 5, { medicalDirectorType: choice, status: 'active' as const })
+  redirect('/onboarding/done')
 }
 
 /**
@@ -226,52 +228,9 @@ export async function saveRoomProcedures(procedures: string[]): Promise<StepStat
     // Room rental stays closed while supervision is owed. Not a punishment: Melanite owns the
     // room, and it is Melanite that carries the consequence of unsupervised work in it.
     roomRentalEnabled: !requiresMedicalDirection(declared),
-    // ACTIVE HERE. For a laser provider that happens at step 6 when they pick their services,
-    // but a room renter has no step 6 — leaving the flip there would strand every one of them
-    // as `pending` forever, unable to sign in to anything.
+    // ACTIVE HERE, the same as the laser path above now that both end at step 5.
     status: 'active' as const,
   })
-
-  redirect('/onboarding/done')
-}
-
-/** Step 6 — the services offered, and the last step.
- *
- *  This is what makes the account ACTIVE. Not `bookingEnabled` though: Keoni still confirms
- *  insurance and medical-director documents before anyone takes a client, so finishing setup
- *  gets a provider into the app, not into the diary.
- */
-export async function saveServices(
-  selections: { serviceId: string; price: number; durationMins: number }[],
-): Promise<StepState> {
-  const user = await requireProvider()
-
-  if (selections.length === 0) {
-    return { error: 'Turn on at least one service — it is what clients book.' }
-  }
-
-  for (const selection of selections) {
-    if (!(selection.price > 0)) return { error: 'Every service needs a price above zero.' }
-    if (!Number.isInteger(selection.durationMins) || selection.durationMins <= 0) {
-      return { error: 'Every service needs a duration.' }
-    }
-  }
-
-  // Replaces rather than appends, so going back and changing the selection does not leave
-  // services switched on that were deselected.
-  await db.delete(providerServices).where(eq(providerServices.providerId, user.id))
-
-  await db.insert(providerServices).values(
-    selections.map((s) => ({
-      providerId: user.id,
-      serviceId: s.serviceId,
-      price: toMoney(toCents(s.price)),
-      durationMins: s.durationMins,
-      isActive: true,
-    })),
-  )
-
-  await completeStep(user.id, 6, { status: 'active' as const })
 
   redirect('/onboarding/done')
 }

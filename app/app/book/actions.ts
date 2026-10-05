@@ -64,47 +64,44 @@ export async function createBooking(_prev: BookState, formData: FormData): Promi
     }
   }
 
-  const providerServiceId = String(formData.get('providerServiceId') ?? '')
+  const serviceId = String(formData.get('serviceId') ?? '')
+  const requestedMins = Number(formData.get('durationMins') ?? 0)
   const startTimeRaw = String(formData.get('startTime') ?? '')
   const treatmentArea = String(formData.get('treatmentArea') ?? '').trim() || null
   const notes = String(formData.get('notes') ?? '').trim() || null
 
-  if (!providerServiceId) return { error: 'Choose a service.' }
+  if (!serviceId) return { error: 'Choose a service.' }
   if (!startTimeRaw) return { error: 'Choose a time.' }
 
   const startTime = new Date(startTimeRaw)
   if (Number.isNaN(startTime.getTime())) return { error: 'That time is not valid.' }
   if (startTime <= new Date()) return { error: 'Choose a time in the future.' }
 
-  // The service must exist, belong to the caller, be switched on by them, and still be offered
-  // platform-wide. They fail for different reasons and all of them mean the booking must not
-  // happen.
-  //
-  // `providerServices.price` is deliberately not read. It is what the provider charges their own
-  // client, which is now none of Melanite's business; the column survives until the client
-  // payment code is removed, and reading it here would quietly make it matter again.
+  // The service only has to exist and still be offered. It no longer has to be one this
+  // provider ticked in a setup form — every active service is bookable by everybody, because
+  // the menu was a client-facing idea and Melanite no longer knows anybody's clients.
   const [svc] = await db
     .select({
-      durationMins: providerServices.durationMins,
+      suggestedDurationMins: services.suggestedDurationMins,
       minDurationMins: services.minDurationMins,
       maxDurationMins: services.maxDurationMins,
       name: services.name,
     })
-    .from(providerServices)
-    .innerJoin(services, eq(providerServices.serviceId, services.id))
-    .where(
-      and(
-        eq(providerServices.id, providerServiceId),
-        eq(providerServices.providerId, user.id),
-        eq(providerServices.isActive, true),
-        eq(services.active, true),
-      ),
-    )
+    .from(services)
+    .where(and(eq(services.id, serviceId), eq(services.active, true)))
     .limit(1)
 
-  if (!svc) return { error: 'That service is not available on your profile.' }
-  if (svc.durationMins < svc.minDurationMins || svc.durationMins > svc.maxDurationMins) {
-    return { error: 'That service’s configured duration is outside its allowed range.' }
+  if (!svc) return { error: 'That service is not available.' }
+  // Checked here and not only in the form. The duration decides how much of a shared laser is
+  // taken, so a hand-edited request must not be able to claim four hours for a chin.
+  const durationMins = Number.isInteger(requestedMins) && requestedMins > 0
+    ? requestedMins
+    : svc.suggestedDurationMins
+
+  if (durationMins < svc.minDurationMins || durationMins > svc.maxDurationMins) {
+    return {
+      error: `${svc.name} has to be between ${svc.minDurationMins} and ${svc.maxDurationMins} minutes.`,
+    }
   }
 
   const [provider] = await db
@@ -149,7 +146,7 @@ export async function createBooking(_prev: BookState, formData: FormData): Promi
     }
   }
 
-  const endTime = new Date(startTime.getTime() + svc.durationMins * 60_000)
+  const endTime = new Date(startTime.getTime() + durationMins * 60_000)
 
   // Operating hours, evaluated on the booking's own date in Mountain Time.
   const hours = await getLaserHours()
@@ -158,6 +155,42 @@ export async function createBooking(_prev: BookState, formData: FormData): Promi
   const close = denverInstant(dayInDenver, hours.closeTime)
   if (startTime < open || endTime > close) {
     return { error: 'That time is outside laser operating hours.' }
+  }
+
+  // `provider_services` is no longer a menu — it is where this provider's length for this
+  // service is remembered, and `bookings.provider_service_id` is NOT NULL, so one has to exist.
+  // Created on first use rather than in a setup form: the first booking is the first moment
+  // there is anything true to record.
+  //
+  // Upserted every time, so changing the length today is what it defaults to next time. The
+  // price column is written once at 0.00 and never read — it dies with the client-payment code.
+  const [existingLink] = await db
+    .select({ id: providerServices.id })
+    .from(providerServices)
+    .where(
+      and(eq(providerServices.providerId, user.id), eq(providerServices.serviceId, serviceId)),
+    )
+    .limit(1)
+
+  let providerServiceId: string
+  if (existingLink) {
+    providerServiceId = existingLink.id
+    await db
+      .update(providerServices)
+      .set({ durationMins, isActive: true })
+      .where(eq(providerServices.id, existingLink.id))
+  } else {
+    const [created] = await db
+      .insert(providerServices)
+      .values({
+        providerId: user.id,
+        serviceId,
+        price: '0.00',
+        durationMins,
+        isActive: true,
+      })
+      .returning({ id: providerServices.id })
+    providerServiceId = created.id
   }
 
   const bookingId = crypto.randomUUID()
@@ -196,7 +229,7 @@ export async function createBooking(_prev: BookState, formData: FormData): Promi
          original_price, price, payment_source, duration_mins, start_time, end_time, status)
       SELECT ${bookingId}::uuid, ${user.id}::uuid, ${providerServiceId}::uuid,
              ${treatmentArea}, ${notes}, '0.00'::numeric, '0.00'::numeric,
-             'rental'::booking_payment_source, ${svc.durationMins},
+             'rental'::booking_payment_source, ${durationMins},
              ${startTime.toISOString()}::timestamptz, ${endTime.toISOString()}::timestamptz,
              'upcoming'::booking_status
       WHERE NOT EXISTS (

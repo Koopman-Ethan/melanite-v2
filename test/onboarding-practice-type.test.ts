@@ -57,7 +57,6 @@ describe('where a provider is sent next', () => {
     expect(nextStepSlug(2, 'laser')).toBe('license')
     expect(nextStepSlug(3, 'laser')).toBe('billing')
     expect(nextStepSlug(4, 'laser')).toBe('director')
-    expect(nextStepSlug(5, 'laser')).toBe('services')
   })
 
   it('jumps a room renter over the steps that do not apply', () => {
@@ -79,7 +78,6 @@ describe('what a provider may open', () => {
     // over a card for laser time they never book — and before the rental model, would have
     // created an Express account nobody will ever pay into.
     expect(canOpenStep('billing', 5, 'room_only')).toBe(false)
-    expect(canOpenStep('services', 5, 'room_only')).toBe(false)
   })
 
   it('still refuses skipping ahead', () => {

@@ -310,12 +310,15 @@ export async function getMonthAvailability(
 }
 
 export interface BookableService {
-  providerServiceId: string
+  /** Null until this provider has booked it once. `createBooking` creates the row on demand,
+   *  so there is nothing to set up before a first booking. */
+  providerServiceId: string | null
   serviceId: string
   name: string
   /** Which group this sits under in the dropdown. Null renders last, not nowhere. */
   category: string | null
-  price: string
+  /** How long this provider takes, remembered from last time, or the catalogue's suggestion
+   *  if they have never booked it. */
   durationMins: number
   minDurationMins: number
   maxDurationMins: number
@@ -328,18 +331,26 @@ export interface BookableService {
  *  whether the service is still offered platform-wide. v1 checked them separately at create
  *  time with the same INVALID_SERVICE code; filtering here means an unbookable service is
  *  never offered in the first place. */
-export async function getBookableServices(providerId: string): Promise<BookableService[]> {
+export interface PricedService {
+  providerServiceId: string
+  name: string
+  category: string | null
+  price: string
+}
+
+/** The services a provider has configured, WITH the price they charge a client.
+ *
+ *  Only the prepaid flow still wants this: spending a client's balance needs a figure to spend
+ *  against, and that figure is the provider's own. It goes with the rest of the client-payment
+ *  code — see `docs/decisions.md` — and is kept separate so `getBookableServices` can stop
+ *  pretending Melanite knows what anybody charges. */
+export async function getPricedServices(providerId: string): Promise<PricedService[]> {
   return db
     .select({
       providerServiceId: providerServices.id,
-      serviceId: services.id,
       name: services.name,
       category: services.category,
       price: providerServices.price,
-      durationMins: providerServices.durationMins,
-      minDurationMins: services.minDurationMins,
-      maxDurationMins: services.maxDurationMins,
-      colorHex: services.colorHex,
     })
     .from(providerServices)
     .innerJoin(services, eq(providerServices.serviceId, services.id))
@@ -350,6 +361,40 @@ export async function getBookableServices(providerId: string): Promise<BookableS
         eq(services.active, true),
       ),
     )
+    .orderBy(asc(services.category), asc(services.name))
+}
+
+export async function getBookableServices(providerId: string): Promise<BookableService[]> {
+  return db
+    .select({
+      providerServiceId: providerServices.id,
+      serviceId: services.id,
+      name: services.name,
+      category: services.category,
+      // Theirs if they have booked it before, the catalogue's suggestion if not. This is the
+      // whole of what `provider_services` means now: a remembered length, not a menu.
+      durationMins: sql<number>`coalesce(${providerServices.durationMins}, ${services.suggestedDurationMins})`,
+      minDurationMins: services.minDurationMins,
+      maxDurationMins: services.maxDurationMins,
+      colorHex: services.colorHex,
+    })
+    .from(services)
+    // EVERY active service, not the ones this provider ticked in a setup form. The menu was a
+    // client-facing idea: a client browsing a provider's offering needed one. Melanite no
+    // longer knows a provider's clients and does not care which treatments they do — it rents
+    // out a machine, and the fee is per service at the moment of booking.
+    //
+    // Left join, so a service they have never booked still appears. The provider_service row
+    // is created by `createBooking` the first time, which is also when there is finally
+    // something true to record about it.
+    .leftJoin(
+      providerServices,
+      and(
+        eq(providerServices.serviceId, services.id),
+        eq(providerServices.providerId, providerId),
+      ),
+    )
+    .where(eq(services.active, true))
     // Grouped in the dropdown, so grouped here. Alphabetical within the group: twelve hair
     // removal areas in one list is scanned by first letter, not by anatomy.
     .orderBy(asc(services.category), asc(services.name))

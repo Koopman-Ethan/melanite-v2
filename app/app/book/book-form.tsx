@@ -20,10 +20,13 @@ export interface SlotView {
 }
 
 export interface ServiceView {
-  providerServiceId: string
+  serviceId: string
   category: string | null
   name: string
+  /** What this provider took last time, or the catalogue's suggestion. */
   durationMins: number
+  minDurationMins: number
+  maxDurationMins: number
   /** What Melanite charges for the slot, in cents. Null means no published fee, which is a
    *  refusal rather than a free session — the form blocks it the same way the action does. */
   rentalFeeCents: number | null
@@ -84,7 +87,9 @@ export function BookForm({
   services,
   slots,
   selectedServiceId,
+  durationMins,
   onServiceChange,
+  onDurationChange,
   onDateChange,
   onMonthChange,
   date,
@@ -100,7 +105,11 @@ export function BookForm({
   services: ServiceView[]
   slots: SlotView[]
   selectedServiceId: string
+  /** How long this booking will take. Decides which slots fit, so changing it re-asks the
+   *  server rather than filtering what is already on screen. */
+  durationMins: number
   onServiceChange: (id: string) => void
+  onDurationChange: (mins: number) => void
   onDateChange: (date: string) => void
   onMonthChange: (month: string) => void
   date: string
@@ -123,7 +132,7 @@ export function BookForm({
   // means the form unblocks the instant they tap rather than appearing not to have worked.
   const [acceptedNow, setAcceptedNow] = useState(false)
 
-  const service = services.find((s) => s.providerServiceId === selectedServiceId)
+  const service = services.find((s) => s.serviceId === selectedServiceId)
   const openSlots = slots.filter((s) => s.available)
 
   // A pack in the same tier covers this booking, and the one with sessions left is spent first.
@@ -139,7 +148,8 @@ export function BookForm({
 
   return (
     <form action={formAction} className="space-y-6">
-      <input type="hidden" name="providerServiceId" value={selectedServiceId} />
+      <input type="hidden" name="serviceId" value={selectedServiceId} />
+      <input type="hidden" name="durationMins" value={durationMins} />
       <input type="hidden" name="startTime" value={selectedSlot} />
 
       <section className="space-y-3">
@@ -155,8 +165,8 @@ export function BookForm({
         >
           {groupByCategory(services).map((group) => {
             const options = group.items.map((s) => (
-              <option key={s.providerServiceId} value={s.providerServiceId}>
-                {s.name} · {s.durationMins} min
+              <option key={s.serviceId} value={s.serviceId}>
+                {s.name}
                 {s.rentalFeeCents !== null ? ` · ${usd(s.rentalFeeCents)} rental` : ' · no fee set'}
               </option>
             ))
@@ -169,6 +179,30 @@ export function BookForm({
             )
           })}
         </select>
+
+        {service && service.minDurationMins !== service.maxDurationMins && (
+          <label className="block text-xs">
+            <span className="block text-ink-faint">
+              How long do you need? Remembered for next time.
+            </span>
+            <select
+              value={durationMins}
+              onChange={(e) => onDurationChange(Number(e.target.value))}
+              className="mt-1 rounded-field border border-line bg-surface px-3 py-2 text-sm text-ink"
+            >
+              {/* Every 15-minute step the service allows. The stride matches the booking grid,
+                  so a length that cannot line up with a slot is never offered. */}
+              {Array.from(
+                { length: Math.floor((service.maxDurationMins - service.minDurationMins) / 15) + 1 },
+                (_, i) => service.minDurationMins + i * 15,
+              ).map((m) => (
+                <option key={m} value={m}>
+                  {m} minutes
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </section>
 
       <section className="space-y-3">

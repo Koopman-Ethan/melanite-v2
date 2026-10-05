@@ -2,6 +2,13 @@ import type { SessionUser } from '@/lib/auth/session'
 
 // Where a provider is in setup, and where they should be sent.
 //
+// SETUP IS FIVE STEPS since the rental model. "Select services" was the sixth and is gone: it
+// existed so a client browsing a provider's offering saw a menu with prices on it. Melanite no
+// longer knows a provider's clients and takes no share of what they charge, so there is nothing
+// for a menu to be. Every active service is bookable by everybody, and `provider_services` is
+// now only where a provider's own length for a service is remembered — written by
+// `createBooking` the first time they book one.
+//
 // Progress is `providers.onboardingStep`; COMPLETION is `providers.status`. Those are different
 // questions and conflating them would have been a mistake here: v1's terminal step was 5, this
 // flow's is 6, and all nine imported providers sit at 5. Gating on a step number would have
@@ -13,7 +20,6 @@ export const ONBOARDING_STEPS = [
   { n: 3, slug: 'license', title: 'License & Compliance', blurb: 'Verify your credentials' },
   { n: 4, slug: 'billing', title: 'Card on File', blurb: 'For equipment rental' },
   { n: 5, slug: 'director', title: 'Medical Director', blurb: 'Physician oversight' },
-  { n: 6, slug: 'services', title: 'Select Services', blurb: 'What you offer, and how long' },
 ] as const
 
 export type OnboardingSlug = (typeof ONBOARDING_STEPS)[number]['slug']
@@ -38,13 +44,9 @@ export type PracticeType = 'laser' | 'room_only'
  *  the Stripe Connect account that paid them their share of a client's payment; it was excluded
  *  then for the mirror-image reason, that there was no share to pay.
  *
- *  `services` is the Melanite laser catalogue. What a room renter does in that room never
- *  touches this system, so the question does not apply — asking them to pick from a laser menu
- *  would record something untrue.
- *
  *  The medical director step is NOT here. Whether they need one depends on what they perform,
  *  which the app cannot know, so it is asked rather than assumed. */
-const NOT_FOR_ROOM_ONLY = new Set<OnboardingSlug>(['billing', 'services'])
+const NOT_FOR_ROOM_ONLY = new Set<OnboardingSlug>(['billing'])
 
 export function stepApplies(slug: OnboardingSlug, practice: PracticeType): boolean {
   return practice === 'laser' || !NOT_FOR_ROOM_ONLY.has(slug)

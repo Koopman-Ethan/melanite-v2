@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 
 import { requireProvider } from '@/lib/auth/dal'
-import { getBookableServices } from '@/lib/db/queries/availability'
+import { getPricedServices } from '@/lib/db/queries/availability'
 import {
   getPendingPrepaidLinks,
   getPrepaidBalances,
@@ -32,7 +32,7 @@ export default async function PrepaidPage() {
     getPrepaidBalances(user.id),
     getPendingPrepaidLinks(user.id),
     getProviderClients(user.id),
-    getBookableServices(user.id),
+    getPricedServices(user.id),
   ])
 
   // Grouped by client. Spending crosses balances, so a per-purchase list would make the
@@ -64,12 +64,7 @@ export default async function PrepaidPage() {
   const grouped = [...byClient.values()].sort((a, b) => b.spendableCents - a.spendableCents)
   const outstandingCents = grouped.reduce((sum, c) => sum + c.spendableCents, 0)
 
-  const bookable = services.map((s) => ({
-    providerServiceId: s.providerServiceId,
-    name: s.name,
-    category: s.category,
-    price: s.price,
-  }))
+  const bookable = services
 
   return (
     <main className="mx-auto w-full max-w-4xl px-6 py-10 space-y-10">

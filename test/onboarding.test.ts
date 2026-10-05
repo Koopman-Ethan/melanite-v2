@@ -13,8 +13,11 @@ import {
 // browser test that takes ten seconds and needs a database.
 
 describe('step definitions', () => {
-  it('numbers the steps 1..6 with no gaps', () => {
-    expect(ONBOARDING_STEPS.map((s) => s.n)).toEqual([1, 2, 3, 4, 5, 6])
+  it('numbers the steps 1..5 with no gaps', () => {
+    // Five since "select services" went with the rental model. A gap here would be worse than
+    // a wrong count: `nextStepSlug` walks these numbers, so a hole strands somebody on a step
+    // that never resolves.
+    expect(ONBOARDING_STEPS.map((s) => s.n)).toEqual([1, 2, 3, 4, 5])
   })
 
   it('has unique slugs', () => {
@@ -57,12 +60,13 @@ describe('nextStepSlug', () => {
     expect(nextStepSlug(2)).toBe('license')
     expect(nextStepSlug(3)).toBe('billing')
     expect(nextStepSlug(4)).toBe('director')
-    expect(nextStepSlug(5)).toBe('services')
   })
 
   it('clamps at the last step rather than running off the end', () => {
-    expect(nextStepSlug(6)).toBe('services')
-    expect(nextStepSlug(99)).toBe('services')
+    // Director is the last step since "select services" went. A provider who somehow has a
+    // higher number — the imported ones all sit at 5 — lands there rather than nowhere.
+    expect(nextStepSlug(5)).toBe('director')
+    expect(nextStepSlug(99)).toBe('director')
   })
 
   it('never returns a slug that is not a real step', () => {
@@ -79,9 +83,9 @@ describe('canOpenStep', () => {
   })
 
   it('refuses skipping ahead', () => {
-    // Someone who has only set a password cannot jump straight to picking services and
-    // activating their own account.
-    expect(canOpenStep('services', 1)).toBe(false)
+    // Someone who has only set a password cannot jump straight to the last step and activate
+    // their own account.
+    expect(canOpenStep('director', 1)).toBe(false)
     expect(canOpenStep('billing', 1)).toBe(false)
     expect(canOpenStep('director', 3)).toBe(false)
   })
