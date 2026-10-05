@@ -38,7 +38,8 @@
     "cutover:grant-sessions": "tsx --tsconfig scripts/tsconfig.json scripts/cutover-grant-sessions.ts",
     "etl:rental-fees": "tsx --tsconfig scripts/tsconfig.json scripts/etl/rental-fees.ts",
     "dev:rental-ready": "tsx --tsconfig scripts/tsconfig.json scripts/dev-rental-ready.ts",
-    "dev:after-refresh": "npm run etl:catalogue && npm run etl:rental-fees && tsx --tsconfig scripts/tsconfig.json scripts/dev-connect-accounts.ts && npm run dev:e2e-credentials && npm run dev:house-provider && npm run dev:rental-ready && npm run dev:usable"
+    "dev:after-refresh": "npm run etl:catalogue && npm run etl:rental-fees && tsx --tsconfig scripts/tsconfig.json scripts/dev-connect-accounts.ts && npm run dev:e2e-credentials && npm run dev:house-provider && npm run dev:rental-ready && npm run dev:usable",
+    "block-laser-time": "tsx --tsconfig scripts/tsconfig.json scripts/block-laser-time.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
