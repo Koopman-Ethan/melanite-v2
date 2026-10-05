@@ -262,6 +262,6 @@ describe('what a provider has accepted', () => {
   it('opens the gate when nothing has been published', () => {
     // Before the seeding script runs there is no schedule to be out of date with, and blocking
     // every booking because of that would be the wrong failure.
-    expect(hasAcceptedRentalTerms({ rentalTermsVersion: RENTAL_TERMS_VERSION }, null)).toBe(true)
+    expect(hasAcceptedRentalTerms({ rentalTermsVersion: RENTAL_TERMS_VERSION, rentalScheduleVersion: null }, null)).toBe(true)
   })
 })

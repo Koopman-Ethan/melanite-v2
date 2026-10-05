@@ -28,6 +28,7 @@ export interface AccountProfile {
   billingCardExpYear: number | null
   rentalTermsVersion: string | null
   rentalTermsAckAt: Date | null
+  rentalScheduleVersion: number | null
   notifyBookingConfirmed: boolean
   notifyPayoutDeposited: boolean
   notifyAppointmentReminders: boolean
@@ -58,6 +59,7 @@ export async function getAccount(providerId: string): Promise<AccountProfile | n
       billingCardExpYear: providers.billingCardExpYear,
       rentalTermsVersion: providers.rentalTermsVersion,
       rentalTermsAckAt: providers.rentalTermsAckAt,
+      rentalScheduleVersion: providers.rentalScheduleVersion,
       notifyBookingConfirmed: providers.notifyBookingConfirmed,
       notifyPayoutDeposited: providers.notifyPayoutDeposited,
       notifyAppointmentReminders: providers.notifyAppointmentReminders,

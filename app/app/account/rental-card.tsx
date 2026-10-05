@@ -151,8 +151,12 @@ export function RentalCard({
               </Button>
             </>
           ) : (
-            <Button variant="ghost" disabled={pending} onClick={() => setConfirming(true)}>
-              Remove
+            // Outline rather than ghost. A ghost button is transparent with no border and muted
+            // text, which is right for an action somebody stumbles past and wrong for one they
+            // go looking for — "how do I take my card off this" is a question people arrive
+            // with. The two-step confirm below is what keeps it from being an easy mistake.
+            <Button variant="outline" disabled={pending} onClick={() => setConfirming(true)}>
+              Remove card
             </Button>
           ))}
       </div>

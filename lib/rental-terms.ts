@@ -100,10 +100,16 @@ export const RENTAL_TERMS_FEE_NOTE =
  *  than against "did they ever agree to anything".
  *
  *  A null `liveSchedule` means nothing has been published yet — the seeding script has not run
- *  — so there is no schedule to be out of date with and that half of the gate is open. */
+ *  — so there is no schedule to be out of date with and that half of the gate is open.
+ *
+ *  `rentalScheduleVersion` IS REQUIRED, and was optional for about a day. The account page did
+ *  not select it, so it arrived as undefined, never equalled the live version, and showed a
+ *  provider a "the prices have changed" banner that accepting did not clear — it wrote the
+ *  right row and re-rendered the same screen. Optional meant the compiler could not say so.
+ *  Required means a caller that forgets the column does not build. */
 export function hasAcceptedRentalTerms(
   provider:
-    | { rentalTermsVersion: string | null; rentalScheduleVersion?: number | null }
+    | { rentalTermsVersion: string | null; rentalScheduleVersion: number | null }
     | null
     | undefined,
   liveSchedule: number | null = null,

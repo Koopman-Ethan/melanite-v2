@@ -27,19 +27,42 @@ describe('the version', () => {
 
 describe('whether somebody has accepted', () => {
   it('accepts the current version', () => {
-    expect(hasAcceptedRentalTerms({ rentalTermsVersion: RENTAL_TERMS_VERSION })).toBe(true)
+    expect(hasAcceptedRentalTerms({ rentalTermsVersion: RENTAL_TERMS_VERSION, rentalScheduleVersion: null })).toBe(true)
   })
 
   it('refuses an older one', () => {
     // The whole reason the version is stored rather than just a timestamp. Someone who accepted
     // last year's fee schedule has not agreed to this one.
-    expect(hasAcceptedRentalTerms({ rentalTermsVersion: '2026-01-01.v1' })).toBe(false)
+    expect(hasAcceptedRentalTerms({ rentalTermsVersion: '2026-01-01.v1', rentalScheduleVersion: null })).toBe(false)
   })
 
   it('refuses somebody who has never accepted', () => {
-    expect(hasAcceptedRentalTerms({ rentalTermsVersion: null })).toBe(false)
+    expect(hasAcceptedRentalTerms({ rentalTermsVersion: null, rentalScheduleVersion: null })).toBe(false)
     expect(hasAcceptedRentalTerms(null)).toBe(false)
     expect(hasAcceptedRentalTerms(undefined)).toBe(false)
+  })
+})
+
+describe('accepting it actually clears the prompt', () => {
+  it('is satisfied by exactly what a provider row holds after accepting', () => {
+    // The shape `acceptRentalTerms` writes. This is the regression: the account page compared
+    // against a column it never selected, so the value arrived as undefined, never matched, and
+    // the banner it drives could not be dismissed — accepting wrote the right row and
+    // re-rendered the identical screen.
+    const afterAccepting = { rentalTermsVersion: RENTAL_TERMS_VERSION, rentalScheduleVersion: 3 }
+    expect(hasAcceptedRentalTerms(afterAccepting, 3)).toBe(true)
+  })
+
+  it('is not satisfied when the schedule version is missing rather than wrong', () => {
+    // A provider who has genuinely never accepted a schedule. Correct to refuse — but it is
+    // also what a forgotten column looks like, which is why the parameter is required and a
+    // caller that omits it does not compile.
+    expect(
+      hasAcceptedRentalTerms(
+        { rentalTermsVersion: RENTAL_TERMS_VERSION, rentalScheduleVersion: null },
+        3,
+      ),
+    ).toBe(false)
   })
 })
 
