@@ -20,6 +20,7 @@ export default async function BillingStep() {
 
   const [row] = await db
     .select({
+      paymentMethodId: providers.billingPaymentMethodId,
       cardBrand: providers.billingCardBrand,
       cardLast4: providers.billingCardLast4,
       cardExpMonth: providers.billingCardExpMonth,
@@ -51,8 +52,13 @@ export default async function BillingStep() {
       }
     >
       <BillingStepForm
+        // Keyed on the PAYMENT METHOD, not on the last four. They are different questions:
+        // one is "can this provider be charged", which is what the step is for, and the other
+        // is "what do we show them". A payment method with no last four — a wallet rather than
+        // a card — used to read as no card at all, which left somebody stuck on a step they
+        // had already completed with a working method on file.
         card={
-          row?.cardLast4
+          row?.paymentMethodId
             ? {
                 brand: row.cardBrand,
                 last4: row.cardLast4,

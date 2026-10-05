@@ -64,6 +64,14 @@ export async function startRentalCardSetup(): Promise<BillingRedirect> {
       '/checkout/sessions',
       {
         mode: 'setup',
+        // A CARD, explicitly. Left to itself Checkout offers Stripe Link as soon as it
+        // recognises the email, and a Link payment method has no `card` object — no brand, no
+        // last four. Everything downstream is built around naming the card being charged: the
+        // terms say "your card", the receipt names it so a statement line can be reconciled,
+        // and the account page shows which one is about to be used. None of that works for a
+        // wallet, and a wallet can change the underlying card without telling us, which is the
+        // wrong property for something charged off-session every time somebody books.
+        'payment_method_types[0]': 'card',
         // Required in setup mode, and easy to miss because nothing is being charged — there are
         // no line items to carry it. Stripe rejects the session with "Missing required param:
         // currency", which says nothing about which currency or why a card setup needs one.
@@ -134,6 +142,28 @@ export async function acceptRentalTerms(): Promise<{ error?: string }> {
       rentalTermsVersion: RENTAL_TERMS_VERSION,
       rentalScheduleVersion: scheduleVersion,
     })
+    .where(eq(providers.id, user.id))
+
+  revalidatePath('/app/account')
+  revalidatePath('/app/book')
+  revalidatePath('/onboarding/billing')
+  return {}
+}
+
+/** Withdraws acceptance of the rental terms.
+ *
+ *  The other half of `acceptRentalTerms`, and it was missing. Ticking the box recorded the
+ *  agreement immediately — deliberately, so closing the tab did not lose it — but unticking did
+ *  nothing, which meant somebody who read the fee schedule, agreed, then changed their mind was
+ *  still recorded as having agreed. An acknowledgement you cannot withdraw is not one somebody
+ *  gave freely, and this is the record that says what they are willing to be charged.
+ */
+export async function withdrawRentalTerms(): Promise<{ error?: string }> {
+  const user = await requireProvider()
+
+  await db
+    .update(providers)
+    .set({ rentalTermsAckAt: null, rentalTermsVersion: null, rentalScheduleVersion: null })
     .where(eq(providers.id, user.id))
 
   revalidatePath('/app/account')

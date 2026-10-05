@@ -106,7 +106,7 @@ export default async function AccountPage() {
       >
         <RentalCard
           card={
-            account.billingCardLast4
+            account.billingPaymentMethodId
               ? {
                   brand: account.billingCardBrand,
                   last4: account.billingCardLast4,

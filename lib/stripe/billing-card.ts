@@ -29,6 +29,8 @@ interface SetupIntentObject {
 
 interface PaymentMethodObject {
   id: string
+  /** `card`, or `link` when somebody paid through the Stripe Link wallet. */
+  type?: string
   card?: {
     brand?: string
     last4?: string
@@ -84,7 +86,11 @@ export async function saveRentalCard(
     .set({
       stripeBillingCustomerId: customer,
       billingPaymentMethodId: intent.payment_method,
-      billingCardBrand: method.card?.brand ?? null,
+      // A non-card payment method has no brand or last four. The session now asks for a card
+      // explicitly, so this should not happen — but if it does, record WHAT it is rather than
+      // leaving every display column null, which reads identically to having no payment method
+      // at all and is how a provider ends up stuck on a step they have already completed.
+      billingCardBrand: method.card?.brand ?? method.type ?? null,
       billingCardLast4: method.card?.last4 ?? null,
       billingCardExpMonth: method.card?.exp_month ?? null,
       billingCardExpYear: method.card?.exp_year ?? null,

@@ -20,7 +20,7 @@ export function RentalCard({
   termsAccepted,
   termsAckAt,
 }: {
-  card: { brand: string | null; last4: string; expMonth: number | null; expYear: number | null } | null
+  card: { brand: string | null; last4: string | null; expMonth: number | null; expYear: number | null } | null
   termsAccepted: boolean
   termsAckAt: Date | null
 }) {
@@ -48,8 +48,14 @@ export function RentalCard({
         <div className="rounded-field border border-line p-4">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <span className="text-sm">
-              {card.brand ? `${card.brand} ` : 'Card '}ending{' '}
-              <strong className="tabular-nums">{card.last4}</strong>
+              {card.last4 ? (
+                <>
+                  {card.brand ? `${card.brand} ` : 'Card '}ending{' '}
+                  <strong className="tabular-nums">{card.last4}</strong>
+                </>
+              ) : (
+                <strong>{card.brand ?? 'Payment method'} on file</strong>
+              )}
             </span>
             {expiry && (
               <span className={expired ? 'text-xs text-danger' : 'text-xs text-ink-faint'}>

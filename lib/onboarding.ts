@@ -13,7 +13,7 @@ export const ONBOARDING_STEPS = [
   { n: 3, slug: 'license', title: 'License & Compliance', blurb: 'Verify your credentials' },
   { n: 4, slug: 'billing', title: 'Card on File', blurb: 'For equipment rental' },
   { n: 5, slug: 'director', title: 'Medical Director', blurb: 'Physician oversight' },
-  { n: 6, slug: 'services', title: 'Select Services', blurb: 'Set pricing and duration' },
+  { n: 6, slug: 'services', title: 'Select Services', blurb: 'What you offer, and how long' },
 ] as const
 
 export type OnboardingSlug = (typeof ONBOARDING_STEPS)[number]['slug']

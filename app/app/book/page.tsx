@@ -86,6 +86,7 @@ export default async function BookPage({
       .select({
         revenueModel: providers.revenueModel,
         cardLast4: providers.billingCardLast4,
+        paymentMethodId: providers.billingPaymentMethodId,
         rentalTermsVersion: providers.rentalTermsVersion,
         rentalScheduleVersion: providers.rentalScheduleVersion,
       })
@@ -136,6 +137,7 @@ export default async function BookPage({
         }))}
         payingRent={payingRent}
         cardLast4={provider?.cardLast4 ?? null}
+        hasCard={Boolean(provider?.paymentMethodId)}
         termsAccepted={hasAcceptedRentalTerms(provider, schedule.version)}
         slots={slots.map((s) => ({
           startTime: s.startTime.toISOString(),

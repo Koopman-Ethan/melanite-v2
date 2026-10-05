@@ -94,6 +94,7 @@ export function BookForm({
   packs,
   payingRent,
   cardLast4,
+  hasCard,
   termsAccepted,
 }: {
   services: ServiceView[]
@@ -109,6 +110,9 @@ export function BookForm({
   packs: PackView[]
   payingRent: boolean
   cardLast4: string | null
+  /** Whether anything can be charged at all. `cardLast4` is for display and can be null even
+   *  when a payment method exists. */
+  hasCard: boolean
   termsAccepted: boolean
 }) {
   const [state, formAction] = useActionState<BookState, FormData>(createBooking, {})
@@ -128,7 +132,7 @@ export function BookForm({
     : undefined
 
   const unpriced = payingRent && service?.rentalFeeCents === null
-  const needsCard = payingRent && !pack && !cardLast4
+  const needsCard = payingRent && !pack && !hasCard
   // A credited session does NOT excuse this one. The terms cover what the fee schedule is and
   // what happens on a no-show, which apply just as much to a session that costs nothing.
   const needsTerms = payingRent && !termsAccepted && !acceptedNow
@@ -314,7 +318,8 @@ export function BookForm({
                   : ''}{' '}
                 charged now
               </strong>{' '}
-              to the card ending {cardLast4}, for the equipment and the room. What you charge your
+              to {cardLast4 ? `the card ending ${cardLast4}` : 'your payment method on file'},
+              for the equipment and the room. What you charge your
               client is between you and them.
               <br />
               If the card is declined the slot isn’t held — the laser is shared, so an unpaid

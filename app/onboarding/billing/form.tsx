@@ -5,7 +5,11 @@ import { useState, useTransition } from 'react'
 import { Button } from '@/components/ui/button'
 import { Notice } from '@/components/ui/field'
 
-import { acceptRentalTerms, startRentalCardSetup } from '@/app/app/account/billing-actions'
+import {
+  acceptRentalTerms,
+  startRentalCardSetup,
+  withdrawRentalTerms,
+} from '@/app/app/account/billing-actions'
 import { completeBillingStep } from '../actions'
 
 export interface TierView {
@@ -32,7 +36,7 @@ export function BillingStepForm({
   terms,
   tiers,
 }: {
-  card: { brand: string | null; last4: string; expMonth: number | null; expYear: number | null } | null
+  card: { brand: string | null; last4: string | null; expMonth: number | null; expYear: number | null } | null
   termsAccepted: boolean
   terms: { key: string; text: string }[]
   tiers: TierView[]
@@ -104,15 +108,13 @@ export function BillingStepForm({
               // Recorded the moment it is ticked, not on submit. The acknowledgement is a fact
               // about what somebody agreed to and when — losing it because they closed the tab
               // before pressing a button would mean asking again with no record either way.
-              if (next) {
-                start(async () => {
-                  const result = await acceptRentalTerms()
-                  if (result.error) {
-                    setChecked(false)
-                    setError(result.error)
-                  }
-                })
-              }
+              start(async () => {
+                const result = next ? await acceptRentalTerms() : await withdrawRentalTerms()
+                if (result.error) {
+                  setChecked(!next)
+                  setError(result.error)
+                }
+              })
             }}
             className="mt-0.5 size-4 shrink-0"
           />
@@ -124,7 +126,12 @@ export function BillingStepForm({
 
       {card ? (
         <Notice tone="success">
-          {card.brand ? `${card.brand} ` : 'Card '}ending {card.last4}
+          {/* A payment method without a last four is a wallet rather than a card. Rare now that
+              the session asks for a card explicitly, but it must read as "we have one" — the
+              alternative is a blank where a number goes, which reads as broken. */}
+          {card.last4
+            ? `${card.brand ? `${card.brand} ` : 'Card '}ending ${card.last4}`
+            : `${card.brand ?? 'Payment method'} on file`}
           {card.expMonth && card.expYear
             ? ` · expires ${String(card.expMonth).padStart(2, '0')}/${String(card.expYear).slice(-2)}`
             : ''}
@@ -140,10 +147,13 @@ export function BillingStepForm({
       {error && <Notice>{error}</Notice>}
 
       <div className="space-y-2">
+        {/* Not reachable until the terms are accepted. Handing over a card before agreeing to
+            what it will be charged is the wrong order, and the fee schedule is part of what is
+            being agreed to. */}
         <Button
           block
           variant={card ? 'outline' : 'gold'}
-          disabled={pending}
+          disabled={pending || !checked}
           onClick={() =>
             start(async () => {
               const result = await startRentalCardSetup()
@@ -155,7 +165,13 @@ export function BillingStepForm({
             })
           }
         >
-          {pending ? 'Opening Stripe…' : card ? 'Use a different card' : 'Add a card with Stripe'}
+          {pending
+            ? 'Opening Stripe…'
+            : !checked
+              ? 'Accept the terms first'
+              : card
+                ? 'Use a different card'
+                : 'Add a card with Stripe'}
         </Button>
 
         {card && (

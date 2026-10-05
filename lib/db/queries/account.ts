@@ -22,6 +22,10 @@ export interface AccountProfile {
   stripeOnboardingComplete: boolean
   /** The card Melanite charges for laser time. Null last4 means none on file, which blocks
    *  booking — see `createBooking`. */
+  /** Null means no payment method at all. The display columns below can be null even when
+   *  this is set — a wallet has no last four — so anything deciding "can they be charged" must
+   *  read THIS and not `billingCardLast4`. */
+  billingPaymentMethodId: string | null
   billingCardBrand: string | null
   billingCardLast4: string | null
   billingCardExpMonth: number | null
@@ -53,6 +57,7 @@ export async function getAccount(providerId: string): Promise<AccountProfile | n
       policyAckAt: providers.policyAckAt,
       policyAckVersion: providers.policyAckVersion,
       stripeOnboardingComplete: providers.stripeOnboardingComplete,
+      billingPaymentMethodId: providers.billingPaymentMethodId,
       billingCardBrand: providers.billingCardBrand,
       billingCardLast4: providers.billingCardLast4,
       billingCardExpMonth: providers.billingCardExpMonth,

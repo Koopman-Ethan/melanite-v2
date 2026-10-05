@@ -1,5 +1,7 @@
 'use client'
 
+import { todayInDenver } from '@/lib/validation'
+
 import { useState, useTransition } from 'react'
 
 import { Button } from '@/components/ui/button'
@@ -71,6 +73,12 @@ export function LicenseForm({
             type="date"
             required
             value={licenseExpiry}
+            // An expired licence is refused on submit — it blocks booking anyway — but without
+            // a floor the picker happily offers last year, and somebody finds out only after
+            // filling the rest of the form. `todayInDenver` rather than the browser's today:
+            // the business is in Mountain Time and a provider in another state should get the
+            // same answer.
+            min={todayInDenver()}
             onChange={(e) => setLicenseExpiry(e.target.value)}
             className="min-h-11 w-full rounded-field border border-line-control bg-surface px-3 py-2 text-sm text-ink focus:border-gold"
           />
@@ -115,7 +123,7 @@ export function LicenseForm({
           })
         }
       >
-        {pending ? 'Saving…' : 'Continue to Stripe'}
+        {pending ? 'Saving…' : 'Continue'}
       </Button>
     </div>
   )

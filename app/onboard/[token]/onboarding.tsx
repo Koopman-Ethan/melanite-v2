@@ -5,6 +5,7 @@ import { useState, useTransition } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Field, Notice } from '@/components/ui/field'
+import { stepsFor } from '@/lib/onboarding'
 import { PASSWORD_CHECKS } from '@/lib/auth/password-policy'
 import { cn } from '@/lib/cn'
 
@@ -15,14 +16,17 @@ import { activateAccount } from './actions'
 // v1's first screen said "STEP 1 OF 5" while every screen after it said "OF 6" — its own
 // sidebar listed five steps and omitted Medical Director. Six is correct and used throughout.
 
-export const STEPS = [
-  { n: 1, title: 'Create Password', blurb: 'Secure your account' },
-  { n: 2, title: 'Personal Profile', blurb: 'Name, phone, credentials' },
-  { n: 3, title: 'License & Compliance', blurb: 'Verify your credentials' },
-  { n: 4, title: 'Connect Stripe', blurb: 'For automatic payouts' },
-  { n: 5, title: 'Medical Director', blurb: 'Physician oversight' },
-  { n: 6, title: 'Select Services', blurb: 'Set pricing and duration' },
-] as const
+/** The steps, from the one list that defines them.
+ *
+ *  This screen used to keep its OWN copy, which is exactly how it ended up advertising
+ *  "Connect Stripe — for automatic payouts" on step 1 while step 3 correctly showed "Card on
+ *  File". Two lists meant the rename landed in one of them, and the first thing a new provider
+ *  ever sees was the stale one.
+ *
+ *  `stepsFor('laser')` rather than the raw list, so a room renter is never shown steps that do
+ *  not apply to them — the same thing `ProgressRail` does on every screen after this. This page
+ *  predates the practice type being known, so it describes the laser path. */
+const STEPS = stepsFor('laser')
 
 /** The persistent right-hand rail: where you are, and why this step is being asked for.
  *
@@ -216,10 +220,11 @@ export function Onboarding({ token, email }: { token: string; email: string }) {
         current={1}
         heading={
           <>
-            You&rsquo;re <span className="text-gold">6 steps</span> away from your first payout.
+            You&rsquo;re <span className="text-gold">{STEPS.length} steps</span> away from
+            booking the laser.
           </>
         }
-        body="This one-time setup takes about 10 minutes. Once complete, you'll have full access to book laser time and accept payments from clients."
+        body="This one-time setup takes about 10 minutes. Once complete you can book laser time. You bill your own clients, at your own prices — that side never comes through Melanite."
       />
     </div>
   )

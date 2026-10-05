@@ -24,6 +24,7 @@ export function BookPanel({
   packs,
   payingRent,
   cardLast4,
+  hasCard,
   termsAccepted,
 }: {
   services: ServiceView[]
@@ -36,6 +37,9 @@ export function BookPanel({
   packs: PackView[]
   payingRent: boolean
   cardLast4: string | null
+  /** Whether anything can be charged at all. `cardLast4` is for display and can be null even
+   *  when a payment method exists. */
+  hasCard: boolean
   termsAccepted: boolean
 }) {
   const router = useRouter()
@@ -60,6 +64,7 @@ export function BookPanel({
       packs={packs}
       payingRent={payingRent}
       cardLast4={cardLast4}
+      hasCard={hasCard}
       termsAccepted={termsAccepted}
       onServiceChange={(id) => set({ service: id })}
       // Picking a day keeps the calendar on that day's month, so the two can never disagree.
