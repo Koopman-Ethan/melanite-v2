@@ -408,6 +408,12 @@ export const providers = pgTable('providers', {
    *  policy a provider acknowledged on a particular appointment. */
   rentalTermsAckAt: timestamp({ withTimezone: true }),
   rentalTermsVersion: text(),
+  /** Which published fee schedule they accepted — `rental_fee_schedules.version`.
+   *
+   *  Separate from the terms version because the two change for different reasons and at
+   *  different rates: the prose is edited in a reviewed commit, the numbers by Keoni in the
+   *  admin. Both gate booking, and a provider has to be current on both. */
+  rentalScheduleVersion: integer(),
 
   medicalDirectorType: medicalDirectorType(),
   medicalDirectorStatus: medicalDirectorStatus().notNull().default('none'),
@@ -1114,6 +1120,70 @@ export const prepaidCheckoutLinks = pgTable('prepaid_checkout_links', {
   uniqueIndex().on(t.token),
   index().on(t.providerId, t.status),
   index().on(t.stripePaymentIntentId),
+])
+
+// ---------------------------------------------------------------------------
+// The rental fee schedule
+// ---------------------------------------------------------------------------
+
+/** One published version of what Melanite charges to use the laser.
+ *
+ *  IMMUTABLE ONCE PUBLISHED. Editing a price writes a new version rather than changing a row,
+ *  because a provider ACCEPTS a schedule — `providers.rentalScheduleVersion` records which —
+ *  and "what did Karly agree to pay" has to be a fact you can look up rather than one you
+ *  reconstruct by replaying an audit log. Reconstructing a contractual amount from a log is
+ *  exactly the thing that goes wrong.
+ *
+ *  NO FOREIGN KEY TO `services`, here or in the entries below, and that is deliberate:
+ *  `scripts/etl/load.ts --force` does `TRUNCATE ... CASCADE` across `services`, so anything
+ *  hanging off it is erased by an import. The schedule is keyed by TIER, and which service
+ *  belongs to which tier stays in `lib/rental-fees.ts` — structure in code, numbers here.
+ *
+ *  `publishedBy` is null for the version the seeding script writes, which is the only one
+ *  nobody decided by hand. */
+export const rentalFeeSchedules = pgTable('rental_fee_schedules', {
+  /** Monotonic, 1-based. Two admins publishing at once collide on the primary key and one
+   *  fails loudly, which is the correct outcome — the loser re-reads and republishes. */
+  version: integer().primaryKey(),
+  publishedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  publishedBy: uuid().references(() => providers.id, { onDelete: 'restrict' }),
+  /** Why this change was made. Not optional in the UI — a price move with no reason attached
+   *  is unanswerable six months later. */
+  note: text(),
+})
+
+/** What each tier costs, in one published version.
+ *
+ *  CENTS, as integers, not `money()`. Every consumer wants cents — Stripe charges in them and
+ *  `lib/money.ts` works in them — and a numeric(10,2) round trip is exactly where the penny
+ *  disagreements this codebase has already fixed twice come from. */
+export const rentalFeeEntries = pgTable('rental_fee_entries', {
+  id: uuid().primaryKey().defaultRandom(),
+  scheduleVersion: integer()
+    .notNull()
+    .references(() => rentalFeeSchedules.version, { onDelete: 'cascade' }),
+  /** A `RENTAL_TIERS` key. Not a foreign key — the tier list lives in code. */
+  tierKey: text().notNull(),
+  singleCents: integer().notNull(),
+  /** What the guide suggests a provider might charge their own client. Advisory, displayed
+   *  only, and stored per version so a published schedule is a complete picture of what was
+   *  shown to somebody when they accepted it. */
+  suggestedLowCents: integer().notNull(),
+  suggestedHighCents: integer().notNull(),
+}, (t) => [
+  uniqueIndex().on(t.scheduleVersion, t.tierKey),
+  check('rental_fee_entries_single_positive', sql`${t.singleCents} > 0`),
+  // A fee at or above what the treatment sells for means renting at a loss. The whole model is
+  // that the fee is roughly half of market and the provider keeps the rest, so this is the
+  // invariant rather than a nicety — and it is the one a typo in an admin form would break.
+  check(
+    'rental_fee_entries_below_suggested',
+    sql`${t.singleCents} < ${t.suggestedLowCents}`,
+  ),
+  check(
+    'rental_fee_entries_range_order',
+    sql`${t.suggestedHighCents} >= ${t.suggestedLowCents}`,
+  ),
 ])
 
 // ---------------------------------------------------------------------------

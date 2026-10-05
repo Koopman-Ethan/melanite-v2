@@ -4,17 +4,21 @@ import {
   RENTAL_TIERS,
   SERVICE_TIER,
   UNPRICED,
-  rentalFeeFor,
+  seedFeeFor,
   tierByKey,
   tierForService,
 } from '@/lib/rental-fees'
 
 // What Melanite bills a provider for a session.
 //
-// Pure logic, no database. The valuable tests here are the frozen ones: these numbers are what a
-// provider has agreed to pay, and a fee that changes because somebody tidied a table is a fee
-// nobody agreed to. The service names are the catalogue's stable key, so a rename is a fee change
-// and has to break something.
+// Pure logic, no database. These numbers are the SEED — the schedule the code ships with and
+// what a tier falls back to until a published version prices it. What is actually charged lives
+// in `rental_fee_schedules` and is tested in `test/rental-schedule.test.ts`.
+//
+// Still frozen, and still worth freezing. The seed is what a brand-new environment starts from
+// and what the cutover publishes as v1, so a number changing here because somebody tidied a
+// table would quietly change what the next environment charges. The service names are the
+// catalogue's stable key, so a rename is a fee change and has to break something.
 
 /** Every fee in Keoni's guide, written out by hand ON PURPOSE.
  *
@@ -123,27 +127,27 @@ describe('the service mapping, frozen', () => {
   })
 
   it('maps the five tattoo sizes one to one', () => {
-    expect(rentalFeeFor('Tattoo Removal (XXSmall)')).toBe(5000)
-    expect(rentalFeeFor('Tattoo Removal (XSmall)')).toBe(8500)
-    expect(rentalFeeFor('Tattoo Removal (Small)')).toBe(11000)
-    expect(rentalFeeFor('Tattoo Removal (Medium)')).toBe(15000)
-    expect(rentalFeeFor('Tattoo Removal (Large)')).toBe(20000)
+    expect(seedFeeFor('Tattoo Removal (XXSmall)')).toBe(5000)
+    expect(seedFeeFor('Tattoo Removal (XSmall)')).toBe(8500)
+    expect(seedFeeFor('Tattoo Removal (Small)')).toBe(11000)
+    expect(seedFeeFor('Tattoo Removal (Medium)')).toBe(15000)
+    expect(seedFeeFor('Tattoo Removal (Large)')).toBe(20000)
   })
 
   it('prices each IPL area separately', () => {
     // The reason the catalogue was split. One generic IPL at one price was the thing Keoni
     // specifically asked not to have: "people charge different prices for each area".
-    expect(rentalFeeFor('IPL — Full Face')).toBe(15000)
-    expect(rentalFeeFor('IPL — Neck')).toBe(10000)
-    expect(rentalFeeFor('IPL — Chest')).toBe(13500)
-    expect(rentalFeeFor('IPL — Hands')).toBe(7500)
+    expect(seedFeeFor('IPL — Full Face')).toBe(15000)
+    expect(seedFeeFor('IPL — Neck')).toBe(10000)
+    expect(seedFeeFor('IPL — Chest')).toBe(13500)
+    expect(seedFeeFor('IPL — Hands')).toBe(7500)
   })
 
   it('prices each ClearLift area separately', () => {
-    expect(rentalFeeFor('ClearLift')).toBe(17500)
-    expect(rentalFeeFor('ClearLift — Neck')).toBe(9500)
-    expect(rentalFeeFor('ClearLift — Hands')).toBe(8500)
-    expect(rentalFeeFor('ClearLift Lip Plumper')).toBe(7000)
+    expect(seedFeeFor('ClearLift')).toBe(17500)
+    expect(seedFeeFor('ClearLift — Neck')).toBe(9500)
+    expect(seedFeeFor('ClearLift — Hands')).toBe(8500)
+    expect(seedFeeFor('ClearLift Lip Plumper')).toBe(7000)
   })
 
   it('charges the same for carbon as for ClearLift', () => {
@@ -151,15 +155,15 @@ describe('the service mapping, frozen', () => {
     // treatment". The same TIER rather than the same number typed twice, so the two cannot
     // drift apart when one of them is repriced.
     expect(SERVICE_TIER['Carbon Laser Treatment']).toBe(SERVICE_TIER['ClearLift'])
-    expect(rentalFeeFor('Carbon Laser Treatment')).toBe(rentalFeeFor('ClearLift'))
+    expect(seedFeeFor('Carbon Laser Treatment')).toBe(seedFeeFor('ClearLift'))
   })
 
   it('prices the two that were guesses until Keoni confirmed them', () => {
     // Facial vein removal was "possibly the guide's 20 min VascuPen, but that is an inference".
     // Sunspots were not in the guide at all. Both were listed as UNPRICED and refused at the
     // booking form until 3 October.
-    expect(rentalFeeFor('Facial Vein Removal')).toBe(4500)
-    expect(rentalFeeFor('Sunspot Removal')).toBe(4500)
+    expect(seedFeeFor('Facial Vein Removal')).toBe(4500)
+    expect(seedFeeFor('Sunspot Removal')).toBe(4500)
   })
 })
 
@@ -181,14 +185,14 @@ describe('services the guide does not price', () => {
     // The distinction the whole module turns on. A null is "cannot be booked" and the booking
     // path must refuse; a zero would be a free session nobody notices until the month's takings
     // are short.
-    expect(rentalFeeFor('Massage')).toBeNull()
+    expect(seedFeeFor('Massage')).toBeNull()
     expect(tierForService('Massage')).toBeNull()
   })
 
   it('returns null for the retired generic IPL', () => {
     // Replaced by the four areas and retired from the catalogue. If it somehow came back as a
     // bookable service it must refuse rather than pick an area's price.
-    expect(rentalFeeFor('IPL')).toBeNull()
+    expect(seedFeeFor('IPL')).toBeNull()
   })
 })
 

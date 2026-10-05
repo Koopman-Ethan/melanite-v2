@@ -1954,3 +1954,51 @@ the twelve-hour close it enforces is unchanged.
 
 **Still true, and the reason the close-out itself was never gated:** nothing here stops anybody
 using the laser. It records what somebody says they did.
+
+---
+
+## The rental fee schedule moved out of code — mostly (2026-10-05)
+
+`lib/rental-fees.ts` shipped on the argument that a fee is what somebody agreed to pay and
+therefore belongs in a reviewed commit rather than a form field, the same reasoning this document
+uses about medical policy. Half of that argument survived Keoni revising the whole schedule twice
+in three weeks. Waiting for a developer to change a price is not review, it is a bottleneck with a
+deploy attached.
+
+**The split is structural versus numeric.**
+
+| | Lives in | Why |
+|---|---|---|
+| What a tier IS, and which service is in it | `lib/rental-fees.ts` | Adding a service needs a catalogue change anyway (`scripts/etl/catalogue.ts`), so mapping it to a tier in the same commit is natural |
+| What a tier COSTS | `rental_fee_schedules` | A number Keoni changes, and the only thing she has actually changed |
+
+The guarantees that mattered are kept, and none of them were really about the file:
+
+- A service can never silently become free. `test/rental-fee-coverage.test.ts` still proves every
+  bookable service maps to a tier, and `UNPRICED` still exists for one awaiting a price.
+- A fee is still never below cost in the sense that matters: a CHECK constraint refuses a fee at
+  or above what the guide says the treatment sells for, because the whole model is that the fee
+  is roughly half of market and the provider keeps the rest.
+- What someone agreed to is still answerable. That is why a published schedule is **immutable** and
+  editing writes a new version: `providers.rentalScheduleVersion` records which one, and version 3
+  is still there to be read. The rejected alternative was mutable rows plus a change log, which
+  makes the same question answerable only by replaying the log — not how you want to answer a
+  contractual amount.
+
+**The frozen-numbers test did not disappear, it changed meaning.** `test/rental-fees.test.ts` now
+pins the SEED: what a fresh environment starts from and what the cutover publishes as v1. A tier
+added in code that no published schedule prices falls back to it, which is what stops a new
+treatment area being unbookable until somebody happens to republish. The admin page says loudly
+when that is happening.
+
+**Publishing blocks booking until providers accept**, because the terms say it does and because
+nobody should be charged a price they have not agreed to. That is only tolerable because accepting
+is one tap on the booking page itself — sending somebody to a settings page mid-booking would turn
+a correct rule into a support message. The gate is two versions, not one: the prose in
+`RENTAL_TERMS_VERSION` and the numbers in the schedule, because they change for different reasons
+and at different rates.
+
+**Not a reversal of the medical-policy rule.** That still stands, and for a reason that does not
+apply here: a booking gate derived from a license or a director agreement is a safety decision with
+a regulator behind it. A rental fee is a commercial one with a counterparty who is told about it
+and asked to agree.

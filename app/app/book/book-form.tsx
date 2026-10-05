@@ -1,9 +1,10 @@
 'use client'
 
 import Link from 'next/link'
-import { useActionState, useState } from 'react'
+import { useActionState, useState, useTransition } from 'react'
 import { useFormStatus } from 'react-dom'
 
+import { acceptRentalTerms } from '@/app/app/account/billing-actions'
 import { Button } from '@/components/ui/button'
 import { Field, Notice } from '@/components/ui/field'
 import { cn } from '@/lib/cn'
@@ -112,6 +113,11 @@ export function BookForm({
 }) {
   const [state, formAction] = useActionState<BookState, FormData>(createBooking, {})
   const [selectedSlot, setSelectedSlot] = useState<string>('')
+  const [accepting, startAccepting] = useTransition()
+  const [acceptError, setAcceptError] = useState<string | null>(null)
+  // Accepting revalidates the page, but the re-render arrives a beat later. Tracking it locally
+  // means the form unblocks the instant they tap rather than appearing not to have worked.
+  const [acceptedNow, setAcceptedNow] = useState(false)
 
   const service = services.find((s) => s.providerServiceId === selectedServiceId)
   const openSlots = slots.filter((s) => s.available)
@@ -123,9 +129,9 @@ export function BookForm({
 
   const unpriced = payingRent && service?.rentalFeeCents === null
   const needsCard = payingRent && !pack && !cardLast4
-  // A pack does NOT excuse this one. The terms cover what the fee schedule is and what happens
-  // on a no-show, which apply just as much to a session drawn from a pack.
-  const needsTerms = payingRent && !termsAccepted
+  // A credited session does NOT excuse this one. The terms cover what the fee schedule is and
+  // what happens on a no-show, which apply just as much to a session that costs nothing.
+  const needsTerms = payingRent && !termsAccepted && !acceptedNow
 
   return (
     <form action={formAction} className="space-y-6">
@@ -253,13 +259,39 @@ export function BookForm({
               to price it.
             </Notice>
           ) : needsTerms ? (
-            <Notice>
-              The rental terms have changed since you last accepted them.{' '}
+            // Accepted HERE rather than by sending them to the account page. A price change
+            // blocks every provider from booking until they accept it, which is correct —
+            // nobody should be charged a price they have not agreed to — but only tolerable if
+            // agreeing takes a tap. Sending somebody away mid-booking to find a settings page
+            // turns a correct rule into a support message.
+            <div className="rounded-field border border-warning/40 bg-warning/10 p-3 text-xs leading-relaxed text-ink-secondary">
+              <strong className="text-warning">The rental prices have changed.</strong>{' '}
+              {service?.rentalFeeCents !== null && service?.rentalFeeCents !== undefined && (
+                <>
+                  {service.name} is now {usd(service.rentalFeeCents)} a session.{' '}
+                </>
+              )}
               <Link href="/app/account" className="underline underline-offset-4">
-                Review and accept them
-              </Link>{' '}
-              to carry on booking.
-            </Notice>
+                See the full schedule
+              </Link>
+              .
+              <Button
+                type="button"
+                className="mt-3"
+                variant="outline"
+                disabled={accepting}
+                onClick={() =>
+                  startAccepting(async () => {
+                    const result = await acceptRentalTerms()
+                    if (result.error) setAcceptError(result.error)
+                    else setAcceptedNow(true)
+                  })
+                }
+              >
+                {accepting ? 'Accepting…' : 'Accept and carry on'}
+              </Button>
+              {acceptError && <p className="mt-2 text-danger">{acceptError}</p>}
+            </div>
           ) : pack ? (
             <div className="rounded-field border border-line p-3 text-xs leading-relaxed text-ink-secondary">
               <strong className="text-ink">Covered by a credited session.</strong>{' '}

@@ -3,8 +3,8 @@ import { eq } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
 import { providers } from '@/lib/db/schema'
-import { RENTAL_TIERS } from '@/lib/rental-fees'
 import { hasAcceptedRentalTerms, RENTAL_TERMS } from '@/lib/rental-terms'
+import { getLiveSchedule } from '@/lib/rental/schedule'
 
 import { requireOnboardingStep } from '../guard'
 import { ProgressRail, StepShell } from '../steps'
@@ -16,6 +16,8 @@ export const dynamic = 'force-dynamic'
 export default async function BillingStep() {
   const user = await requireOnboardingStep('billing')
 
+  const schedule = await getLiveSchedule()
+
   const [row] = await db
     .select({
       cardBrand: providers.billingCardBrand,
@@ -23,6 +25,7 @@ export default async function BillingStep() {
       cardExpMonth: providers.billingCardExpMonth,
       cardExpYear: providers.billingCardExpYear,
       rentalTermsVersion: providers.rentalTermsVersion,
+      rentalScheduleVersion: providers.rentalScheduleVersion,
     })
     .from(providers)
     .where(eq(providers.id, user.id))
@@ -58,16 +61,18 @@ export default async function BillingStep() {
               }
             : null
         }
-        termsAccepted={hasAcceptedRentalTerms(row)}
+        termsAccepted={hasAcceptedRentalTerms(row, schedule.version)}
         terms={RENTAL_TERMS.map((t) => ({ key: t.key, text: t.text }))}
         // The fee schedule is part of what is being agreed to, so it is on the screen where the
         // agreeing happens rather than a link somebody could reasonably not follow.
-        tiers={RENTAL_TIERS.map((t) => ({
-          key: t.key,
-          label: t.label,
-          singleCents: t.singleCents,
-          suggestedLowCents: t.suggestedLowCents,
-          suggestedHighCents: t.suggestedHighCents,
+        // The schedule actually in force, not the one the code shipped with — a provider is
+        // accepting what they will be charged.
+        tiers={schedule.entries.map((e) => ({
+          key: e.tierKey,
+          label: e.label,
+          singleCents: e.singleCents,
+          suggestedLowCents: e.suggestedLowCents,
+          suggestedHighCents: e.suggestedHighCents,
         }))}
       />
     </StepShell>

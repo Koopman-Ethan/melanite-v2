@@ -3,6 +3,7 @@ import type { Metadata } from 'next'
 import { requireProvider } from '@/lib/auth/dal'
 import { licenseMessage, licenseStatus } from '@/lib/license'
 import { hasAcceptedRentalTerms } from '@/lib/rental-terms'
+import { liveScheduleVersion } from '@/lib/rental/schedule'
 import { getAccount, getActiveSessions, getDocuments } from '@/lib/db/queries/account'
 
 import { NotificationsForm, PasswordForm, ProfileForm } from './forms'
@@ -48,10 +49,11 @@ function Section({
 
 export default async function AccountPage() {
   const user = await requireProvider()
-  const [account, documents, activeSessions] = await Promise.all([
+  const [account, documents, activeSessions, scheduleVersion] = await Promise.all([
     getAccount(user.id),
     getDocuments(user.id),
     getActiveSessions(user.id),
+    liveScheduleVersion(),
   ])
 
   if (!account) return null
@@ -113,7 +115,7 @@ export default async function AccountPage() {
                 }
               : null
           }
-          termsAccepted={hasAcceptedRentalTerms(account)}
+          termsAccepted={hasAcceptedRentalTerms(account, scheduleVersion)}
           termsAckAt={account.rentalTermsAckAt}
         />
       </Section>

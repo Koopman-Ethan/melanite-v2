@@ -8,6 +8,7 @@ import { db } from '@/lib/db'
 import { providers } from '@/lib/db/schema'
 import { isOnboarding } from '@/lib/onboarding'
 import { RENTAL_TERMS_VERSION } from '@/lib/rental-terms'
+import { liveScheduleVersion } from '@/lib/rental/schedule'
 import { forgetRentalCard } from '@/lib/stripe/billing-card'
 import { friendlyStripeError, stripePost, stripeWritesEnabled } from '@/lib/stripe/client'
 import { appOrigin } from '@/lib/stripe/config'
@@ -82,16 +83,27 @@ export async function startRentalCardSetup(): Promise<BillingRedirect> {
   }
 }
 
-/** Records that this provider accepted the rental terms as they currently stand. */
+/** Records that this provider accepted the rental terms AND the fee schedule as they currently
+ *  stand.
+ *
+ *  Both stamped together, because they are accepted together on one screen. Recording only the
+ *  prose version would leave a provider permanently unable to book after a price change, since
+ *  the schedule half of the gate would never close. */
 export async function acceptRentalTerms(): Promise<{ error?: string }> {
   const user = await requireProvider()
+  const scheduleVersion = await liveScheduleVersion()
 
   await db
     .update(providers)
-    .set({ rentalTermsAckAt: new Date(), rentalTermsVersion: RENTAL_TERMS_VERSION })
+    .set({
+      rentalTermsAckAt: new Date(),
+      rentalTermsVersion: RENTAL_TERMS_VERSION,
+      rentalScheduleVersion: scheduleVersion,
+    })
     .where(eq(providers.id, user.id))
 
   revalidatePath('/app/account')
+  revalidatePath('/app/book')
   revalidatePath('/onboarding/billing')
   return {}
 }

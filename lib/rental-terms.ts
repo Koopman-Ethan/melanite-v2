@@ -91,12 +91,24 @@ export const RENTAL_TERMS: readonly RentalTerm[] = [
 export const RENTAL_TERMS_FEE_NOTE =
   'The current fee for every service is listed above and in the booking form.'
 
-/** Has this provider accepted the terms that are in force now?
+/** Has this provider accepted what is in force now — both the prose and the prices?
  *
- *  Compares the VERSION, not merely "is there an acknowledgement". A provider who accepted an
- *  older set has not agreed to this one, which is the entire reason the version is stored. */
+ *  TWO VERSIONS, because the two change for different reasons. The terms above are edited in a
+ *  reviewed commit; the fee schedule is published by Keoni from the admin, and lives in
+ *  `rental_fee_schedules`. A provider has to be current on both, and the reason is the same in
+ *  each case: they agreed to a specific thing, and this compares against that thing rather
+ *  than against "did they ever agree to anything".
+ *
+ *  A null `liveSchedule` means nothing has been published yet — the seeding script has not run
+ *  — so there is no schedule to be out of date with and that half of the gate is open. */
 export function hasAcceptedRentalTerms(
-  provider: { rentalTermsVersion: string | null } | null | undefined,
+  provider:
+    | { rentalTermsVersion: string | null; rentalScheduleVersion?: number | null }
+    | null
+    | undefined,
+  liveSchedule: number | null = null,
 ): boolean {
-  return provider?.rentalTermsVersion === RENTAL_TERMS_VERSION
+  if (provider?.rentalTermsVersion !== RENTAL_TERMS_VERSION) return false
+  if (liveSchedule === null) return true
+  return provider?.rentalScheduleVersion === liveSchedule
 }

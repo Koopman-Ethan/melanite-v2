@@ -10,6 +10,7 @@ import { providerServices, providers } from '@/lib/db/schema'
 import { toCents, toMoney } from '@/lib/money'
 import { nextStepSlug } from '@/lib/onboarding'
 import { hasAcceptedRentalTerms } from '@/lib/rental-terms'
+import { liveScheduleVersion } from '@/lib/rental/schedule'
 import { phoneError } from '@/lib/validation'
 
 export interface StepState {
@@ -137,6 +138,7 @@ export async function completeBillingStep(): Promise<StepState> {
     .select({
       billingPaymentMethodId: providers.billingPaymentMethodId,
       rentalTermsVersion: providers.rentalTermsVersion,
+      rentalScheduleVersion: providers.rentalScheduleVersion,
     })
     .from(providers)
     .where(eq(providers.id, user.id))
@@ -145,7 +147,7 @@ export async function completeBillingStep(): Promise<StepState> {
   if (!row?.billingPaymentMethodId) {
     return { error: 'Add a card before continuing — the rental fee is charged when you book.' }
   }
-  if (!hasAcceptedRentalTerms(row)) {
+  if (!hasAcceptedRentalTerms(row, await liveScheduleVersion())) {
     return { error: 'Accept the rental terms before continuing.' }
   }
 

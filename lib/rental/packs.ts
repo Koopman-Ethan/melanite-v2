@@ -6,6 +6,8 @@ import { db } from '@/lib/db'
 import { providerPackRedemptions, providerPacks } from '@/lib/db/schema'
 import { tierByKey, tierForService } from '@/lib/rental-fees'
 
+import { getLiveSchedule } from './schedule'
+
 // Fee-free laser sessions a provider has been granted.
 //
 // NOT SOLD. Melanite published pack rates for about a fortnight and Keoni withdrew them on
@@ -179,16 +181,20 @@ export async function packBalancesFor(providerId: string): Promise<PackBalance[]
     )
     .groupBy(providerPacks.tierKey)
 
+  const schedule = await getLiveSchedule()
+
   return rows.map((r) => {
     const tier = tierByKey(r.tierKey)
     return {
       tierKey: r.tierKey,
-      // Falling back to the raw key rather than hiding the row: a pack whose tier left the
-      // schedule is still sessions somebody paid for, and it must not vanish from their balance.
+      // Falling back to the raw key rather than hiding the row: a grant whose tier left the
+      // schedule is still sessions somebody is owed, and it must not vanish from their balance.
       label: tier?.label ?? r.tierKey,
       sessionsRemaining: Number(r.remaining),
       sessionsTotal: Number(r.total),
-      singleCents: tier?.singleCents ?? null,
+      // The live fee, so "rent you won't be charged" is worth what it would cost today rather
+      // than what it cost when the code was written.
+      singleCents: schedule.byTier.get(r.tierKey)?.singleCents ?? tier?.singleCents ?? null,
     }
   })
 }

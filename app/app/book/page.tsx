@@ -13,7 +13,8 @@ import {
   getMonthAvailability,
 } from '@/lib/db/queries/availability'
 import { packBalancesFor } from '@/lib/rental/packs'
-import { rentalFeeFor, tierForService } from '@/lib/rental-fees'
+import { tierForService } from '@/lib/rental-fees'
+import { getLiveSchedule } from '@/lib/rental/schedule'
 import { hasAcceptedRentalTerms } from '@/lib/rental-terms'
 
 import { BookPanel } from './book-panel'
@@ -76,20 +77,31 @@ export default async function BookPage({
   // and only falls back to the selected date's month.
   const month = /^\d{4}-\d{2}$/.test(params.month ?? '') ? params.month! : date.slice(0, 7)
 
-  const [{ slots, hours }, monthAvailability, packs, [provider]] = await Promise.all([
+  const [{ slots, hours }, monthAvailability, packs, schedule, [provider]] = await Promise.all([
     getAvailability(date, selected.durationMins),
     getMonthAvailability(month, selected.durationMins),
     packBalancesFor(user.id),
+    getLiveSchedule(),
     db
       .select({
         revenueModel: providers.revenueModel,
         cardLast4: providers.billingCardLast4,
         rentalTermsVersion: providers.rentalTermsVersion,
+        rentalScheduleVersion: providers.rentalScheduleVersion,
       })
       .from(providers)
       .where(eq(providers.id, user.id))
       .limit(1),
   ])
+
+  /** The live fee for a service, read off the schedule already loaded above rather than
+   *  queried per row — a provider with twenty services would otherwise be twenty round trips
+   *  to price one dropdown. */
+  const feeFromSchedule = (serviceName: string): number | null => {
+    const tier = tierForService(serviceName)
+    if (!tier) return null
+    return schedule.byTier.get(tier.key)?.singleCents ?? tier.singleCents
+  }
 
   // Melanite treating Melanite's own client pays no rent, so the whole fee panel is irrelevant
   // for the house account rather than showing it a charge of nothing.
@@ -114,7 +126,7 @@ export default async function BookPage({
           // What Melanite charges the provider for the slot. Null means the service has no
           // published fee and cannot be booked — the form says so rather than letting them
           // find out after picking a time.
-          rentalFeeCents: payingRent ? rentalFeeFor(s.name) : 0,
+          rentalFeeCents: payingRent ? feeFromSchedule(s.name) : 0,
           tierKey: tierForService(s.name)?.key ?? null,
         }))}
         packs={packs.map((p) => ({
@@ -124,7 +136,7 @@ export default async function BookPage({
         }))}
         payingRent={payingRent}
         cardLast4={provider?.cardLast4 ?? null}
-        termsAccepted={hasAcceptedRentalTerms(provider)}
+        termsAccepted={hasAcceptedRentalTerms(provider, schedule.version)}
         slots={slots.map((s) => ({
           startTime: s.startTime.toISOString(),
           available: s.available,

@@ -80,6 +80,7 @@ const ITEMS: NavItem[] = [
   { label: 'Training', href: '/app/admin/training', adminOnly: true },
   { label: 'Queue', href: '/app/admin/queue', adminOnly: true },
   { label: 'Revenue', href: '/app/admin/revenue', adminOnly: true },
+  { label: 'Laser Pricing', href: '/app/admin/pricing', adminOnly: true },
   { label: 'Tools', href: '/app/admin/tools', adminOnly: true },
   { label: 'Oversight', href: '/app/oversight', directorOnly: true },
   { label: 'Account', href: '/app/account' },

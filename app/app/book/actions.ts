@@ -16,8 +16,8 @@ import {
   releasePackSession,
   type PackClaim,
 } from '@/lib/rental/packs'
-import { rentalFeeFor } from '@/lib/rental-fees'
 import { hasAcceptedRentalTerms } from '@/lib/rental-terms'
+import { feeForService, liveScheduleVersion } from '@/lib/rental/schedule'
 
 export interface BookState {
   error?: string
@@ -108,6 +108,7 @@ export async function createBooking(_prev: BookState, formData: FormData): Promi
       customerId: providers.stripeBillingCustomerId,
       paymentMethodId: providers.billingPaymentMethodId,
       rentalTermsVersion: providers.rentalTermsVersion,
+      rentalScheduleVersion: providers.rentalScheduleVersion,
     })
     .from(providers)
     .where(eq(providers.id, user.id))
@@ -116,7 +117,7 @@ export async function createBooking(_prev: BookState, formData: FormData): Promi
   // Melanite treating Melanite's own client. There is no rent to pay yourself.
   const payingRent = provider?.revenueModel !== 'house'
 
-  const feeCents = rentalFeeFor(svc.name)
+  const feeCents = await feeForService(svc.name)
   if (payingRent && feeCents === null) {
     // A service nobody has set a rental fee for. Refusing is the whole point: letting it through
     // would be a free session, and a free session is not discovered until the month's takings are
@@ -137,9 +138,9 @@ export async function createBooking(_prev: BookState, formData: FormData): Promi
   // The rental terms say in as many words that a provider will be asked to accept a new fee
   // schedule before their next booking. This is what makes that true rather than aspirational —
   // a term the code does not implement is a term that quietly becomes false.
-  if (payingRent && !hasAcceptedRentalTerms(provider)) {
+  if (payingRent && !hasAcceptedRentalTerms(provider, await liveScheduleVersion())) {
     return {
-      error: 'The rental terms have changed. Accept them on your account page before booking.',
+      error: 'The rental terms or prices have changed. Accept them before booking.',
     }
   }
 

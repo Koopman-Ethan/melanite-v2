@@ -5,7 +5,7 @@ import { and, eq, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { bookings, ledgerEntries, providerServices, providers, services } from '@/lib/db/schema'
 import { toMoney } from '@/lib/money'
-import { rentalFeeFor } from '@/lib/rental-fees'
+import { feeForService } from '@/lib/rental/schedule'
 import { StripeApiError, stripePost, stripeWritesEnabled } from '@/lib/stripe/client'
 
 // Charging a provider to use the laser.
@@ -43,7 +43,7 @@ export async function rentalFeeForBooking(bookingId: string): Promise<number | n
     .where(eq(bookings.id, bookingId))
     .limit(1)
 
-  return row ? rentalFeeFor(row.serviceName) : null
+  return row ? await feeForService(row.serviceName) : null
 }
 
 /**
@@ -114,7 +114,7 @@ export async function chargeRentalFee(bookingId: string): Promise<RentalChargeRe
     return { skipped: "Melanite's own appointment — no rental fee." }
   }
 
-  const amountCents = rentalFeeFor(booking.serviceName)
+  const amountCents = await feeForService(booking.serviceName)
   if (amountCents === null) {
     // The loud gap. A service with no published fee must not become a free session; it is a
     // question for Keoni, and until she answers it this booking cannot be billed.

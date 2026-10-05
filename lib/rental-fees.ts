@@ -13,11 +13,25 @@
 // provider can be GRANTED fee-free sessions — the cutover owes Karly the ones her clients
 // already bought — but nothing is sold.
 //
-// IN CODE, NOT IN THE DATABASE, and for a specific reason: `scripts/etl/load.ts` truncates
-// `services`, so anything hung off that table can be erased by an import. The catalogue's
-// duration data lives in `scripts/etl/catalogue.ts` for exactly this reason and this follows it.
-// It is also what somebody is agreeing to pay, which `docs/decisions.md` has repeatedly said
-// belongs in a reviewed commit rather than a form field.
+// STRUCTURE IN CODE, NUMBERS IN THE DATABASE. This file used to hold both, on the argument that
+// a fee is what somebody agreed to pay and belongs in a reviewed commit. Half of that argument
+// survived contact with Keoni revising the whole schedule twice in three weeks.
+//
+// So the split is now:
+//
+//   here        what a tier IS, and which service falls in which tier. Structural, and adding
+//               a service needs a catalogue change anyway — see `scripts/etl/catalogue.ts`.
+//   database    what a tier COSTS. Published by Keoni in the admin, versioned and immutable,
+//               and accepted by each provider before it can be charged to them. See
+//               `lib/rental/schedule.ts` and `rental_fee_schedules`.
+//
+// The numbers below are the SEED — the first published version, and the fallback for a tier
+// added here that no published schedule has priced yet. `seedFeeFor` reads them; nothing in the
+// app should. Application code calls `feeForService` in `lib/rental/schedule.ts`, which reads
+// what is actually in force.
+//
+// They are not in the `services` table for the original reason, which still holds:
+// `scripts/etl/load.ts --force` truncates it, so anything hung off it is erased by an import.
 //
 // KEYED BY SERVICE NAME, which is this codebase's stable catalogue key — `catalogue.ts` matches
 // on name too. A rename is therefore a fee change and must be made deliberately in both places;
@@ -66,7 +80,10 @@ const tier = (
 })
 
 /**
- * Every tier the pricing guide defines.
+ * Every tier the pricing guide defines, with the fees it was seeded from.
+ *
+ * The LABELS and the set of tiers are live; the numbers are a seed. Read a current fee from
+ * `lib/rental/schedule.ts`, never from here.
  *
  * Hair removal is bracketed by area size; tattoo removal by the size of the tattoo; IPL and
  * ClearLift are priced per area directly, which is why the catalogue now carries a service per
@@ -182,11 +199,15 @@ export function tierForService(serviceName: string): RentalTier | null {
 }
 
 /**
- * What one session of this service costs the provider, in cents.
+ * The SEEDED fee for a service, in cents — what the schedule started at, not what is charged.
+ *
+ * Deliberately named so it cannot be mistaken for the live figure. Application code wants
+ * `feeForService` in `lib/rental/schedule.ts`; this is for seeding the first version, for
+ * pricing a tier no published schedule covers yet, and for tests that pin the starting point.
  *
  * NULL means "no published fee", which is a refusal rather than a free session — see `UNPRICED`.
- * Callers must treat null as "cannot be booked yet", never as zero.
+ * Callers must treat null as "cannot be booked", never as zero.
  */
-export function rentalFeeFor(serviceName: string): number | null {
+export function seedFeeFor(serviceName: string): number | null {
   return tierForService(serviceName)?.singleCents ?? null
 }

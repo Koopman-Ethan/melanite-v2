@@ -32,6 +32,7 @@ export const APP_DESTINATIONS: readonly string[] = [
   '/app/admin',
   '/app/admin/calendar',
   '/app/admin/equipment',
+  '/app/admin/pricing',
   '/app/admin/providers',
   '/app/admin/queue',
   '/app/admin/revenue',

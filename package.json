@@ -35,7 +35,8 @@
     "dev:house-provider": "tsx --tsconfig scripts/tsconfig.json scripts/dev-house-provider.ts",
     "dev:usable": "tsx --tsconfig scripts/tsconfig.json scripts/dev-usable.ts",
     "dev:closeout-demo": "tsx --tsconfig scripts/tsconfig.json scripts/dev-closeout-demo.ts",
-    "cutover:grant-sessions": "tsx --tsconfig scripts/tsconfig.json scripts/cutover-grant-sessions.ts"
+    "cutover:grant-sessions": "tsx --tsconfig scripts/tsconfig.json scripts/cutover-grant-sessions.ts",
+    "etl:rental-fees": "tsx --tsconfig scripts/tsconfig.json scripts/etl/rental-fees.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
