@@ -77,9 +77,19 @@ async function book(providerId: string, providerServiceId: string): Promise<stri
 }
 
 beforeAll(async () => {
+  // A provider with NO CARD, deliberately. Every refusal in this file happens before the
+  // Stripe call, and that is only true of a provider who cannot be charged — pick one who can
+  // and `chargeRentalFee` succeeds, takes a real test-mode payment and writes a ledger row,
+  // which is what happened the moment `dev-rental-ready.ts` started giving dev providers cards.
+  //
+  // Selected by the absence of a payment method rather than by booking gates, so the fixture
+  // states its own requirement instead of depending on what the nightly copy happened to bring.
   const [prov] = (await sql.query(
-    `SELECT id FROM providers WHERE revenue_model = 'split' AND booking_enabled LIMIT 1`,
+    `SELECT id FROM providers
+      WHERE revenue_model = 'split' AND billing_payment_method_id IS NULL
+      LIMIT 1`,
   )) as { id: string }[]
+  if (!prov) throw new Error('no card-less provider in dev — these tests need one')
   priced.providerId = prov.id
 
   // "Laser Hair Removal — Chin" is XS, $35 since the October schedule. The generic "IPL" was
@@ -134,7 +144,8 @@ describe('refusals, all of them before Stripe is called', () => {
   })
 
   it('refuses when the provider has no card on file', async () => {
-    // Dev providers have no billing card, so this is the live path rather than a contrived one.
+    // The guard that stops a booking being made against a provider nobody can bill. Real path:
+    // the fixture provider genuinely has no payment method, nothing is mocked.
     const out = await chargeRentalFee(priced.bookingId)
     expect(out).toHaveProperty('error')
     if ('error' in out) expect(out.error).toMatch(/no card on file/i)

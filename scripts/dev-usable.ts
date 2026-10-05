@@ -5,6 +5,8 @@ import { eq, sql } from 'drizzle-orm'
 import { canBook, bookingBlockedReasons } from '@/lib/auth/dal'
 import type { SessionUser } from '@/lib/auth/session'
 import { providerServices, providers } from '@/lib/db/schema'
+import { RENTAL_TERMS_VERSION } from '@/lib/rental-terms'
+import { liveScheduleVersion } from '@/lib/rental/schedule'
 
 import { describeDatabase, requireEnv } from '../lib/env-guard'
 import { db } from './db'
@@ -185,6 +187,56 @@ const CHECKS: Check[] = [
         : 'no active provider has a Stripe account at all — dev-connect-accounts.ts has not run'
     },
   },
+  {
+    label: 'a bookable provider can actually pay the rental fee',
+    because:
+      'under the rental model booking refuses without a card on file and without the current terms accepted — a provider who passes every gate above still cannot book',
+    run: async () => {
+      const schedule = await liveScheduleVersion()
+      if (schedule === null) return 'no fee schedule published — etl:rental-fees has not run'
+
+      const [row] = await db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(providers)
+        .where(
+          sql`${providers.status} = 'active'
+              AND ${providers.bookingEnabled}
+              AND ${providers.revenueModel} <> 'house'
+              AND ${providers.billingCardLast4} IS NOT NULL
+              AND ${providers.rentalTermsVersion} = ${RENTAL_TERMS_VERSION}
+              AND ${providers.rentalScheduleVersion} = ${schedule}`,
+        )
+
+      return (row?.n ?? 0) > 0
+        ? true
+        : 'no bookable provider has a card and current terms — dev-rental-ready.ts has not run'
+    },
+  },
+  {
+    label: 'no provider is left holding a production Stripe customer',
+    because:
+      'the nightly copy brings live cus_ ids across, and a card setup against one fails with "No such customer" — which reads like a permissions problem and is not',
+    run: async () => {
+      // The billing customer is the mirror of the Connect account above, and was missed when
+      // that check was written because nothing charged a provider yet. `dev-rental-ready.ts`
+      // replaces a live id when it finds one; this notices if it has not been run since the
+      // last refresh.
+      const [row] = await db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(providers)
+        .where(
+          sql`${providers.stripeBillingCustomerId} IS NOT NULL
+              AND ${providers.billingPaymentMethodId} IS NULL
+              AND ${providers.status} = 'active'
+              AND ${providers.revenueModel} <> 'house'`,
+        )
+
+      const n = row?.n ?? 0
+      return n === 0
+        ? true
+        : `${n} active provider(s) have a billing customer but no payment method — likely live ids from the copy`
+    },
+  },
 ]
 
 async function main() {
@@ -215,7 +267,7 @@ async function main() {
   if (failed > 0) {
     console.log(
       `\n${failed} check(s) failed. Dev will produce test failures that look like product bugs.` +
-        `\nRepair with: dev-connect-accounts.ts, dev-e2e-credentials.ts, dev-house-provider.ts\n`,
+        `\nRepair with: dev-connect-accounts.ts, dev-e2e-credentials.ts, dev-house-provider.ts, dev-rental-ready.ts\n`,
     )
     process.exit(1)
   }
