@@ -50,7 +50,8 @@ const PAYMENT_LABELS: Record<Appointment['paymentSource'], string> = {
   rental: 'Laser rental',
 }
 
-const usd = (v: string) => Number(v).toLocaleString('en-US', { style: 'currency', currency: 'USD' })
+const usd = (v: string | number) =>
+  Number(v).toLocaleString('en-US', { style: 'currency', currency: 'USD' })
 
 const dayLabel = (d: Date) =>
   d.toLocaleDateString('en-US', {
@@ -116,7 +117,32 @@ function AppointmentCard({ appointment, origin }: { appointment: Appointment; or
         </div>
 
         <div className="text-right">
-          <div className="text-lg font-semibold tabular-nums">{usd(appointment.price)}</div>
+          {/* A rental booking's `price` is the CLIENT's, which Melanite no longer knows and the
+              database forces to zero — so showing it reads as "this session was free" for one
+              the provider was charged $60 for. The rent is the only money on the booking. */}
+          {appointment.paymentSource === 'rental' ? (
+            appointment.paidFromCredit ? (
+              <>
+                <div className="text-lg font-semibold tabular-nums">$0.00</div>
+                <div className="text-xs text-ink-faint">credited session</div>
+              </>
+            ) : (
+              <>
+                <div className="text-lg font-semibold tabular-nums">
+                  {usd((appointment.rentalCents ?? 0) / 100)}
+                </div>
+                <div className="text-xs text-ink-faint">
+                  {appointment.rentalCents === null
+                    ? 'no rent recorded'
+                    : appointment.rentalCents === 0
+                      ? 'rent refunded'
+                      : 'rent'}
+                </div>
+              </>
+            )
+          ) : (
+            <div className="text-lg font-semibold tabular-nums">{usd(appointment.price)}</div>
+          )}
           {discounted && (
             <>
               <div className="text-xs text-ink-faint tabular-nums line-through">

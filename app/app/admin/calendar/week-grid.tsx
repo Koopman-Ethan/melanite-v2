@@ -30,7 +30,7 @@ const PAYMENT_LABELS: Record<string, string> = {
   comped: 'Comped',
 }
 
-const usd = (v: string) => Number(v).toLocaleString('en-US', { style: 'currency', currency: 'USD' })
+const usd = (v: string | number) => Number(v).toLocaleString('en-US', { style: 'currency', currency: 'USD' })
 
 const dayHeading = (day: string) => {
   const [y, m, d] = day.split('-').map(Number)
@@ -431,8 +431,23 @@ export function WeekGrid({
               </p>
               <p className="mt-1.5 text-xs text-ink-faint">{selected.providerName}</p>
             </div>
-            <div className="text-right text-lg font-semibold tabular-nums">
-              {usd(selected.price)}
+            {/* Rent on a rental booking. Its `price` is the client's, which Melanite does
+                not know and the database forces to zero. */}
+            <div className="text-right">
+              <div className="text-lg font-semibold tabular-nums">
+                {selected.paymentSource === 'rental'
+                  ? usd((selected.rentalCents ?? 0) / 100)
+                  : usd(selected.price)}
+              </div>
+              {selected.paymentSource === 'rental' && (
+                <div className="text-xs text-ink-faint">
+                  {selected.paidFromCredit
+                    ? 'credited session'
+                    : selected.rentalCents === null
+                      ? 'no rent recorded'
+                      : 'rent'}
+                </div>
+              )}
             </div>
           </div>
         </div>

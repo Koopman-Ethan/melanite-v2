@@ -29,6 +29,16 @@ export interface AppointmentFilters {
 }
 
 export interface Appointment {
+  /** Rent Melanite kept for this session, in cents, netting off a refund. Null when none was
+   *  charged — which for a rental booking means a credited session covered it, or it is
+   *  Melanite's own appointment.
+   *
+   *  The ONLY money on a rental booking. `price` is the client's, which Melanite no longer
+   *  knows and forces to zero, so a list showing `price` shows $0.00 for a session the
+   *  provider was charged $60 for. */
+  rentalCents: number | null
+  /** A credited session paid for it, so nothing was charged and nothing is missing. */
+  paidFromCredit: boolean
   id: string
   clientName: string
   clientPhone: string | null
@@ -103,6 +113,15 @@ export async function getAppointments(
     .select({
       id: bookings.id,
       clientName: bookings.clientName,
+      rentalCents: sql<number | null>`(
+        select round(sum(l.gross_amount) * 100)::int from ledger_entries l
+        where l.subject_type = 'booking' and l.subject_id = ${bookings.id}
+          and l.source = 'rental_fee'
+      )`,
+      paidFromCredit: sql<boolean>`exists (
+        select 1 from provider_pack_redemptions r
+        where r.booking_id = ${bookings.id} and r.voided_at is null
+      )`,
       clientPhone: bookings.clientPhone,
       clientEmail: bookings.clientEmail,
       clientId: bookings.clientId,
@@ -212,6 +231,15 @@ async function getAppointmentsById(providerId: string, bookingId: string): Promi
     .select({
       id: bookings.id,
       clientName: bookings.clientName,
+      rentalCents: sql<number | null>`(
+        select round(sum(l.gross_amount) * 100)::int from ledger_entries l
+        where l.subject_type = 'booking' and l.subject_id = ${bookings.id}
+          and l.source = 'rental_fee'
+      )`,
+      paidFromCredit: sql<boolean>`exists (
+        select 1 from provider_pack_redemptions r
+        where r.booking_id = ${bookings.id} and r.voided_at is null
+      )`,
       clientPhone: bookings.clientPhone,
       clientEmail: bookings.clientEmail,
       clientId: bookings.clientId,

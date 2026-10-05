@@ -63,7 +63,13 @@ export interface CalendarBooking {
   providerName: string
   serviceName: string
   colorHex: string | null
+  /** What the CLIENT paid. Always zero on a rental booking — Melanite no longer knows what the
+   *  provider charged — so anything showing money must use `rentalCents` for those. */
   price: string
+  /** Rent Melanite kept, in cents, netting off a refund. Null when none was charged: a
+   *  credited session, or Melanite's own appointment. */
+  rentalCents: number | null
+  paidFromCredit: boolean
   status: string
   paymentSource: string
   /** Which external route, when the money came from outside the app. */
@@ -237,6 +243,15 @@ export async function getCalendarWeek(weekStart: string): Promise<CalendarWeek> 
       treatmentArea: bookings.treatmentArea,
       durationMins: bookings.durationMins,
       price: bookings.price,
+      rentalCents: sql<number | null>`(
+        select round(sum(l.gross_amount) * 100)::int from ledger_entries l
+        where l.subject_type = 'booking' and l.subject_id = ${bookings.id}
+          and l.source = 'rental_fee'
+      )`,
+      paidFromCredit: sql<boolean>`exists (
+        select 1 from provider_pack_redemptions r
+        where r.booking_id = ${bookings.id} and r.voided_at is null
+      )`,
       status: bookings.status,
       paymentSource: bookings.paymentSource,
       externalMethod: bookings.externalMethod,
@@ -341,6 +356,8 @@ export async function getCalendarWeek(weekStart: string): Promise<CalendarWeek> 
       serviceName: r.serviceName,
       colorHex: r.colorHex,
       price: r.price,
+      rentalCents: r.rentalCents === null ? null : Number(r.rentalCents),
+      paidFromCredit: r.paidFromCredit,
       status: r.status,
       paymentSource: r.paymentSource,
       externalMethod: r.externalMethod,
@@ -358,7 +375,17 @@ export async function getCalendarWeek(weekStart: string): Promise<CalendarWeek> 
   assignLanes(occupying)
 
   const bookedMinutes = occupying.reduce((sum, e) => sum + e.durationMins, 0)
-  const revenueCents = occupying.reduce((sum, e) => sum + Math.round(Number(e.price) * 100), 0)
+  // Rent for a rental booking, the client price for anything older. Summing `price` alone made
+  // the day's takings read as zero once bookings stopped carrying a client price — the figure
+  // was right for every booking made before the rental model and wrong for every one after.
+  const revenueCents = occupying.reduce(
+    (sum, e) =>
+      sum +
+      (e.paymentSource === 'rental'
+        ? (e.rentalCents ?? 0)
+        : Math.round(Number(e.price) * 100)),
+    0,
+  )
 
   return {
     days,
