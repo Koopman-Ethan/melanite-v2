@@ -417,7 +417,13 @@ async function main() {
     `\nDone. ${counts.clients} clients, ${counts.bookings} bookings, ` +
       `${counts.ledger} ledger entries — nothing identifying.`,
   )
-  console.log('\nNow run:  npx tsx --tsconfig scripts/tsconfig.json scripts/dev-connect-accounts.ts')
+  // Everything the copy undoes, in the order it has to be repaired. The catalogue and the fee
+  // schedule are v2 decisions production does not carry yet, and the provider fixtures depend on
+  // both — a card is useless to somebody whose services have no published fee.
+  console.log(
+    '\nNow run:  npm run dev:after-refresh' +
+      '\n          etl:catalogue, etl:rental-fees, connect accounts, credentials, rental cards',
+  )
 }
 
 main().catch((err) => {

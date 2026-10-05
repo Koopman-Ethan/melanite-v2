@@ -11,6 +11,7 @@ import { RENTAL_TERMS_VERSION } from '@/lib/rental-terms'
 import { liveScheduleVersion } from '@/lib/rental/schedule'
 import { forgetRentalCard } from '@/lib/stripe/billing-card'
 import { friendlyStripeError, stripePost, stripeWritesEnabled } from '@/lib/stripe/client'
+import { isMissingCustomerError } from '@/lib/stripe/config'
 import { appOrigin } from '@/lib/stripe/config'
 
 // The card Melanite charges for laser time, and the terms that go with it.
@@ -53,8 +54,13 @@ export async function startRentalCardSetup(): Promise<BillingRedirect> {
   // remaining steps are there and the account page would strand them mid-flow.
   const back = isOnboarding(user) ? '/onboarding/billing' : '/app/account'
 
-  try {
-    const session = await stripePost<{ url?: string }>(
+  // NOT keyed on the provider alone. A card setup is something somebody may legitimately do
+  // twice — a declined card, then a different one — and a 24-hour idempotent replay would hand
+  // them back the session for the card that failed.
+  const key = `rental-card:${user.id}:${Date.now()}`
+
+  const open = (customer: string | null, idempotencyKey: string) =>
+    stripePost<{ url?: string }>(
       '/checkout/sessions',
       {
         mode: 'setup',
@@ -65,21 +71,45 @@ export async function startRentalCardSetup(): Promise<BillingRedirect> {
         // Reuse the Customer if one exists — a provider who already pays for medical direction
         // should not end up with two Customers, which is how a card gets attached to the one
         // nothing charges.
-        ...(provider?.customerId
-          ? { customer: provider.customerId }
+        ...(customer
+          ? { customer }
           : { customer_creation: 'always', customer_email: provider?.email }),
       },
-      {
-        // NOT keyed on the provider alone. A card setup is something somebody may legitimately
-        // do twice — a declined card, then a different one — and a 24-hour idempotent replay
-        // would hand them back the session for the card that failed.
-        idempotencyKey: `rental-card:${user.id}:${Date.now()}`,
-      },
+      { idempotencyKey },
     )
 
+  try {
+    const session = await open(provider?.customerId ?? null, key)
     return session.url ? { url: session.url } : { error: 'Stripe did not return a checkout link.' }
   } catch (err) {
-    return { error: friendlyStripeError(err, 'Could not open Stripe. Try again shortly.') }
+    // A stored customer Stripe has never heard of. `isMissingCustomerError` was written for
+    // exactly this and the membership flow already recovers from it: a customer deleted in the
+    // dashboard, or a database restored across Stripe modes — which is what the nightly copy of
+    // production does to dev every morning, bringing live cus_ ids into a test account.
+    //
+    // Without this the provider is stuck forever on "Could not open Stripe", and the id is not
+    // editable from anywhere in the app, so there is nothing they or Melanite can do about it.
+    if (!provider?.customerId || !isMissingCustomerError(err)) {
+      return { error: friendlyStripeError(err, 'Could not open Stripe. Try again shortly.') }
+    }
+
+    console.warn(
+      `[stripe] clearing unknown billing customer ${provider.customerId} for ${user.id}`,
+    )
+    await db
+      .update(providers)
+      .set({ stripeBillingCustomerId: null })
+      .where(eq(providers.id, user.id))
+
+    try {
+      // A different key. Stripe caches the response to an idempotent request even when it
+      // failed, so replaying the original would hand back the same error.
+      return await open(null, `${key}:recustomer`).then((session) =>
+        session.url ? { url: session.url } : { error: 'Stripe did not return a checkout link.' },
+      )
+    } catch (retryErr) {
+      return { error: friendlyStripeError(retryErr, 'Could not open Stripe. Try again shortly.') }
+    }
   }
 }
 
