@@ -4,7 +4,7 @@ import { eq, sql } from 'drizzle-orm'
 
 import { canBook, bookingBlockedReasons } from '@/lib/auth/dal'
 import type { SessionUser } from '@/lib/auth/session'
-import { providerServices, providers } from '@/lib/db/schema'
+import { providers, services } from '@/lib/db/schema'
 import { RENTAL_TERMS_VERSION } from '@/lib/rental-terms'
 import { liveScheduleVersion } from '@/lib/rental/schedule'
 
@@ -86,11 +86,14 @@ async function byEmail(email: string) {
   return row ?? null
 }
 
-async function activeServiceCount(providerId: string): Promise<number> {
+/** Services anybody can book. Since the rental model that is a property of the CATALOGUE, not
+ *  of a provider — nobody picks a menu, and the `provider_services` row appears when they first
+ *  book something. */
+async function bookableServiceCount(): Promise<number> {
   const [row] = await db
     .select({ n: sql<number>`count(*)::int` })
-    .from(providerServices)
-    .where(sql`${providerServices.providerId} = ${providerId} and ${providerServices.isActive}`)
+    .from(services)
+    .where(sql`${services.active}`)
   return row?.n ?? 0
 }
 
@@ -136,15 +139,15 @@ const CHECKS: Check[] = [
     },
   },
   {
-    label: 'the e2e provider has something to book',
-    because: 'the book page renders "you don’t have any active services yet" and no slots',
+    label: 'there is something to book',
+    because: 'the book page renders an empty dropdown and no slots',
     run: async () => {
-      const email = process.env.E2E_PROVIDER_EMAIL
-      if (!email) return 'E2E_PROVIDER_EMAIL is not set'
-      const row = await byEmail(email)
-      if (!row) return `${email} has no provider row`
-      const n = await activeServiceCount(row.id)
-      return n > 0 ? true : 'no active provider_services'
+      // Asked of the CATALOGUE, not of one provider. It used to count that provider's
+      // `provider_services` rows, which was right while a menu had to be picked during setup;
+      // since the rental model nobody has rows until they book, so a correct environment
+      // failed this every morning.
+      const n = await bookableServiceCount()
+      return n > 0 ? true : 'no active services in the catalogue'
     },
   },
   {
@@ -163,7 +166,12 @@ const CHECKS: Check[] = [
         owner.revenueModel !== 'house' && `revenue_model is '${owner.revenueModel}'`,
         !canBook(asSessionUser(owner)) &&
           `blocked by ${bookingBlockedReasons(asSessionUser(owner)).map((g) => g.gate).join(', ')}`,
-        (await activeServiceCount(owner.id)) === 0 && 'no active services',
+        // NOT "has active services" any more. Nobody configures a service menu since the
+        // rental model — every active service is bookable by everybody, and the
+        // `provider_services` row is created by `createBooking` the first time somebody books
+        // one. Requiring rows here failed every morning after the refresh and described a
+        // setup step that no longer exists.
+        (await bookableServiceCount()) === 0 && 'the catalogue has no bookable services',
       ].filter((p): p is string => typeof p === 'string')
 
       return problems.length === 0 ? true : problems.join('; ')
