@@ -30,6 +30,8 @@ import {
   roomDateLabel,
   sendEmail,
 } from '@/lib/email'
+import { hasCurrentLicense } from '@/lib/auth/dal'
+import type { SessionUser } from '@/lib/auth/session'
 import { END_OF_USE_ITEMS, reportedLabelsFor } from '@/lib/end-of-use'
 import { toMoney } from '@/lib/money'
 import { appOrigin } from '@/lib/stripe/config'
@@ -204,6 +206,10 @@ export async function notifyBookingAccessChanged(
         lastName: providers.lastName,
         email: providers.email,
         billingCustomerId: providers.stripeBillingCustomerId,
+        // The OTHER two gates. A medical director going active is one of three things that
+        // have to be true, and on its own it decides nothing.
+        bookingEnabled: providers.bookingEnabled,
+        licenseExpiry: providers.licenseExpiry,
       })
       .from(providers)
       .where(eq(providers.id, providerId))
@@ -212,11 +218,25 @@ export async function notifyBookingAccessChanged(
     if (!row) return
 
     const origin = await appOrigin()
+
+    // "Restored" has to mean they can actually book, not that one gate moved.
+    //
+    // It did not. A provider finishing onboarding pays for their medical director, this fires,
+    // and they were told "booking is switched back on, you can create appointments straight
+    // away" while `bookingEnabled` was still false and the booking page was still turning them
+    // away. Worse for a new provider, who was being told something was back ON that had never
+    // been on at all.
+    //
+    // Melanite still hears about it, and that message is the useful one: a provider who is paid
+    // up and waiting on somebody to clear them is an action for Keoni, not an error.
+    const licenceOk =
+      hasCurrentLicense({ licenseExpiry: row.licenseExpiry } as unknown as SessionUser)
+    const canBookNow = next === 'active' && row.bookingEnabled && licenceOk
     const restored = next === 'active'
 
     // The provider first. They are the one who cannot work, and unlike Melanite they have no
     // other way of finding out — there is no banner until they try to book and are turned away.
-    if (row.email) {
+    if (row.email && (!restored || canBookNow)) {
       await sendEmail({
         to: row.email,
         ...(restored
@@ -243,6 +263,7 @@ export async function notifyBookingAccessChanged(
         // Decides whether this is hers to deal with: without a billing customer there is no
         // portal to send them to, so they cannot fix it themselves however clear the email is.
         canSelfServe: row.billingCustomerId !== null,
+        stillBlocked: restored && !canBookNow,
         url: `${origin}/app/admin/providers`,
       }),
     })

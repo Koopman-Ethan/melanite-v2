@@ -1255,30 +1255,47 @@ export function deskProviderAccessEmail(input: {
   providerName: string
   reason: 'past_due' | 'inactive' | 'active'
   canSelfServe: boolean
+  /** Their subscription is fine but they still cannot book — almost always because nobody has
+   *  ticked "can book clients" for them yet. That is Keoni's to do, so it is the one case where
+   *  this email is an action rather than a record. */
+  stillBlocked?: boolean
   url: string
 }): Omit<EmailMessage, 'to'> {
   const lost = input.event === 'lost'
 
   const why = !lost
-    ? 'Their subscription is paid up, and they have been told.'
+    ? input.stillBlocked
+      ? 'Their subscription is paid up, but they still cannot book — they have not been cleared for booking yet. They have NOT been told booking is open, because it is not.'
+      : 'Their subscription is paid up, and they have been told.'
     : input.reason === 'past_due'
       ? 'A subscription payment was declined, so they cannot create appointments until it is paid.'
       : 'Their subscription has ended, so they cannot create appointments until it is restarted.'
 
   const action = !lost
-    ? null
+    ? input.stillBlocked
+      ? 'Tick "Can book clients" on the provider roster when their documents are confirmed.'
+      : null
     : input.canSelfServe
       ? 'They can fix this themselves in the Stripe billing portal from their Membership page, and they have been emailed a link to it. Nothing is needed from you unless they ask.'
       : 'They have no billing account on file, so they CANNOT fix this themselves — this one needs you.'
 
+  // Three outcomes, not two. "Restored" and "paid up but still waiting on you" are different
+  // things to walk up to, and a heading that says somebody can book while the sentence under it
+  // says they cannot is worse than either.
+  const waiting = !lost && input.stillBlocked
+
   return {
     subject: lost
       ? `Booking paused: ${input.providerName}`
-      : `Booking restored: ${input.providerName}`,
+      : waiting
+        ? `Waiting on you: ${input.providerName}`
+        : `Booking restored: ${input.providerName}`,
     text: [
       lost
         ? `${input.providerName} has lost the ability to book.`
-        : `${input.providerName} can book again.`,
+        : waiting
+          ? `${input.providerName} is paid up and waiting to be cleared.`
+          : `${input.providerName} can book again.`,
       '',
       why,
       ...(action ? ['', action] : []),
@@ -1287,7 +1304,11 @@ export function deskProviderAccessEmail(input: {
       input.url,
     ].join('\n'),
     html: wrap(
-      lost ? 'A provider cannot book' : 'A provider can book again',
+      lost
+        ? 'A provider cannot book'
+        : waiting
+          ? 'A provider is waiting to be cleared'
+          : 'A provider can book again',
       p(`<strong>${input.providerName}</strong>`) + p(why) + (action ? p(action) : ''),
       { label: 'Open the provider roster', url: input.url },
     ),

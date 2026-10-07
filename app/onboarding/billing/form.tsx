@@ -43,7 +43,12 @@ export function BillingStepForm({
 }) {
   const [error, setError] = useState<string | null>(null)
   const [checked, setChecked] = useState(termsAccepted)
-  const [pending, start] = useTransition()
+  // TWO transitions, not one. They were sharing it, so ticking the terms box put the card
+  // button into its pending state and it announced "Opening Stripe…" — about a click that had
+  // nothing to do with Stripe.
+  const [savingTerms, startTerms] = useTransition()
+  const [openingStripe, startStripe] = useTransition()
+  const pending = savingTerms || openingStripe
 
   return (
     <div className="mt-6 space-y-5">
@@ -108,7 +113,7 @@ export function BillingStepForm({
               // Recorded the moment it is ticked, not on submit. The acknowledgement is a fact
               // about what somebody agreed to and when — losing it because they closed the tab
               // before pressing a button would mean asking again with no record either way.
-              start(async () => {
+              startTerms(async () => {
                 const result = next ? await acceptRentalTerms() : await withdrawRentalTerms()
                 if (result.error) {
                   setChecked(!next)
@@ -155,7 +160,7 @@ export function BillingStepForm({
           variant={card ? 'outline' : 'gold'}
           disabled={pending || !checked}
           onClick={() =>
-            start(async () => {
+            startStripe(async () => {
               const result = await startRentalCardSetup()
               if (result.url) {
                 window.location.href = result.url
@@ -165,7 +170,7 @@ export function BillingStepForm({
             })
           }
         >
-          {pending
+          {openingStripe
             ? 'Opening Stripe…'
             : !checked
               ? 'Accept the terms first'
@@ -179,7 +184,7 @@ export function BillingStepForm({
             block
             disabled={pending || !checked}
             onClick={() =>
-              start(async () => {
+              startStripe(async () => {
                 const result = await completeBillingStep()
                 if (result?.error) setError(result.error)
               })

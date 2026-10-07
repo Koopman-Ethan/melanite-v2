@@ -102,7 +102,7 @@ export function ProfileForm({
               key: 'laser' as const,
               title: 'Using the laser',
               blurb:
-                'You book laser time and your clients pay through Melanite. Your half reaches your own bank automatically.',
+                'You book laser time and pay Melanite a rental fee for each session. You bill your own clients, at your own prices — that side never comes through Melanite.',
             },
             {
               key: 'room_only' as const,

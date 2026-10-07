@@ -31,6 +31,9 @@ export interface RosterRow {
    *  without it, and only one of those should read as settled. */
   declared: boolean
   stripeConnected: boolean
+  /** Whether Melanite can charge them. Null blocks booking regardless of the toggles. */
+  paymentMethodId: string | null
+  cardLast4: string | null
   payoutsEnabled: boolean
   /** The own-director path only. Present once the provider has filed her director, which is
    *  what Melanite has to verify before opening the gate — a name and a licence number are the
@@ -77,6 +80,11 @@ export async function getRoster(): Promise<Roster> {
         roomProceduresDeclaredAt: providers.roomProceduresDeclaredAt,
         stripeAccountId: providers.stripeAccountId,
         payoutsEnabled: providers.stripeOnboardingComplete,
+        // What the roster actually needs now. Melanite does not pay providers, it charges them,
+        // so "can we take the rental fee" is the question — and it is a real gate: a provider
+        // with every box ticked and no card still cannot book.
+        cardLast4: providers.billingCardLast4,
+        paymentMethodId: providers.billingPaymentMethodId,
         directorName: medicalDirectorCredentials.name,
         directorCredentials: medicalDirectorCredentials.credentials,
         directorNpi: medicalDirectorCredentials.npi,

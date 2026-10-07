@@ -31,7 +31,13 @@ export interface RosterView {
   /** Whether they were ASKED, not what they answered. `[]` alone cannot tell the two apart. */
   declared: boolean
   stripeConnected: boolean
+  /** Connect, which pays a provider out. Unused by this screen since the rental model and kept
+   *  only until the client-payment code is removed. */
   payoutsEnabled: boolean
+  /** Whether Melanite can charge them at all. Null means no card, which blocks booking however
+   *  many boxes on this row are ticked. */
+  paymentMethodId: string | null
+  cardLast4: string | null
   /** What the provider filed about her own director, on the `own` path. Null when she has filed
    *  nothing, and on the Melanite plan where the director is Melanite's. */
   director: {
@@ -261,19 +267,24 @@ export function Roster({
                   />
                 )}
 
-                {/* Payouts are the rail for a provider's share of what a CLIENT paid Melanite.
-                    A room renter has no share, so an empty Connect account is the correct state
-                    rather than an outstanding task. */}
+                {/* Was "Payouts": whether Stripe could send a provider their half of what a
+                    client paid. There are no payouts now — Melanite charges providers rather
+                    than paying them — so the useful question is whether that charge can land.
+                    It is a real gate: every box on this row can be ticked and the provider
+                    still cannot book without a card.
+
+                    A room renter never books laser time, so no card is the correct state for
+                    them rather than an outstanding task. */}
                 {!roomOnly && (
                   <Signal
-                    ok={provider.payoutsEnabled}
-                    label="Payouts"
+                    ok={Boolean(provider.paymentMethodId)}
+                    label="Card"
                     detail={
-                      !provider.stripeConnected
-                        ? 'no Stripe account'
-                        : provider.payoutsEnabled
-                          ? 'enabled'
-                          : 'Stripe still verifying'
+                      !provider.paymentMethodId
+                        ? 'none on file — cannot book'
+                        : provider.cardLast4
+                          ? `ending ${provider.cardLast4}`
+                          : 'on file'
                     }
                   />
                 )}
