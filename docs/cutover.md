@@ -8,6 +8,10 @@ expected output rather than an instruction to "check that it worked".
 Step 3.2 puts it back. Skipping it is silent — nothing fails, the booking form just quietly
 offers Small/Medium/Large again, which is what it did for two years, so nobody thinks to look.
 
+> **Looking for the rental-model switch?** That is a different night and a different runbook:
+> [`rental-cutover.md`](./rental-cutover.md). This page is the one-time Xano → v2 migration,
+> which already happened.
+
 ---
 
 ## 0. Before the night
