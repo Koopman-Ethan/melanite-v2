@@ -66,9 +66,36 @@ nothing run from a laptop can charge anybody, even with `.env.migration` loaded.
 so rather than reporting it as a fault.
 
 **The deployed key is the one that matters and cannot be checked from here.** In Vercel →
-production, `STRIPE_SECRET_KEY_WRITE` must be a **live** key. From cutover it starts *debiting*
+production, `STRIPE_SECRET_KEY_WRITE` must be a **live** key. From cutover it starts _debiting_
 providers; until now it has only ever credited Melanite, so this is the first time a mistake here
 costs somebody else money.
+
+That it is live is not in doubt — live payment intents and payouts exist, which a test key cannot
+produce. **Its SCOPES are the open question**, because it is a _restricted_ key (`rk_live`) and the
+rental code calls five endpoints the old code never did:
+
+| Call                                | Where                           | Needs                    |
+| ----------------------------------- | ------------------------------- | ------------------------ |
+| `GET /setup_intents/{id}`           | `lib/stripe/billing-card.ts:58` | SetupIntents **read**    |
+| `GET /payment_methods/{id}`         | `billing-card.ts:75`            | PaymentMethods **read**  |
+| `POST /customers/{id}`              | `billing-card.ts:80`            | Customers **write**      |
+| `POST /payment_methods/{id}/detach` | `billing-card.ts:122`           | PaymentMethods **write** |
+| `POST /refunds`                     | `lib/rental/charge.ts:391`      | Refunds **write**        |
+
+`POST /payment_intents` is the sixth. The code has called it since v2 shipped, but **off-session,
+against a saved card, is new** — and off-session is the mode that matters now.
+
+"Payments have been working" proves none of these. Each is a different permission, and a missing
+one answers 403 with the exact permission named in the message.
+
+**Nothing needs to be checked by hand.** Steps 7 and 9 exercise all six, in an order that stops
+before anybody else is affected — adding the canary card hits the first three, booking hits
+payment intents, cancelling hits refunds, and replacing a card hits detach. If a scope is missing,
+that is where it surfaces, which is why step 7 says to stop rather than carry on.
+
+A 403 no longer reads as a card problem. `isCardDecline` (`lib/rental/charge.ts`) separates a card
+refusing from Stripe refusing us, so a missing scope tells the provider Melanite could not take the
+fee and asks them to report it, instead of sending them to their bank about Melanite's API key.
 
 ### 0.4 Two decisions that are not technical
 
@@ -185,8 +212,10 @@ MELANITE_ENV_FILE=.env.migration npx tsx --tsconfig scripts/tsconfig.json script
      from providers where billing_payment_method_id is not null"
 ```
 
-A row with a last four and both versions set means the webhook works in production. Nothing else
-proves it — the redirect back looks identical whether or not the card saved.
+A row with a last four and both versions set means the webhook works in production **and** that
+the restricted key carries SetupIntents read, PaymentMethods read and Customers write — saving a
+card is all three. Nothing else proves any of it: the redirect back looks identical whether or not
+the card saved.
 
 If that row is empty, **stop**. Nobody else should hand over a card until it is explained.
 
@@ -209,9 +238,16 @@ MELANITE_ENV_FILE=.env.migration npx tsx --tsconfig scripts/tsconfig.json script
 
 1. Sign in as a provider. Book something — the fee is on the button before it is pressed.
 2. `/app/charges` shows the charge against the right service.
-3. Cancel it. The fee comes back, and the appointment reads `rent refunded`.
+3. Cancel it. The fee comes back, and the appointment reads `rent refunded`. This is the only
+   step that proves Refunds write — and if it fails, every earlier booking is already charged.
 4. `/app/admin/calendar` — block an hour, confirm it greys out for a provider.
 5. `/app/admin/pricing` — publish a change, confirm the provider is asked to accept it.
+6. Replace the canary's card with itself. Last of the six scopes — PaymentMethods write, for the
+   detach. Least urgent of them: nobody is blocked by it, it just fails later and alone.
+
+If any of these reports _"Melanite could not take the rental fee"_ rather than a card problem, it
+is a scope on the restricted key, not the provider. The exact permission is in the Vercel function
+log, logged by `[rental] charge FAILED`.
 
 ---
 
@@ -222,7 +258,7 @@ MELANITE_ENV_FILE=.env.migration npx tsx --tsconfig scripts/tsconfig.json script
 - **Remove the client-payment code.** `/pay`, packages, prepaid and `/app/services` are unlinked
   from the provider menu but still work. The last pre-cutover appointment is **20 October**.
 - **Cancel and rebook an existing appointment.** Cancelling frees the slot; rebooking creates a
-  *rental* booking and charges rent — for a client who already paid by Groupon. Moving one of the
+  _rental_ booking and charges rent — for a client who already paid by Groupon. Moving one of the
   eight goes through Keoni.
 
 ---
