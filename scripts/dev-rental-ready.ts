@@ -44,6 +44,15 @@ import { db } from './db'
  *  handle, a token can be exchanged more than once, so every provider gets their own. */
 const TEST_CARD_TOKEN = 'tok_visa'
 
+/** A card that ATTACHES cleanly and then fails when charged.
+ *
+ *  The realistic shape of the failure that matters here. A card rejected at setup never reaches
+ *  the interesting path; this one gets saved, passes every check the booking form makes, and
+ *  declines at the moment the slot is being taken — which is the case `createBooking` has to
+ *  delete the booking for, and the one with the worst consequence if it is wrong, because it
+ *  lands on a shared calendar. */
+const DECLINING_CARD_TOKEN = 'tok_chargeCustomerFail'
+
 /** Does this object exist in the Stripe account the write key points at?
  *
  *  Anything other than a clean read is treated as "no". In a dev fixture the cost of guessing
@@ -73,6 +82,15 @@ async function main() {
   requireEnv(['dev'], 'give providers a test card')
 
   const checkOnly = process.argv.includes('--check')
+
+  // Narrow to one provider, and optionally give them a card that declines when charged. Both
+  // are for testing a specific path rather than preparing the environment.
+  const onlyEmail = (() => {
+    const i = process.argv.indexOf('--email')
+    return i === -1 ? null : (process.argv[i + 1] ?? '').trim().toLowerCase()
+  })()
+  const declining = process.argv.includes('--declining')
+  const cardToken = declining ? DECLINING_CARD_TOKEN : TEST_CARD_TOKEN
   const key = process.env.STRIPE_SECRET_KEY_WRITE ?? ''
 
   if (!key) {
@@ -129,8 +147,13 @@ async function main() {
   let failed = 0
 
   for (const p of targets) {
+    if (onlyEmail && p.email.toLowerCase() !== onlyEmail) continue
+
     const who = `${p.firstName} ${p.lastName}`.padEnd(20)
-    const needsCard = !p.cardLast4
+    // Naming ONE provider means "set their card", so it always replaces. Without that, swapping
+    // the declining card back for a working one silently did nothing — the provider had a card,
+    // so there was nothing to do, and the run reported success while leaving the broken one on.
+    const needsCard = !p.cardLast4 || declining || Boolean(onlyEmail)
     const needsTerms = p.termsVersion !== RENTAL_TERMS_VERSION || p.scheduleVersion !== schedule
 
     if (!needsCard && !needsTerms) {
@@ -182,7 +205,7 @@ async function main() {
         const method = await stripePost<{
           id: string
           card?: { last4?: string; brand?: string; exp_month?: number; exp_year?: number }
-        }>('/payment_methods', { type: 'card', card: { token: TEST_CARD_TOKEN } })
+        }>('/payment_methods', { type: 'card', card: { token: cardToken } })
         await stripePost(`/payment_methods/${method.id}/attach`, { customer: customerId })
         await stripePost(`/customers/${customerId}`, {
           'invoice_settings[default_payment_method]': method.id,
@@ -226,7 +249,23 @@ async function main() {
         .where(eq(providers.id, p.id))
     }
 
-    const did = [needsCard && `card ••${last4}`, needsTerms && `accepted v${schedule}`]
+    // `0341` is Stripe's card that attaches and then fails when charged. Checked against what
+    // came BACK rather than against the flag that was passed in: an earlier version reported
+    // "(declines when charged)" while a working card was attached, and the test built on it
+    // passed for the wrong reason.
+    const isDecliner = last4 === '0341'
+    if (declining && needsCard && !isDecliner) {
+      console.error(
+        `  FAILED   ${who} asked for a declining card and got ••${last4}. Not usable for that test.`,
+      )
+      failed += 1
+      continue
+    }
+
+    const did = [
+      needsCard && `card ••${last4}${isDecliner ? ' — DECLINES when charged' : ''}`,
+      needsTerms && `accepted v${schedule}`,
+    ]
       .filter(Boolean)
       .join(', ')
     console.log(`  ready    ${who} ${did}`)

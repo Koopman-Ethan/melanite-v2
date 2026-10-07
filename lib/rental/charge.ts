@@ -154,7 +154,15 @@ export async function chargeRentalFee(bookingId: string): Promise<RentalChargeRe
     intentId = intent.id
   } catch (err) {
     if (err instanceof StripeApiError) {
-      return { error: `The card was declined: ${err.message}` }
+      // Stripe's own wording reached the provider here — "Your card was declined." followed by
+      // a code, or worse, something about an authentication the booking form cannot offer.
+      // None of it tells them anything they can act on, and the two things they CAN do are the
+      // same whatever the reason.
+      //
+      // The reason is logged rather than thrown away: a provider reporting "it says declined"
+      // is unanswerable without it, and it is the only record of why.
+      console.warn(`[rental] card declined for booking ${booking.id}: ${err.message}`)
+      return { error: 'Your card was declined. Try again, or use a different card.' }
     }
     throw err
   }
