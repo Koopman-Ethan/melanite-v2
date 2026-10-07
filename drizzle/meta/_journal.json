@@ -267,6 +267,13 @@
       "when": 1791229109339,
       "tag": "0037_classy_speed_demon",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1791401873750,
+      "tag": "0038_slim_taskmaster",
+      "breakpoints": true
     }
   ]
 }

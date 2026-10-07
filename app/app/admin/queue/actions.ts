@@ -10,6 +10,8 @@ import { friendlyStripeError, stripePost, stripeWritesEnabled } from '@/lib/stri
 import { toCents } from '@/lib/money'
 import { planRefund } from '@/lib/refunds'
 import { chargeBookingFee } from '@/lib/stripe/fees'
+import { notifyRentDecision } from '@/lib/rental/notify-decision'
+import { reviewRentalFee } from '@/lib/rental/review'
 
 export interface QueueState {
   error?: string
@@ -238,4 +240,54 @@ export async function transferEnrollment(
   revalidatePath('/app/admin/queue')
   revalidatePath('/app/admin/training')
   return { success: 'Moved to the new course, with what they paid carried across.' }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Rent held on a session that did not happen.
+//
+// The two below are the whole of Keoni's answer to "how do we handle cancellations?": she reads
+// what the provider said and decides. Nothing in the system decides for her, which is the point
+// — the automatic no-show refund it replaced was deciding every time, always the same way, on no
+// information at all.
+//
+// Both end with `rentalReviewedAt` stamped, so the item leaves the queue either way. "She looked
+// at it and the fee stands" has to be distinguishable from "nobody has looked".
+// ---------------------------------------------------------------------------------------------
+
+/** Gives the provider their rent back — the fee refunded, or the pack session returned. */
+export async function refundHeldRent(bookingId: string): Promise<QueueState> {
+  const admin = await requireAdmin()
+
+  const out = await reviewRentalFee(bookingId, 'refund', admin.id)
+  revalidatePath('/app/admin/queue')
+  revalidatePath('/app/charges')
+
+  if ('error' in out) return { error: out.error }
+  if ('kept' in out) return { error: 'Nothing was refunded.' }
+
+  const released = out.refunded
+  if ('returnedSession' in released) {
+    await notifyRentDecision(bookingId, { refunded: 'session' })
+    return { success: 'Session returned to the pack. The provider has been told.' }
+  }
+  if ('refundedCents' in released) {
+    const amount = `$${(released.refundedCents / 100).toFixed(2)}`
+    await notifyRentDecision(bookingId, { refunded: amount })
+    return { success: `${amount} refunded. The provider has been told.` }
+  }
+  return { success: 'Reviewed. There was nothing held to give back.' }
+}
+
+/** Records that the fee stands. No money moves; the provider is told, because a decision they
+ *  never hear about is the same to them as one nobody made. */
+export async function keepHeldRent(bookingId: string): Promise<QueueState> {
+  const admin = await requireAdmin()
+
+  const out = await reviewRentalFee(bookingId, 'keep', admin.id)
+  revalidatePath('/app/admin/queue')
+
+  if ('error' in out) return { error: out.error }
+
+  await notifyRentDecision(bookingId, { kept: true })
+  return { success: 'The fee stands. The provider has been told.' }
 }

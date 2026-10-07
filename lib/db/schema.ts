@@ -687,6 +687,37 @@ export const bookings = pgTable('bookings', {
    *  has looked at it", which is the entire point of a review queue. */
   feeWaivedAt: timestamp({ withTimezone: true }),
   feeWaivedBy: uuid().references(() => providers.id, { onDelete: 'set null' }),
+
+  /** The provider's account of why this appointment did not happen.
+   *
+   *  Required by the UI on every cancellation and every no-show — Keoni's rule, in her words:
+   *  "sometimes its the clients fault, and not the providers". She cannot judge that without
+   *  being told what happened, so there is no path to `cancelled` or `no_show` that does not
+   *  collect this.
+   *
+   *  NOT null-checked in the database, and that is deliberate. Four other paths reach
+   *  `cancelled` — package restore, prepaid return, admin tools, the ETL — and they carry no
+   *  rental fee, so there is nothing for anybody to decide and nothing to explain. A NOT NULL
+   *  here would break all four to enforce a rule that only applies to rental bookings.
+   *
+   *  Free text on purpose. A dropdown of reasons would be a list Keoni has to maintain and
+   *  providers have to squeeze a real situation into, and the situations she described are not
+   *  enumerable. */
+  outcomeReason: text(),
+
+  /** When Keoni decided what to do about the held rental fee, and who decided.
+   *
+   *  Nothing refunds itself under the rental model. The fee is taken when the slot is reserved
+   *  and stays taken until somebody with the authority to give it back says so — including for
+   *  a no-show, which used to refund automatically. Keoni asked for that: she is the decider,
+   *  because whose fault it was is not something the software can see.
+   *
+   *  The DECISION itself is not stored, only that one was made. Refunded or kept is derivable —
+   *  a refund leaves a negative ledger row, or a returned pack session — and a stored enum
+   *  beside those is one more thing that can disagree with the money. Same reasoning as
+   *  `lib/db/queries/review-queue.ts`, which derives the whole queue rather than keeping one. */
+  rentalReviewedAt: timestamp({ withTimezone: true }),
+  rentalReviewedBy: uuid().references(() => providers.id, { onDelete: 'set null' }),
 }, (t) => [
   index().on(t.providerId, t.startTime),
   index().on(t.startTime, t.endTime),

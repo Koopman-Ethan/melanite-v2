@@ -1,12 +1,12 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import {
   chargeRentalFee,
   isCardDecline,
   refundRentalFee,
   rentalFeeForBooking,
-} from "@/lib/rental/charge";
-import { StripeApiError } from "@/lib/stripe/client";
+} from '@/lib/rental/charge'
+import { StripeApiError } from '@/lib/stripe/client'
 
 // Charging a provider to use the laser.
 //
@@ -20,14 +20,14 @@ import { StripeApiError } from "@/lib/stripe/client";
 // call, so it belongs in a manual pass on appdev; pretending otherwise with a mock would assert
 // that the mock works.
 
-const { neon } = await import("@neondatabase/serverless");
-const sql = neon(process.env.DATABASE_URL!);
+const { neon } = await import('@neondatabase/serverless')
+const sql = neon(process.env.DATABASE_URL!)
 
-const TAG = `ZZ RENTAL ${Date.now()}`;
-const priced = { providerId: "", providerServiceId: "", bookingId: "" };
-const unpriced = { providerServiceId: "", bookingId: "" };
-let houseBookingId = "";
-const bookingIds: string[] = [];
+const TAG = `ZZ RENTAL ${Date.now()}`
+const priced = { providerId: '', providerServiceId: '', bookingId: '' }
+const unpriced = { providerServiceId: '', bookingId: '' }
+let houseBookingId = ''
+const bookingIds: string[] = []
 
 /** A provider_service for a named catalogue service, so the fee lookup has something to find.
  *
@@ -35,35 +35,29 @@ const bookingIds: string[] = [];
  *  RETIRED service, which is the only way that case still exists now that every bookable
  *  service has a fee — and it is the realistic shape of it too: a service is retired, and the
  *  appointments already made against it still have to be chargeable or refusable. */
-async function providerServiceFor(
-  providerId: string,
-  serviceName: string,
-): Promise<string> {
+async function providerServiceFor(providerId: string, serviceName: string): Promise<string> {
   const [svc] = (await sql.query(`SELECT id FROM services WHERE name = $1`, [
     serviceName,
-  ])) as { id: string }[];
-  if (!svc) throw new Error(`${serviceName} is not in the catalogue`);
+  ])) as { id: string }[]
+  if (!svc) throw new Error(`${serviceName} is not in the catalogue`)
 
   const existing = (await sql.query(
     `SELECT id FROM provider_services WHERE provider_id = $1 AND service_id = $2`,
     [providerId, svc.id],
-  )) as { id: string }[];
-  if (existing.length > 0) return existing[0].id;
+  )) as { id: string }[]
+  if (existing.length > 0) return existing[0].id
 
   const rows = (await sql.query(
     `INSERT INTO provider_services (provider_id, service_id, price, duration_mins, is_active)
      VALUES ($1, $2, '0.00', 30, true) RETURNING id`,
     [providerId, svc.id],
-  )) as { id: string }[];
-  return rows[0].id;
+  )) as { id: string }[]
+  return rows[0].id
 }
 
 /** The laser is one shared resource behind an exclusion constraint, and dev carries real
  *  appointments. Walk back until a slot is free rather than failing on whoever was booked. */
-async function book(
-  providerId: string,
-  providerServiceId: string,
-): Promise<string> {
+async function book(providerId: string, providerServiceId: string): Promise<string> {
   for (let back = 200; back < 400; back += 2) {
     try {
       const rows = (await sql.query(
@@ -74,18 +68,18 @@ async function book(
                  now() - ($4 || ' hours')::interval, now() - ($5 || ' hours')::interval, 'completed')
          RETURNING id`,
         [providerId, providerServiceId, TAG, String(back), String(back - 1)],
-      )) as { id: string }[];
-      bookingIds.push(rows[0].id);
-      return rows[0].id;
+      )) as { id: string }[]
+      bookingIds.push(rows[0].id)
+      return rows[0].id
     } catch (err) {
       // Only an overlap is worth retrying — `lib/db/errors.ts` explains why a string match on the
       // constraint name would never fire here.
-      const code = err as { cause?: { code?: string }; code?: string };
-      const sqlState = code.code ?? code.cause?.code;
-      if (sqlState !== "23P01") throw err;
+      const code = (err as { cause?: { code?: string }; code?: string })
+      const sqlState = code.code ?? code.cause?.code
+      if (sqlState !== '23P01') throw err
     }
   }
-  throw new Error("could not place a fixture booking");
+  throw new Error('could not place a fixture booking')
 }
 
 beforeAll(async () => {
@@ -100,86 +94,77 @@ beforeAll(async () => {
     `SELECT id FROM providers
       WHERE revenue_model = 'split' AND billing_payment_method_id IS NULL
       LIMIT 1`,
-  )) as { id: string }[];
-  if (!prov)
-    throw new Error("no card-less provider in dev — these tests need one");
-  priced.providerId = prov.id;
+  )) as { id: string }[]
+  if (!prov) throw new Error('no card-less provider in dev — these tests need one')
+  priced.providerId = prov.id
 
   // "Laser Hair Removal — Chin" is XS, $35 since the October schedule. The generic "IPL" was
   // retired when the catalogue split into areas and never had a fee of its own, which makes it
   // the one service left that the schedule refuses to price.
-  priced.providerServiceId = await providerServiceFor(
-    prov.id,
-    "Laser Hair Removal — Chin",
-  );
-  unpriced.providerServiceId = await providerServiceFor(prov.id, "IPL");
+  priced.providerServiceId = await providerServiceFor(prov.id, 'Laser Hair Removal — Chin')
+  unpriced.providerServiceId = await providerServiceFor(prov.id, 'IPL')
 
-  priced.bookingId = await book(prov.id, priced.providerServiceId);
-  unpriced.bookingId = await book(prov.id, unpriced.providerServiceId);
+  priced.bookingId = await book(prov.id, priced.providerServiceId)
+  unpriced.bookingId = await book(prov.id, unpriced.providerServiceId)
 
   const [house] = (await sql.query(
     `SELECT id FROM providers WHERE revenue_model = 'house' LIMIT 1`,
-  )) as { id: string }[];
+  )) as { id: string }[]
   if (house) {
-    const ps = await providerServiceFor(house.id, "Laser Hair Removal — Chin");
-    houseBookingId = await book(house.id, ps);
+    const ps = await providerServiceFor(house.id, 'Laser Hair Removal — Chin')
+    houseBookingId = await book(house.id, ps)
   }
-});
+})
 
 afterAll(async () => {
-  await sql.query(
-    `DELETE FROM ledger_entries WHERE subject_id = ANY($1::uuid[])`,
-    [bookingIds],
-  );
-  await sql.query(`DELETE FROM bookings WHERE client_name = $1`, [TAG]);
-});
+  await sql.query(`DELETE FROM ledger_entries WHERE subject_id = ANY($1::uuid[])`, [bookingIds])
+  await sql.query(`DELETE FROM bookings WHERE client_name = $1`, [TAG])
+})
 
-describe("what a session costs", () => {
-  it("reads the fee off the service", async () => {
-    expect(await rentalFeeForBooking(priced.bookingId)).toBe(3500);
-  });
+describe('what a session costs', () => {
+  it('reads the fee off the service', async () => {
+    expect(await rentalFeeForBooking(priced.bookingId)).toBe(3500)
+  })
 
-  it("is null for a service with no published fee", async () => {
-    expect(await rentalFeeForBooking(unpriced.bookingId)).toBeNull();
-  });
+  it('is null for a service with no published fee', async () => {
+    expect(await rentalFeeForBooking(unpriced.bookingId)).toBeNull()
+  })
 
-  it("is null for a booking that does not exist", async () => {
-    expect(
-      await rentalFeeForBooking("00000000-0000-0000-0000-000000000000"),
-    ).toBeNull();
-  });
-});
+  it('is null for a booking that does not exist', async () => {
+    expect(await rentalFeeForBooking('00000000-0000-0000-0000-000000000000')).toBeNull()
+  })
+})
 
-describe("refusals, all of them before Stripe is called", () => {
-  it("refuses a booking that does not exist", async () => {
-    const out = await chargeRentalFee("00000000-0000-0000-0000-000000000000");
-    expect(out).toHaveProperty("error");
-  });
+describe('refusals, all of them before Stripe is called', () => {
+  it('refuses a booking that does not exist', async () => {
+    const out = await chargeRentalFee('00000000-0000-0000-0000-000000000000')
+    expect(out).toHaveProperty('error')
+  })
 
-  it("refuses a service nobody has priced, rather than charging nothing", async () => {
+  it('refuses a service nobody has priced, rather than charging nothing', async () => {
     // The distinction the whole fee schedule turns on. A free session is worse than a blocked one
     // because nobody finds it until the month's takings are short.
-    const out = await chargeRentalFee(unpriced.bookingId);
-    expect(out).toHaveProperty("error");
-    if ("error" in out) expect(out.error).toMatch(/no published rental fee/i);
-  });
+    const out = await chargeRentalFee(unpriced.bookingId)
+    expect(out).toHaveProperty('error')
+    if ('error' in out) expect(out.error).toMatch(/no published rental fee/i)
+  })
 
-  it("refuses when the provider has no card on file", async () => {
+  it('refuses when the provider has no card on file', async () => {
     // The guard that stops a booking being made against a provider nobody can bill. Real path:
     // the fixture provider genuinely has no payment method, nothing is mocked.
-    const out = await chargeRentalFee(priced.bookingId);
-    expect(out).toHaveProperty("error");
-    if ("error" in out) expect(out.error).toMatch(/no card on file/i);
-  });
+    const out = await chargeRentalFee(priced.bookingId)
+    expect(out).toHaveProperty('error')
+    if ('error' in out) expect(out.error).toMatch(/no card on file/i)
+  })
 
   it("skips Melanite's own appointment", async () => {
-    if (!houseBookingId) return;
-    const out = await chargeRentalFee(houseBookingId);
-    expect(out).toHaveProperty("skipped");
-    if ("skipped" in out) expect(out.skipped).toMatch(/own appointment/i);
-  });
+    if (!houseBookingId) return
+    const out = await chargeRentalFee(houseBookingId)
+    expect(out).toHaveProperty('skipped')
+    if ('skipped' in out) expect(out.skipped).toMatch(/own appointment/i)
+  })
 
-  it("skips a session whose fee has already been charged", async () => {
+  it('skips a session whose fee has already been charged', async () => {
     // The guard that matters most: a retry, a double submit, or a cancel-and-rebook must not bill
     // the same session twice. Asserted by writing the ledger row the charge would have written.
     await sql.query(
@@ -190,22 +175,22 @@ describe("refusals, all of them before Stripe is called", () => {
        VALUES ('rental_fee','provider','purchase','booking',$1,$2,
                '35.00','0.00','0.00','35.00','stripe','pi_zz_rental','paid')`,
       [priced.bookingId, priced.providerId],
-    );
+    )
 
-    const out = await chargeRentalFee(priced.bookingId);
-    expect(out).toHaveProperty("skipped");
-    if ("skipped" in out) expect(out.skipped).toMatch(/already been charged/i);
-  });
-});
+    const out = await chargeRentalFee(priced.bookingId)
+    expect(out).toHaveProperty('skipped')
+    if ('skipped' in out) expect(out.skipped).toMatch(/already been charged/i)
+  })
+})
 
-describe("giving the fee back", () => {
-  it("skips a session that was never charged", async () => {
-    const out = await refundRentalFee(unpriced.bookingId);
-    expect(out).toHaveProperty("skipped");
-    if ("skipped" in out) expect(out.skipped).toMatch(/no rental fee/i);
-  });
+describe('giving the fee back', () => {
+  it('skips a session that was never charged', async () => {
+    const out = await refundRentalFee(unpriced.bookingId)
+    expect(out).toHaveProperty('skipped')
+    if ('skipped' in out) expect(out.skipped).toMatch(/no rental fee/i)
+  })
 
-  it("skips one already refunded", async () => {
+  it('skips one already refunded', async () => {
     // Relies on the purchase row written above. The refund row is inserted directly, because the
     // Stripe call itself is not what this asserts.
     await sql.query(
@@ -216,16 +201,16 @@ describe("giving the fee back", () => {
        VALUES ('rental_fee','provider','refund','booking',$1,$2,
                '-35.00','0.00','0.00','-35.00','stripe','pi_zz_rental','paid')`,
       [priced.bookingId, priced.providerId],
-    );
+    )
 
-    const out = await refundRentalFee(priced.bookingId);
-    expect(out).toHaveProperty("skipped");
-    if ("skipped" in out) expect(out.skipped).toMatch(/already been refunded/i);
-  });
-});
+    const out = await refundRentalFee(priced.bookingId)
+    expect(out).toHaveProperty('skipped')
+    if ('skipped' in out) expect(out.skipped).toMatch(/already been refunded/i)
+  })
+})
 
-describe("the ledger shape a rental fee has to satisfy", () => {
-  it("accepts a provider-paid row with no payout, and a negative refund", async () => {
+describe('the ledger shape a rental fee has to satisfy', () => {
+  it('accepts a provider-paid row with no payout, and a negative refund', async () => {
     // The check constraint is what stops a rental fee being recorded as though half of it were
     // owed to the provider. Both signs must satisfy it, which is why the refund is negative on
     // BOTH columns rather than only on gross.
@@ -233,75 +218,52 @@ describe("the ledger shape a rental fee has to satisfy", () => {
       `SELECT entry_type, gross_amount, provider_payout, melanite_cut
          FROM ledger_entries WHERE subject_id = $1 ORDER BY entry_type`,
       [priced.bookingId],
-    )) as {
-      entry_type: string;
-      gross_amount: string;
-      provider_payout: string;
-      melanite_cut: string;
-    }[];
+    )) as { entry_type: string; gross_amount: string; provider_payout: string; melanite_cut: string }[]
 
-    expect(rows.length).toBe(2);
+    expect(rows.length).toBe(2)
     for (const r of rows) {
-      expect(Number(r.provider_payout)).toBe(0);
-      expect(Number(r.melanite_cut)).toBe(Number(r.gross_amount));
+      expect(Number(r.provider_payout)).toBe(0)
+      expect(Number(r.melanite_cut)).toBe(Number(r.gross_amount))
     }
-    expect(
-      Number(rows.find((r) => r.entry_type === "refund")!.gross_amount),
-    ).toBeLessThan(0);
-  });
-});
+    expect(Number(rows.find((r) => r.entry_type === 'refund')!.gross_amount)).toBeLessThan(0)
+  })
+})
 
-describe("telling a declined card apart from a broken key", () => {
+describe('telling a declined card apart from a broken key', () => {
   // The one thing in the catch block that matters, and the reason it is a named function.
   //
-  // Every StripeApiError used to be reported to the provider as "your card was declined".
-  // From cutover the rental code calls five endpoints the old code never did — setup intents,
+  // Every StripeApiError used to be reported to the provider as "your card was declined". From
+  // cutover the rental code calls five endpoints the old code never did — setup intents,
   // payment methods, detach, customer update, refunds — on a RESTRICTED key. A missing scope
   // answers 403, and under the old wording a provider would be told their card failed, ring
   // their bank, and nobody would ever look at Melanite's API key.
 
-  it("treats a card error as a decline", () => {
-    expect(
-      isCardDecline(
-        new StripeApiError(402, "card_declined", "Your card was declined."),
-      ),
-    ).toBe(true);
+  it('treats a card error as a decline', () => {
+    expect(isCardDecline(new StripeApiError(402, 'card_declined', 'Your card was declined.'))).toBe(
+      true,
+    )
     // Stripe has not always been consistent about the status on these, so the codes are checked
     // independently of it.
-    expect(
-      isCardDecline(new StripeApiError(400, "insufficient_funds", "no funds")),
-    ).toBe(true);
-    expect(
-      isCardDecline(new StripeApiError(400, "expired_card", "expired")),
-    ).toBe(true);
-  });
+    expect(isCardDecline(new StripeApiError(400, 'insufficient_funds', 'no funds'))).toBe(true)
+    expect(isCardDecline(new StripeApiError(400, 'expired_card', 'expired'))).toBe(true)
+  })
 
-  it("does not call a permissions failure a decline", () => {
+  it('does not call a permissions failure a decline', () => {
     // The case that prompted this. A restricted key without `payment_intents_write`.
     const err = new StripeApiError(
       403,
       undefined,
-      "The provided key does not have the required permissions.",
-    );
-    expect(isCardDecline(err)).toBe(false);
-  });
+      'The provided key does not have the required permissions.',
+    )
+    expect(isCardDecline(err)).toBe(false)
+  })
 
-  it("does not call a bad request or an outage a decline", () => {
-    expect(
-      isCardDecline(
-        new StripeApiError(400, "parameter_missing", "Missing currency"),
-      ),
-    ).toBe(false);
-    expect(
-      isCardDecline(new StripeApiError(401, undefined, "Invalid API Key")),
-    ).toBe(false);
-    expect(
-      isCardDecline(new StripeApiError(429, undefined, "Too many requests")),
-    ).toBe(false);
-    expect(
-      isCardDecline(
-        new StripeApiError(500, undefined, "Stripe is having trouble"),
-      ),
-    ).toBe(false);
-  });
-});
+  it('does not call a bad request or an outage a decline', () => {
+    expect(isCardDecline(new StripeApiError(400, 'parameter_missing', 'Missing currency'))).toBe(
+      false,
+    )
+    expect(isCardDecline(new StripeApiError(401, undefined, 'Invalid API Key'))).toBe(false)
+    expect(isCardDecline(new StripeApiError(429, undefined, 'Too many requests'))).toBe(false)
+    expect(isCardDecline(new StripeApiError(500, undefined, 'Stripe is having trouble'))).toBe(false)
+  })
+})

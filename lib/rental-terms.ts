@@ -18,8 +18,15 @@
  *  v2, 4 October 2026: Melanite stopped selling session packs, so the term describing them was
  *  replaced by one about credited sessions, and a term was added saying that packaging and
  *  promotions are the provider's own business. Both change what somebody is agreeing to, which
- *  is what a version bump is for. */
-export const RENTAL_TERMS_VERSION = '2026-10-04.v2'
+ *  is what a version bump is for.
+ *
+ *  v3, 7 October 2026: the automatic refund is gone. A cancellation or a no-show no longer
+ *  returns the fee by itself — the provider says what happened and Melanite decides. This is the
+ *  most substantive bump so far and the one that most needs re-acceptance: v2 told providers in
+ *  as many words that marking a no-show got their money back, and a provider still holding that
+ *  belief would plan around it. Keoni's reason was that the old rule took the provider's word
+ *  for whose fault it was, every time, without anybody reading a word. */
+export const RENTAL_TERMS_VERSION = '2026-10-07.v3'
 
 export interface RentalTerm {
   /** Stable key. Survives rewording, so a change in phrasing is not a change in substance. */
@@ -54,10 +61,16 @@ export const RENTAL_TERMS: readonly RentalTerm[] = [
       'not take a share of what you charge and does not keep any record of your clients.',
   },
   {
+    // Key kept from v2, when this term promised an automatic refund. The TOPIC is unchanged —
+    // what becomes of the fee when a session does not go ahead — and the key is meant to
+    // survive a rewording so that the history of one term stays followable. Renaming it would
+    // read as a term removed and another added, which is not what happened.
     key: 'no_show_refund',
     text:
-      'If your client does not turn up, mark the appointment as a no-show and the rental fee ' +
-      'for that session is refunded. The same applies if you cancel.',
+      'If a session does not go ahead, cancel it or mark it a no-show and tell Melanite what ' +
+      'happened. The rental fee is held, not refunded automatically: Melanite reads what you ' +
+      'wrote and decides whether it stands, because whose fault it was is not something the ' +
+      'system can see. You are told either way.',
   },
   {
     key: 'granted_sessions',

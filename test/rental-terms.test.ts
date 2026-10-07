@@ -16,7 +16,7 @@ import {
 describe('the version', () => {
   it('is the one currently in force', () => {
     // Change this deliberately, at the same time as the terms themselves, and never for a typo.
-    expect(RENTAL_TERMS_VERSION).toBe('2026-10-04.v2')
+    expect(RENTAL_TERMS_VERSION).toBe('2026-10-07.v3')
   })
 
   it('sorts after an earlier version', () => {
@@ -79,7 +79,9 @@ describe('the terms themselves', () => {
     //
     //   fee_per_session      chargeRentalFee, from createBooking
     //   decline_no_booking   createBooking deletes the booking on a declined card
-    //   no_show_refund       releaseRentalForBooking, from markNoShow and cancelBooking
+    //   no_show_refund       heldRentalFor gates markNoShow and cancelBooking; the fee is held
+  //                        and reviewRentalFee settles it. NOT releaseRentalForBooking any more —
+  //                        that is now reachable only from Keoni's queue.
     //   granted_sessions     claimPackSession, oldest first
     //   fee_changes          hasAcceptedRentalTerms gates createBooking
     const keys = RENTAL_TERMS.map((t) => t.key)

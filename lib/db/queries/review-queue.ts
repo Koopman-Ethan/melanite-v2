@@ -16,7 +16,7 @@ import {
 
 // Everything waiting on a human decision about money.
 //
-// Three situations can currently arise where the system has deliberately stopped short of
+// Four situations can currently arise where the system has deliberately stopped short of
 // deciding, because deciding would be wrong:
 //
 //   1. A room rental cancelled inside 24 hours. The block is freed either way, but whether the
@@ -25,16 +25,25 @@ import {
 //      consent. The appointment status is already recorded; the money is not.
 //   3. A cancelled training course with deposits already taken. They may be refundable or
 //      transferable to another date, which is a conversation.
+//   4. Rent held on a laser session that did not happen — cancelled, or a no-show. The provider
+//      has said what happened and Keoni decides whether the fee stands. This one is the LARGEST
+//      by volume, because it is every cancellation and every no-show rather than an exception:
+//      added 7 October when Keoni withdrew the automatic refund, on the grounds that "sometimes
+//      its the clients fault, and not the providers" and the software cannot tell which.
 //
 // None of these were visible anywhere. v1 surfaced only the first, through a room-rentals
-// endpoint filtered on `cancellation_requested`; the other two did not exist because it never
-// charged a fee and never cancelled a course in software.
+// endpoint filtered on `cancellation_requested`; the other three did not exist, because it
+// never charged a fee, never cancelled a course in software, and had no rental model at all.
 //
 // Deliberately DERIVED from the state of the things themselves rather than kept in a queue
 // table. A separate work-queue store is one more thing that can disagree with reality, and an
 // item that lingers after being resolved is worse than no queue at all.
 
-export type QueueKind = 'room_refund' | 'failed_fee' | 'cancelled_course_deposit'
+export type QueueKind =
+  | 'room_refund'
+  | 'failed_fee'
+  | 'cancelled_course_deposit'
+  | 'held_rent'
 
 export interface QueueItem {
   kind: QueueKind
@@ -127,6 +136,75 @@ async function failedFees(): Promise<QueueItem[]> {
   }))
 }
 
+/** Laser sessions that did not happen, with the provider's rent still held.
+ *
+ *  Derived, like everything else here. Three conditions: the appointment is cancelled or missed,
+ *  nobody has reviewed it, and there is still something to give back. That last one is what lets
+ *  a resolved item leave without a flag saying it has — a refund nets the ledger to zero, and a
+ *  returned pack session is voided.
+ *
+ *  BOTH held-checks matter. A pack-covered session has no ledger row at all, so looking only at
+ *  money would report nothing held for a session the provider genuinely paid for; a card-charged
+ *  session has no redemption row. Every rental booking has exactly one of the two.
+ */
+async function heldRent(): Promise<QueueItem[]> {
+  const rows = await db
+    .select({
+      id: bookings.id,
+      status: bookings.status,
+      startTime: bookings.startTime,
+      reason: bookings.outcomeReason,
+      serviceName: services.name,
+      firstName: providers.firstName,
+      lastName: providers.lastName,
+      heldCents: sql<number>`coalesce((
+        select round(sum(l.gross_amount) * 100)::int
+        from ledger_entries l
+        where l.subject_type = 'booking' and l.subject_id = bookings.id
+          and l.source = 'rental_fee'
+      ), 0)`,
+      heldSession: sql<boolean>`exists (
+        select 1 from provider_pack_redemptions r
+        where r.booking_id = bookings.id and r.voided_at is null
+      )`,
+    })
+    .from(bookings)
+    .innerJoin(providers, eq(bookings.providerId, providers.id))
+    .innerJoin(providerServices, eq(bookings.providerServiceId, providerServices.id))
+    .innerJoin(services, eq(providerServices.serviceId, services.id))
+    .where(
+      and(
+        eq(bookings.paymentSource, 'rental'),
+        sql`${bookings.status} IN ('cancelled', 'no_show')`,
+        isNull(bookings.rentalReviewedAt),
+      ),
+    )
+    .orderBy(asc(bookings.startTime))
+
+  return rows
+    .filter((r) => r.heldSession || Number(r.heldCents) > 0)
+    .map((r) => ({
+      kind: 'held_rent' as const,
+      id: r.id,
+      // The appointment's own time, not when it was cancelled. Age here means "how long has this
+      // provider been waiting to hear", and the session is what they are waiting about.
+      since: r.startTime,
+      waitingDays: 0,
+      amount: r.heldSession ? '0.00' : (Number(r.heldCents) / 100).toFixed(2),
+      who: `${r.firstName} ${r.lastName}`,
+      detail:
+        `${r.status === 'no_show' ? 'No-show' : 'Cancelled'} · ${r.serviceName} on ` +
+        `${dateLabel(r.startTime.toISOString().slice(0, 10))}` +
+        (r.heldSession ? ' · paid with a pack session' : '') +
+        ` — they said: “${r.reason ?? 'nothing recorded'}”`,
+      meta: {
+        bookingStatus: r.status,
+        outcomeReason: r.reason,
+        heldSession: r.heldSession ? 'yes' : null,
+      },
+    }))
+}
+
 async function cancelledCourseDeposits(): Promise<QueueItem[]> {
   const rows = await db
     .select({
@@ -165,15 +243,16 @@ async function cancelledCourseDeposits(): Promise<QueueItem[]> {
 }
 
 export async function getReviewQueue(now: Date = new Date()): Promise<QueueItem[]> {
-  const [rooms, fees, deposits] = await Promise.all([
+  const [rooms, fees, deposits, rent] = await Promise.all([
     roomRefunds(),
     failedFees(),
     cancelledCourseDeposits(),
+    heldRent(),
   ])
 
   // Oldest first across all three. Age is what matters in a queue — the thing waiting longest
   // is the thing most likely to have been forgotten.
-  return [...rooms, ...fees, ...deposits]
+  return [...rooms, ...fees, ...deposits, ...rent]
     .sort((a, b) => a.since.getTime() - b.since.getTime())
     .map((item) => ({
       ...item,

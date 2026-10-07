@@ -36,8 +36,8 @@ export default async function AdminQueuePage() {
         <div className="rounded-card border border-dashed border-line p-10 text-center">
           <p className="text-sm text-ink-muted">Nothing waiting.</p>
           <p className="mt-1 text-xs text-ink-faint">
-            Late room cancellations, fees that failed to charge, and deposits on cancelled
-            courses all land here.
+            Rent held on sessions that did not happen, late room cancellations, fees that
+            failed to charge, and deposits on cancelled courses all land here.
           </p>
         </div>
       ) : (

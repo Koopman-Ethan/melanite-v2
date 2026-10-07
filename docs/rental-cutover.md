@@ -99,9 +99,11 @@ fee and asks them to report it, instead of sending them to their bank about Mela
 
 ### 0.4 Two decisions that are not technical
 
-- **Does a cancellation refund the fee?** It does today. Keoni asked only for no-shows; a late
-  cancellation leaves a hole in the day that rarely gets filled, so there is an argument for
-  keeping it. One line in `lib/rental/release.ts` either way.
+- ~~**Does a cancellation refund the fee?**~~ **Answered 7 October, and built.** Neither a
+  cancellation nor a no-show refunds anything by itself. The provider says what happened, the fee
+  is held, and Keoni decides from `/app/admin/queue`. Her words: *"sometimes its the clients
+  fault, and not the providers."* See **The held-rent review** below — it changes what the
+  providers have to be told.
 - **Tell the providers.** They cannot book until they have added a card. Whether they hear that
   before or after the deploy is a business call, but somebody has to make it.
 
@@ -111,6 +113,40 @@ Twelve appointments from July–September have no payment recorded — **$1,200*
 Nichole's. They may well have been paid outside the app and never entered. Keoni has the list
 (`unrecorded-payments.csv`). This does not block cutover, but **removing the client-payment code
 makes it uncollectable**, so settle it before step 6.
+
+---
+
+## 0.6 The held-rent review
+
+Added 7 October, after the runbook was first written. It changes three things on the day.
+
+**Every provider must accept the terms again.** `RENTAL_TERMS_VERSION` went to `2026-10-07.v3`,
+because v2 told them in as many words that marking a no-show got their money back. A provider
+still holding that belief would plan around it. Re-acceptance is already enforced — nobody can
+book until they have accepted the current version — so this costs one extra click on the same
+screen they are already visiting for their card. **It does not need a separate round of chasing,
+but it does mean step 8 is not optional for anybody.**
+
+**No money comes back on its own any more.** A cancellation or a no-show holds the fee and puts
+the session in Keoni's queue with the provider's own account of what happened. She refunds it or
+lets it stand, and the provider is emailed either way. Nothing else in the system can refund a
+rental fee.
+
+**She has to work the queue.** This is the part with no technical safeguard. Every cancellation
+and every no-show now waits on her, where before it settled itself, so the volume is ordinary
+rather than exceptional. Two things carry the prompt:
+
+- the desk email, which gains `needs your decision` in the subject and a link straight to the
+  queue instead of the calendar;
+- `/app/admin/queue`, which shows the oldest first and how many days each has waited.
+
+A provider whose fee is held has paid for a session they did not get and has been told they will
+hear. **If nobody works the queue, that is money sitting in Melanite's account with somebody
+waiting on it** — which is worse than the old automatic refund, not better. Worth saying to her
+plainly before the day rather than discovering it a fortnight in.
+
+> The eight pre-cutover external bookings are **not** affected. They hold no rent, so cancelling
+> one never asks for a reason and never reaches the queue.
 
 ---
 
@@ -126,7 +162,7 @@ Named for the date. This is the rollback, and the only one that covers data.
 
 ## 2. Schema first
 
-All six migrations are **additive or permissive** — new tables, a new enum value, columns that
+All seven migrations are **additive or permissive** — new tables, a new enum value, columns that
 default to null, and CHECK constraints that only apply to `payment_source = 'rental'`, which the
 currently deployed code never writes. So they can go on before the new code, and the window where
 the two disagree is zero.
@@ -136,7 +172,7 @@ MELANITE_ENV_FILE=.env.migration npm run db:migrate
 MELANITE_ENV_FILE=.env.migration npm run db:verify
 ```
 
-Expect `0032` through `0037` applied — six — then `Schema verified.`
+Expect `0032` through `0038` applied — seven — then `Schema verified.`
 
 > `db:verify` compares production against the **working tree**. Run it from the rental branch or
 > it reports tables that do not exist yet and looks like a disaster.
@@ -238,11 +274,17 @@ MELANITE_ENV_FILE=.env.migration npx tsx --tsconfig scripts/tsconfig.json script
 
 1. Sign in as a provider. Book something — the fee is on the button before it is pressed.
 2. `/app/charges` shows the charge against the right service.
-3. Cancel it. The fee comes back, and the appointment reads `rent refunded`. This is the only
-   step that proves Refunds write — and if it fails, every earlier booking is already charged.
-4. `/app/admin/calendar` — block an hour, confirm it greys out for a provider.
-5. `/app/admin/pricing` — publish a change, confirm the provider is asked to accept it.
-6. Replace the canary's card with itself. Last of the six scopes — PaymentMethods write, for the
+3. Cancel it. It now asks **what happened** and will not proceed without an answer. The fee is
+   **held, not refunded** — check the wording says so.
+4. `/app/admin/queue` — the session is there with what you typed. Press **Refund**. This is the
+   only step that proves Refunds write, and if it fails every earlier booking is already charged.
+   Check the provider gets the outcome email, then do another and press **The fee stands**:
+   nothing moves, the item leaves the queue, and they are still emailed.
+5. Mark a past session a no-show. It asks the same question and holds the fee the same way —
+   **this is the one that used to refund silently**, so it is the one most worth seeing.
+6. `/app/admin/calendar` — block an hour, confirm it greys out for a provider.
+7. `/app/admin/pricing` — publish a change, confirm the provider is asked to accept it.
+8. Replace the canary's card with itself. Last of the six scopes — PaymentMethods write, for the
    detach. Least urgent of them: nobody is blocked by it, it just fails later and alone.
 
 If any of these reports _"Melanite could not take the rental fee"_ rather than a card problem, it

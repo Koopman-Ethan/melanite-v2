@@ -649,7 +649,9 @@ export function rentalChargedEmail(input: {
       'That is the equipment rental. What you charge your client is yours, and does not come',
       'through Melanite.',
       '',
-      'If your client does not turn up, mark the appointment as a no-show and this comes back.',
+      'If the session does not go ahead, cancel it or mark it a no-show and say what happened.',
+      'Melanite reads that and decides whether the fee stands. It is not refunded automatically',
+      'either way.',
       '',
       'See it against everything else here:',
       input.url,
@@ -664,8 +666,79 @@ export function rentalChargedEmail(input: {
             'your client is yours, and does not come through Melanite.</span>',
         ) +
         p(
-          '<span style="font-size:13px;color:#666">If your client does not turn up, mark the ' +
-            'appointment as a no-show and this comes back.</span>',
+          '<span style="font-size:13px;color:#666">If the session does not go ahead, cancel it ' +
+            'or mark it a no-show and say what happened. Melanite reads that and decides whether ' +
+            'the fee stands — it is not refunded automatically either way.</span>',
+        ),
+      { label: 'View your charges', url: input.url },
+    ),
+  }
+}
+
+/** What Melanite decided about a held rental fee.
+ *
+ *  THE ONLY REASON A PROVIDER EVER LEARNS THE OUTCOME. The fee is taken when they book and then
+ *  held when the session falls through, so without this email the money simply sits in a state
+ *  they cannot see and did not choose — and a decision nobody is told about is the same to them
+ *  as one nobody made.
+ *
+ *  Sent for a KEEP as well as a refund, which is the less comfortable half and the more
+ *  important one. "You are told either way" is a term they accepted; a silent keep would make
+ *  that term false, and would leave them to discover it on the charges page or not at all.
+ */
+export function rentalDecisionEmail(input: {
+  firstName: string
+  serviceName: string
+  when: string
+  /** The amount refunded, 'session' for a pack session returned, or null when the fee stands. */
+  refunded: string | null
+  /** What the provider said happened, quoted back so the decision has its context attached. */
+  reason: string | null
+  url: string
+}): Omit<EmailMessage, 'to'> {
+  const session = input.refunded === 'session'
+  const back = session ? 'Your pack session has gone back on your pack.' : null
+
+  const outcome = input.refunded
+    ? (back ?? `${input.refunded} has been refunded to your card.`)
+    : 'The rental fee for that session stands.'
+
+  const said = input.reason ? [`You told us: “${input.reason}”`, ''] : []
+
+  return {
+    subject: input.refunded
+      ? `${session ? 'Session returned' : `${input.refunded} refunded`} — ${input.serviceName}`
+      : `Rental fee stands — ${input.serviceName}`,
+    text: [
+      `Hi ${input.firstName},`,
+      '',
+      `Melanite has reviewed the session that did not go ahead: ${input.serviceName}.`,
+      input.when,
+      '',
+      ...said,
+      outcome,
+      '',
+      // No invitation to argue, and no pretence that there is nothing to say. Keoni makes this
+      // call as a person, so the route back to her is a conversation rather than a form.
+      'If that does not look right, reply to this and Keoni will take another look.',
+      '',
+      input.url,
+    ].join('\n'),
+    html: wrap(
+      input.refunded ? 'Rental fee returned' : 'Rental fee stands',
+      p(`Hi ${input.firstName},`) +
+        p(
+          `Melanite has reviewed the session that did not go ahead: <strong>${esc(input.serviceName)}</strong>.<br>${esc(input.when)}`,
+        ) +
+        (input.reason
+          ? p(
+              `<span style="font-size:13px;color:#666">You told us: &ldquo;${esc(input.reason)}&rdquo;</span>`,
+            )
+          : '') +
+        p(`<strong>${esc(outcome)}</strong>`) +
+        p(
+          '<span style="font-size:13px;color:#666">If that does not look right, reply to this ' +
+            'and Keoni will take another look.</span>',
         ),
       { label: 'View your charges', url: input.url },
     ),
@@ -1043,26 +1116,56 @@ export function eveningDigestEmail(input: {
 
 /** Tells Melanite that an appointment appeared on, or left, the calendar.
  *
- *  One template for both events rather than two nearly identical ones: every field is the same
- *  and only the verb changes, so two copies would drift the first time a line was added. */
+ *  One template for all three events rather than three nearly identical ones: every field is
+ *  the same and only the verb changes, so copies would drift the first time a line was added.
+ *
+ *  `no_show` joined `booked` and `cancelled` on 7 October. A no-show used to need no alert —
+ *  it refunded itself and left Keoni nothing to do — and now holds a provider's money until she
+ *  decides, which makes it the same kind of event as a cancellation. */
 export function deskBookingEmail(input: {
-  event: 'booked' | 'cancelled'
+  event: 'booked' | 'cancelled' | 'no_show'
   clientName: string
   providerName: string
   serviceName: string
   when: string
   durationMins: number
   paying: string
+  /** What the provider said happened, when their rent is held pending a decision. Null when
+   *  there is nothing to decide — a booking, or one of the four non-rental cancel paths. */
+  outcomeReason: string | null
   url: string
 }): Omit<EmailMessage, 'to'> {
-  const verb = input.event === 'booked' ? 'Booked' : 'Cancelled'
+  const booked = input.event === 'booked'
+  const verb = booked ? 'Booked' : input.event === 'no_show' ? 'No-show' : 'Cancelled'
+
+  const opening = booked
+    ? 'An appointment has been booked.'
+    : input.event === 'no_show'
+      ? 'An appointment was marked a no-show.'
+      : 'An appointment has been cancelled.'
+
+  // The ask goes in the SUBJECT, not only the body. This is the message that has to survive
+  // being read on a phone between clients, and "needs your decision" in the subject line is the
+  // difference between a queue that gets worked and one that silently accrues providers waiting
+  // to hear about their money.
+  const subject = input.outcomeReason
+    ? `${verb} — needs your decision: ${input.serviceName} — ${input.when}`
+    : `${verb}: ${input.serviceName} — ${input.when}`
+
+  const decision = input.outcomeReason
+    ? [
+        '',
+        'THE RENTAL FEE IS HELD, pending your decision. The provider said:',
+        `  “${input.outcomeReason}”`,
+        '',
+        'Refund it or let it stand in the queue. They are emailed either way.',
+      ]
+    : []
 
   return {
-    subject: `${verb}: ${input.serviceName} — ${input.when}`,
+    subject,
     text: [
-      input.event === 'booked'
-        ? 'An appointment has been booked.'
-        : 'An appointment has been cancelled.',
+      opening,
       '',
       input.serviceName,
       `${input.when} (${input.durationMins} minutes)`,
@@ -1070,19 +1173,33 @@ export function deskBookingEmail(input: {
       `Client:   ${input.clientName}`,
       `Provider: ${input.providerName}`,
       `Payment:  ${input.paying}`,
+      ...decision,
       '',
-      'See the calendar:',
+      input.outcomeReason ? 'Decide here:' : 'See the calendar:',
       input.url,
     ].join('\n'),
     html: wrap(
-      input.event === 'booked' ? 'Appointment booked' : 'Appointment cancelled',
+      booked
+        ? 'Appointment booked'
+        : input.event === 'no_show'
+          ? 'Marked a no-show'
+          : 'Appointment cancelled',
       p(`<strong>${input.serviceName}</strong><br>${input.when} (${input.durationMins} minutes)`) +
         p(
           `Client: <strong>${input.clientName}</strong><br>` +
             `Provider: ${input.providerName}<br>` +
             `Payment: ${input.paying}`,
-        ),
-      { label: 'Open the calendar', url: input.url },
+        ) +
+        (input.outcomeReason
+          ? p(
+              '<strong>The rental fee is held, pending your decision.</strong><br>' +
+                `<span style="font-size:13px;color:#666">The provider said: &ldquo;${esc(input.outcomeReason)}&rdquo;</span>`,
+            )
+          : ''),
+      {
+        label: input.outcomeReason ? 'Decide in the queue' : 'Open the calendar',
+        url: input.url,
+      },
     ),
   }
 }

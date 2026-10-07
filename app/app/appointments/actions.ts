@@ -3,7 +3,7 @@
 import { and, eq, isNull, sql } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 
-import { releaseRentalForBooking, type RentalReleaseResult } from '@/lib/rental/release'
+import { heldRentalFor, type HeldRental } from '@/lib/rental/review'
 
 import { clientLabel } from '@/lib/booking-labels'
 import { requireProvider } from '@/lib/auth/dal'
@@ -22,7 +22,7 @@ import {
   services,
 } from '@/lib/db/schema'
 import { appointmentWhen, bookingCancelledEmail, sendEmail } from '@/lib/email'
-import { notifyMelaniteCancelled } from '@/lib/notify-melanite'
+import { notifyMelaniteCancelled, notifyMelaniteNoShow } from '@/lib/notify-melanite'
 import { chargeBookingFee } from '@/lib/stripe/fees'
 
 // Ported from v1's three booking-action endpoints. The preconditions are theirs, deliberately
@@ -50,17 +50,32 @@ export interface ActionState {
  *  a refund people do not check for. An empty string when nothing moved — most appointments
  *  before the rental model, and Melanite's own.
  */
-function rentalReleaseNote(result: RentalReleaseResult): string {
-  if ('returnedSession' in result) return ' The pack session has gone back on your pack.'
-  if ('refundedCents' in result) {
-    return ` The $${(result.refundedCents / 100).toFixed(2)} rental fee has been refunded.`
+/** Short enough that a real answer always clears it, long enough that "n/a" does not.
+ *
+ *  Keoni has to make a money decision off these, so a box somebody can dismiss with a keystroke
+ *  would leave her exactly where she was before the feature existed. It is not a quality bar —
+ *  nothing can enforce that — it is a speed bump in front of the reflex to skip the dialog. */
+const MIN_REASON = 10
+
+/** What the provider is told about their rent, now that nothing refunds itself.
+ *
+ *  It used to announce a refund that had already happened. Saying that now would be a lie: the
+ *  fee is held, Keoni decides, and the provider finds out when she does. Promising nothing is
+ *  the point — "sometimes its the clients fault, and not the providers", and this message is
+ *  written before anybody knows which. */
+function rentalHeldNote(held: HeldRental | null): string {
+  if (held?.kind === 'pack') {
+    return ' Your pack session is held while Melanite reviews what happened.'
   }
-  if ('error' in result) return ` The rental fee could not be refunded: ${result.error}`
+  if (held?.kind === 'card') {
+    return ` The $${(held.cents / 100).toFixed(2)} rental fee is held while Melanite reviews what happened. You will hear once it has been looked at.`
+  }
   return ''
 }
 
 export async function cancelBooking(
   bookingId: string,
+  reason = '',
   chargeLateFee = false,
 ): Promise<ActionState> {
   const user = await requireProvider()
@@ -74,6 +89,17 @@ export async function cancelBooking(
   if (!booking) return { error: 'Appointment not found.' }
   if (booking.status !== 'upcoming') {
     return { error: 'Only upcoming appointments can be cancelled.' }
+  }
+
+  // Checked BEFORE anything is written. A cancellation that went through and then complained
+  // about the reason would have freed the slot and taken the explanation with it.
+  const held = await heldRentalFor(bookingId)
+  const outcomeReason = reason.trim()
+
+  if (held && outcomeReason.length < MIN_REASON) {
+    return {
+      error: `Tell Melanite what happened, in a sentence or so, before cancelling. Keoni reads these to decide whether the $${held.kind === 'card' ? (held.cents / 100).toFixed(2) : '0.00'} rental fee stands.`,
+    }
   }
 
   const [live] = await db
@@ -106,7 +132,10 @@ export async function cancelBooking(
     }
   }
 
-  await db.update(bookings).set({ status: 'cancelled' }).where(eq(bookings.id, bookingId))
+  await db
+    .update(bookings)
+    .set({ status: 'cancelled', outcomeReason: outcomeReason || null })
+    .where(eq(bookings.id, bookingId))
 
   // Only a PENDING link is cancelled. A paid one is never silently voided — refunds are
   // handled in Stripe deliberately, so the record of payment has to survive the cancellation.
@@ -117,14 +146,10 @@ export async function cancelBooking(
 
   revalidatePath('/app/appointments')
 
-  // The slot goes back, so the rent for it does too. See `lib/rental/release.ts` for why a
-  // cancellation is treated the same as a no-show here.
-  //
-  // BEFORE the notification, so the email describes the state it is announcing. The other way
-  // round it said "$60.00 rent charged to the provider" about a booking whose rent was refunded
-  // a few milliseconds later.
-  const released = await releaseRentalForBooking(bookingId)
-  const rentNote = rentalReleaseNote(released)
+  // The slot goes back. The RENT DOES NOT — see `lib/rental/review.ts`. The appointment is
+  // cancelled and the hour is bookable again within the same request; the money waits for
+  // Keoni, because whether the provider owes it depends on something only she can judge.
+  const rentNote = rentalHeldNote(held)
 
   // Before the fee branch, so the ordinary no-fee cancellation notifies too — that is the
   // common case and the one most likely to be forgotten.
@@ -405,6 +430,7 @@ export async function cancelPrepaidBooking(bookingId: string): Promise<ActionSta
  */
 export async function markNoShow(
   bookingId: string,
+  reason = '',
   chargeFee = false,
 ): Promise<ActionState> {
   const user = await requireProvider()
@@ -423,14 +449,34 @@ export async function markNoShow(
     return { error: "That appointment hasn't happened yet." }
   }
 
-  await db.update(bookings).set({ status: 'no_show' }).where(eq(bookings.id, bookingId))
+  const held = await heldRentalFor(bookingId)
+  const outcomeReason = reason.trim()
+
+  if (held && outcomeReason.length < MIN_REASON) {
+    return {
+      error:
+        'Tell Melanite what happened, in a sentence or so, before marking this a no-show. ' +
+        'Keoni reads these to decide whether the rental fee stands.',
+    }
+  }
+
+  await db
+    .update(bookings)
+    .set({ status: 'no_show', outcomeReason: outcomeReason || null })
+    .where(eq(bookings.id, bookingId))
 
   revalidatePath('/app/appointments')
 
-  // Keoni's rule: a provider does not owe the rental fee when their client does not turn up.
-  // The fee was taken when the slot was reserved, so honouring that means giving it back.
-  const released = await releaseRentalForBooking(bookingId)
-  const rentNote = rentalReleaseNote(released)
+  // This USED TO REFUND, on the rule that a provider does not owe the fee when their client
+  // fails to turn up. Keoni withdrew that on 7 October: a no-show is only the client's fault
+  // when it actually is, and the software was taking the provider's word for it by refunding
+  // without anybody reading a word. It is reviewed now, like a cancellation.
+  const rentNote = rentalHeldNote(held)
+
+  // And it is told about now, for the same reason. A no-show needed no alert while it settled
+  // itself; one that holds a provider's money until somebody acts needs the prompt that makes
+  // somebody act.
+  if (held) await notifyMelaniteNoShow(bookingId)
 
   if (!chargeFee) return { success: `Marked as a no-show.${rentNote}` }
 

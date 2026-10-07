@@ -79,6 +79,9 @@ async function bookingDetail(bookingId: string) {
         select 1 from provider_pack_redemptions r
         where r.booking_id = ${bookings.id} and r.voided_at is null
       )`,
+      /** The provider's own account of why it did not happen. Null on a booking, obviously, and
+       *  on the four non-rental paths to `cancelled` that never ask for one. */
+      outcomeReason: bookings.outcomeReason,
       serviceName: services.name,
       providerFirst: providers.firstName,
       providerLast: providers.lastName,
@@ -93,10 +96,24 @@ async function bookingDetail(bookingId: string) {
   return row ?? null
 }
 
-async function notifyBooking(bookingId: string, event: 'booked' | 'cancelled'): Promise<void> {
+async function notifyBooking(
+  bookingId: string,
+  event: 'booked' | 'cancelled' | 'no_show',
+): Promise<void> {
   try {
     const row = await bookingDetail(bookingId)
     if (!row) return
+
+    // Whether this one is waiting on Keoni, and what the provider said about it.
+    //
+    // THE PRIMARY SIGNAL that something needs deciding. `/app/admin/queue` is the list, but a
+    // list only works for somebody who remembers to open it — and under the rental model this
+    // is every cancellation and every no-show, not an occasional exception. The prompt has to
+    // arrive on its own, at the moment it is created, with the provider's words in it.
+    const awaitingDecision =
+      event !== 'booked' &&
+      row.paymentSource === 'rental' &&
+      (row.paidFromPack || Number(row.rentalCents ?? 0) > 0)
 
     await sendEmail({
       to: MELANITE_NOTIFY_EMAIL,
@@ -114,7 +131,11 @@ async function notifyBooking(bookingId: string, event: 'booked' | 'cancelled'): 
           rentCents: row.rentalCents === null ? null : Number(row.rentalCents),
           paidFromPack: row.paidFromPack,
         }),
-        url: `${await appOrigin()}/app/admin/calendar`,
+        outcomeReason: awaitingDecision ? (row.outcomeReason ?? 'nothing recorded') : null,
+        // Straight to the queue when there is a decision to make, rather than the calendar.
+        // The whole message is about a thing that needs doing, so the button should go where it
+        // gets done.
+        url: `${await appOrigin()}${awaitingDecision ? '/app/admin/queue' : '/app/admin/calendar'}`,
       }),
     })
   } catch (err) {
@@ -136,6 +157,16 @@ export async function notifyMelaniteBooked(bookingId: string): Promise<void> {
  *  the single funnel for the ordinary, package and prepaid cancellations. */
 export async function notifyMelaniteCancelled(bookingId: string): Promise<void> {
   await notifyBooking(bookingId, 'cancelled')
+}
+
+/** A session nobody turned up for.
+ *
+ *  New with the held-rent review. It used to need no alert at all: a no-show refunded itself and
+ *  there was nothing for Keoni to do, so the only trace was a status on a page. Now it holds the
+ *  provider's money until she decides, which makes it the same kind of event as a cancellation
+ *  and needs telling about in the same way. */
+export async function notifyMelaniteNoShow(bookingId: string): Promise<void> {
+  await notifyBooking(bookingId, 'no_show')
 }
 
 /** The rental room was taken or given back.

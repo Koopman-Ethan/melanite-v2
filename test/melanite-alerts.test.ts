@@ -26,6 +26,7 @@ const BOOKING = {
   when: 'Thursday, August 20 at 2:00 PM',
   durationMins: 30,
   paying: '$180.00 due on a payment link',
+  outcomeReason: null,
   url: 'https://app.melanitesuite.com/app/admin/calendar',
 }
 
@@ -157,6 +158,57 @@ describe('the appointment alert', () => {
     const mail = deskBookingEmail(BOOKING)
     expect(mail.text).toContain('https://app.melanitesuite.com/app/admin/calendar')
     expect(mail.html).toContain('https://app.melanitesuite.com/app/admin/calendar')
+  })
+})
+
+describe('the alert for a session whose rent is held', () => {
+  // This email IS the prompt. `/app/admin/queue` is the list, but a list only works for
+  // somebody who opens it, and under the rental model a held fee is every cancellation and
+  // every no-show rather than an occasional exception. A provider is waiting to hear about
+  // their money from the moment this sends.
+  const held = {
+    ...BOOKING,
+    event: 'cancelled' as const,
+    outcomeReason: 'Client cancelled the morning of and would not reschedule.',
+    url: 'https://app.melanitesuite.com/app/admin/queue',
+  }
+
+  it('asks for the decision in the subject line', () => {
+    // Where it has to be. Read on a phone between clients, the subject is often all there is.
+    expect(deskBookingEmail(held).subject).toContain('needs your decision')
+    // And is NOT there when nothing is held, or the phrase stops meaning anything.
+    expect(deskBookingEmail(BOOKING).subject).not.toContain('needs your decision')
+  })
+
+  it('quotes what the provider said, in both halves', () => {
+    const mail = deskBookingEmail(held)
+    for (const part of [mail.text, mail.html]) {
+      expect(part).toContain('would not reschedule')
+      expect(part).toMatch(/held/i)
+    }
+  })
+
+  it('sends her to the queue rather than the calendar', () => {
+    // The message is entirely about a thing that needs doing, so the button goes where it is
+    // done. A link to the calendar would land her on a page with no control for this.
+    const mail = deskBookingEmail(held)
+    expect(mail.text).toContain('/app/admin/queue')
+    expect(mail.html).toContain('Decide in the queue')
+  })
+
+  it('reads as a no-show when it is one', () => {
+    const mail = deskBookingEmail({ ...held, event: 'no_show' })
+    expect(mail.subject).toContain('No-show')
+    expect(mail.text).toContain('marked a no-show')
+    expect(mail.html).toContain('Marked a no-show')
+  })
+
+  it('says so when the provider was asked and gave nothing', () => {
+    // `notifyBooking` passes 'nothing recorded' rather than null for a held fee with no reason,
+    // so the absence is visible. Silence here would look like the feature had not run.
+    const mail = deskBookingEmail({ ...held, outcomeReason: 'nothing recorded' })
+    expect(mail.subject).toContain('needs your decision')
+    expect(mail.text).toContain('nothing recorded')
   })
 })
 

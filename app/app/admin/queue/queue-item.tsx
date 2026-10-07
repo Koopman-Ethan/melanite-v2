@@ -9,7 +9,9 @@ import type { QueueItem } from '@/lib/db/queries/review-queue'
 
 import {
   declineRoomRefund,
+  keepHeldRent,
   refundEnrollment,
+  refundHeldRent,
   refundRoomRental,
   retryFee,
   transferEnrollment,
@@ -24,12 +26,17 @@ const KIND_LABELS: Record<QueueItem['kind'], string> = {
   room_refund: 'Room refund',
   failed_fee: 'Fee not collected',
   cancelled_course_deposit: 'Cancelled course',
+  held_rent: 'Rent held',
 }
 
 const KIND_STYLES: Record<QueueItem['kind'], string> = {
   room_refund: 'border-warning/40 bg-warning/10 text-warning',
   failed_fee: 'border-danger/40 bg-danger/10 text-danger',
   cancelled_course_deposit: 'border-info/40 bg-info/10 text-info',
+  // Gold, not a warning colour. Nothing has gone wrong here — a provider cancelled and is
+  // waiting to hear, which is the system working. Painting it red beside genuine failures
+  // would make the whole queue read as a list of problems and get skimmed.
+  held_rent: 'border-gold/40 bg-gold/10 text-gold',
 }
 
 const daysAgo = (days: number) =>
@@ -160,6 +167,36 @@ export function QueueRow({
             >
               Waive it
             </Button>
+          </>
+        )}
+
+        {item.kind === 'held_rent' && (
+          <>
+            <Button
+              size="sm"
+              disabled={pending}
+              onClick={() => run(() => refundHeldRent(item.id))}
+            >
+              {pending
+                ? 'Working…'
+                : item.meta.heldSession
+                  ? 'Give the session back'
+                  : `Refund ${usd(item.amount)}`}
+            </Button>
+            {/* Not "Decline". Keoni is not refusing a request, she is deciding that the fee is
+                owed — and the provider gets told in those terms, so the button says the same
+                thing the email will. */}
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={pending}
+              onClick={() => run(() => keepHeldRent(item.id))}
+            >
+              The fee stands
+            </Button>
+            <span className="text-xs text-ink-faint">
+              Either way the provider is emailed the outcome.
+            </span>
           </>
         )}
 

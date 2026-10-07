@@ -3,19 +3,18 @@ import 'server-only'
 import { refundRentalFee } from './charge'
 import { returnPackSession } from './packs'
 
-// Giving back the rent when the appointment does not happen.
+// Giving back the rent. The mechanism, not the policy.
 //
-// Keoni's rule is that a provider does not owe the fee when their client does not turn up. The
-// fee is taken when the slot is RESERVED and a no-show is only known afterwards, so honouring
-// that rule means undoing a charge rather than declining to make one — there was no moment at
-// which it could have been avoided.
+// NOTHING CALLS THIS AUTOMATICALLY. It is reachable from exactly one place —
+// `reviewRentalFee` in `lib/rental/review.ts`, which runs when Keoni decides — and that is the
+// whole design. Up to 7 October `markNoShow` and `cancelBooking` both called it directly, so a
+// provider who marked a no-show was refunded on the spot. Keoni withdrew that: "sometimes its
+// the clients fault, and not the providers", and the old behaviour assumed the answer every
+// time without anybody reading a word.
 //
-// The same applies to a cancellation, and that goes slightly beyond what Keoni said out loud.
-// The reasoning: the fee buys use of the laser, and a cancelled booking hands the slot back for
-// somebody else to take. Keeping the money would make it a cancellation penalty, which is a
-// different thing that nobody has decided to charge. If Melanite later wants one — a late
-// cancellation does leave a hole in the day that rarely gets filled — it should be a fee with a
-// name and a rule, not this one quietly kept.
+// So this module knows HOW to give the money back and nothing about WHEN. If a new path ever
+// needs to refund rent, the question to answer first is who decided — not whether this function
+// will do it, which it always will.
 //
 // TWO WAYS A SESSION WAS PAID FOR, and they are undone differently: a pack session goes back on
 // the pack, and a card charge is refunded. Checked in that order because a pack-covered booking
@@ -35,8 +34,9 @@ export type RentalReleaseResult =
 /**
  * Undoes whatever the provider paid to hold this slot.
  *
- * Safe to call twice. `returnPackSession` is gated on `voided_at IS NULL` and `refundRentalFee`
- * refuses when a refund row already exists, so a double cancel gives nothing back a second time.
+ * Call it only once somebody has decided it should happen. Safe to call twice:
+ * `returnPackSession` is gated on `voided_at IS NULL` and `refundRentalFee` refuses when a refund
+ * row already exists, so a second decision gives nothing back a second time.
  */
 export async function releaseRentalForBooking(bookingId: string): Promise<RentalReleaseResult> {
   if (await returnPackSession(bookingId)) {
