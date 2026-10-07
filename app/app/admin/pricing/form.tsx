@@ -286,7 +286,10 @@ export function PricingForm({
 
       <div className="flex items-center gap-3">
         <PublishButton disabled={changes.length === 0 || invalid.length > 0} />
-        {changes.length === 0 && (
+        {/* Suppressed right after a publish. "Nothing has changed yet" is true — the draft now
+            matches what was just published — but sitting under "Published schedule v2" it reads
+            as a contradiction of the thing that just happened. */}
+        {changes.length === 0 && !state.success && (
           <span className="text-xs text-ink-faint">Nothing has changed yet.</span>
         )}
       </div>

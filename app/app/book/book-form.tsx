@@ -313,21 +313,25 @@ export function BookForm({
                 See the full schedule
               </Link>
               .
-              <Button
-                type="button"
-                className="mt-3"
-                variant="outline"
-                disabled={accepting}
-                onClick={() =>
-                  startAccepting(async () => {
-                    const result = await acceptRentalTerms()
-                    if (result.error) setAcceptError(result.error)
-                    else setAcceptedNow(true)
-                  })
-                }
-              >
-                {accepting ? 'Accepting…' : 'Accept and carry on'}
-              </Button>
+              {/* On its own line. An inline-flex button inside a paragraph wraps into the
+                  middle of the sentence it belongs to — this one landed between "See the full"
+                  and "schedule". */}
+              <div className="mt-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={accepting}
+                  onClick={() =>
+                    startAccepting(async () => {
+                      const result = await acceptRentalTerms()
+                      if (result.error) setAcceptError(result.error)
+                      else setAcceptedNow(true)
+                    })
+                  }
+                >
+                  {accepting ? 'Accepting…' : 'Accept and carry on'}
+                </Button>
+              </div>
               {acceptError && <p className="mt-2 text-danger">{acceptError}</p>}
             </div>
           ) : pack ? (

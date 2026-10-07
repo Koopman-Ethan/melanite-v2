@@ -69,6 +69,9 @@ export function AppointmentActions({ appointment }: { appointment: Appointment }
   // offer the no-fee option beside the fee one — a provider who does not want to bill a regular
   // client should not have to avoid the button that records what happened.
   const canCharge = appointment.paymentSource === 'checkout_link' && Number(appointment.price) > 0
+  // A rental booking has no client and no payment link — the only money on it is the rent the
+  // provider paid, which comes back. Every other branch here describes a client's money.
+  const isRental = appointment.paymentSource === 'rental'
 
   return (
     <div className="space-y-2">
@@ -111,7 +114,9 @@ export function AppointmentActions({ appointment }: { appointment: Appointment }
               ? 'Cancel this appointment and return the session to the client’s package?'
               : returnsBalance
                 ? 'Cancel this appointment and put the money back on the client’s prepaid balance? Anything they have already paid on a card is refunded in Stripe, not here.'
-                : 'Cancel this appointment? The client’s payment link will be cancelled if it is still unpaid.'}
+                : isRental
+                  ? 'Cancel this appointment? The slot reopens and your rental fee comes back.'
+                  : 'Cancel this appointment? The client’s payment link will be cancelled if it is still unpaid.'}
           </p>
           <div className="flex flex-wrap gap-2">
             <Button

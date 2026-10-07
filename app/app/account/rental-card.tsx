@@ -85,19 +85,21 @@ export function RentalCard({
         <div className="rounded-field border border-warning/40 bg-warning/10 p-3 text-xs text-ink-secondary">
           <strong className="text-warning">The rental terms have changed.</strong> Accept them to
           carry on booking.
-          <Button
-            className="mt-3"
-            variant="outline"
-            disabled={pending}
-            onClick={() =>
-              start(async () => {
-                const result = await acceptRentalTerms()
-                if (result.error) setError(result.error)
-              })
-            }
-          >
-            Accept the rental terms
-          </Button>
+          {/* Its own line, for the reason the booking form's copy of this explains. */}
+          <div className="mt-3">
+            <Button
+              variant="outline"
+              disabled={pending}
+              onClick={() =>
+                start(async () => {
+                  const result = await acceptRentalTerms()
+                  if (result.error) setError(result.error)
+                })
+              }
+            >
+              Accept the rental terms
+            </Button>
+          </div>
         </div>
       )}
 
