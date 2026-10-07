@@ -20,10 +20,14 @@ import { db } from './db'
 // future one is always a mistake, and `markNoShow` refuses it server-side. So testing the refund
 // means waiting for a booking to age, which nobody is going to do.
 //
-// IT MAKES A REAL CHARGE. The whole point is the refund, and `refundRentalFee` refunds an actual
-// Stripe PaymentIntent — a hand-written ledger row with an invented intent id would fail at
-// Stripe with "No such payment_intent", which is a worse lie than not seeding at all. So this
-// goes through `chargeRentalFee`, the same function the booking path calls.
+// IT MAKES A REAL CHARGE. The whole point is the refund at the end of it, and `refundRentalFee`
+// refunds an actual Stripe PaymentIntent — a hand-written ledger row with an invented intent id
+// would fail at Stripe with "No such payment_intent", which is a worse lie than not seeding at
+// all. So this goes through `chargeRentalFee`, the same function the booking path calls.
+//
+// Since 7 October the refund is no longer the next step. Marking the no-show HOLDS the fee and
+// queues it for Keoni, so testing the whole path means seeding here, marking it as the provider,
+// and then deciding as an admin in `/app/admin/queue`.
 //
 // The booking is left `upcoming` deliberately. That is the real state of an appointment nobody
 // has closed out: the hour has passed and the provider has not said what happened.
@@ -196,7 +200,11 @@ async function main() {
     `  charged  $${(charged.charged.amountCents / 100).toFixed(2)} to the card ending ${provider.cardLast4}\n`,
   )
   console.log('Now open Appointments as that provider. "Completed" and "No-show" are both there,')
-  console.log('because the hour has passed. No-show refunds the fee; Charges nets to zero.')
+  console.log('because the hour has passed.')
+  console.log('')
+  console.log('No-show now ASKS WHAT HAPPENED and holds the fee — it does not refund. The session')
+  console.log('then appears in /app/admin/queue with what you typed, for Keoni to refund or let')
+  console.log('stand. Charges nets to zero only once she refunds it.')
 }
 
 main().catch((err) => {
