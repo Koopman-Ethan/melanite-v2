@@ -23,7 +23,7 @@ import {
 } from '@/lib/rental/packs'
 import { hasAcceptedRentalTerms } from '@/lib/rental-terms'
 import { feeForService, liveScheduleVersion } from '@/lib/rental/schedule'
-import { paysRent } from '@/lib/revenue-model'
+import { paysRent, sharesRevenue } from '@/lib/revenue-model'
 
 export interface BookState {
   error?: string
@@ -124,6 +124,24 @@ export async function createBooking(_prev: BookState, formData: FormData): Promi
   // missing row as PAYING rent, and a missing row that silently books for free is the wrong
   // direction to be wrong in.
   const payingRent = !provider || paysRent(provider.revenueModel)
+
+  // A grandfathered 50/50 provider cannot use this path yet, and must not be let through it.
+  //
+  // Every gate below is written `payingRent && ...`, so for them all four are skipped: no fee
+  // lookup, no card, no terms, no charge — and the INSERT further down hard-codes `rental` with
+  // zero prices and no client. The result would be a free session on the shared laser, which is
+  // the exact failure the error a few lines down exists to prevent, arrived at from the other
+  // direction and without even a message.
+  //
+  // Their own path — client details, their own price, a checkout link, Melanite's half — is
+  // restored in a later commit. Until then this refuses loudly instead of booking quietly.
+  if (provider && sharesRevenue(provider.revenueModel)) {
+    return {
+      error:
+        'Your account is on the 50/50 arrangement, and booking for it is being rebuilt. ' +
+        'Tell Keoni rather than working around this — nothing would be charged if it went through.',
+    }
+  }
 
   const feeCents = await feeForService(svc.name)
   if (payingRent && feeCents === null) {
