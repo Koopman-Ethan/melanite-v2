@@ -18,6 +18,7 @@ import {
   providers,
 } from '@/lib/db/schema'
 import { splitClientPayment, splitHouse, toCents, toMoney } from '@/lib/money'
+import { isHouse } from '@/lib/revenue-model'
 import { friendlyStripeError, stripePost } from '@/lib/stripe/client'
 import { isValidEmail } from '@/lib/validation'
 
@@ -105,7 +106,7 @@ export async function createBookingIntent(input: {
 
   // Melanite treating its own client. There is no second party, so there is nothing to transfer
   // and no Connect account to require — and requiring one is all this guard would achieve.
-  const house = provider?.revenueModel === 'house'
+  const house = !!provider && isHouse(provider.revenueModel)
 
   if (!house && !provider?.stripeAccountId) {
     return { error: 'This provider cannot accept payments yet. Contact them directly.' }
@@ -168,7 +169,7 @@ export async function createBookingIntent(input: {
         // Carried so the webhook writes the ledger the way this intent was built. The mode is
         // otherwise read twice, independently, with nothing joining the two reads — and a flag
         // flipped in between would leave Stripe's fee and the books disagreeing.
-        revenue_model: house ? 'house' : 'split',
+        revenue_model: provider?.revenueModel ?? 'split',
       },
     })
 
@@ -232,7 +233,7 @@ export async function createPackageIntent(input: {
 
   // Same rule as a booking: when the provider IS Melanite there is nothing to transfer and no
   // Connect account to require. See `providerRevenueModel` in the schema.
-  const house = provider?.revenueModel === 'house'
+  const house = !!provider && isHouse(provider.revenueModel)
 
   if (!house && !provider?.stripeAccountId) {
     return { error: 'This provider cannot accept payments yet. Contact them directly.' }
@@ -283,7 +284,7 @@ export async function createPackageIntent(input: {
       ...(input.saveCard ? { setup_future_usage: 'off_session' } : {}),
       metadata: {
         type: 'package_purchase',
-        revenue_model: house ? 'house' : 'split',
+        revenue_model: provider?.revenueModel ?? 'split',
         package_template_id: link.templateId,
         package_checkout_link_id: link.id,
         provider_id: link.providerId,
@@ -358,7 +359,7 @@ export async function createPrepaidIntent(input: {
 
   // Same rule as a booking: when the provider IS Melanite there is nothing to transfer and no
   // Connect account to require. See `providerRevenueModel` in the schema.
-  const house = provider?.revenueModel === 'house'
+  const house = !!provider && isHouse(provider.revenueModel)
 
   if (!house && !provider?.stripeAccountId) {
     return { error: 'This provider cannot accept payments yet. Contact them directly.' }
@@ -402,7 +403,7 @@ export async function createPrepaidIntent(input: {
           }),
       metadata: {
         type: 'prepaid_purchase',
-        revenue_model: house ? 'house' : 'split',
+        revenue_model: provider?.revenueModel ?? 'split',
         prepaid_checkout_link_id: link.id,
         provider_id: link.providerId,
         // The BENEFICIARY. The handler attaches the balance to this, never to whoever paid.

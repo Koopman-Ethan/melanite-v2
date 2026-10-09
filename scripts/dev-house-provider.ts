@@ -7,6 +7,7 @@ import { providerServices, providers, services } from '@/lib/db/schema'
 
 import { describeDatabase, requireEnv } from '../lib/env-guard'
 import { db } from './db'
+import { isHouse } from '@/lib/revenue-model'
 
 // Sets the platform owner up as a `house` provider in a NON-PRODUCTION database.
 //
@@ -72,7 +73,7 @@ async function main() {
     .limit(1)
 
   const problems = [
-    owner.revenueModel !== 'house' && `revenue_model is '${owner.revenueModel}', not 'house'`,
+    !isHouse(owner.revenueModel) && `revenue_model is '${owner.revenueModel}', not 'house'`,
     !owner.bookingEnabled && 'booking_enabled is false',
     owner.licenseExpiry !== LICENSE.expiry && `license expiry is ${owner.licenseExpiry ?? 'not set'}`,
     !existingService && 'no priced services',

@@ -14,6 +14,7 @@ import {
 } from '@/lib/db/schema'
 import { feeChargedEmail, sendEmail } from '@/lib/email'
 import { splitFee, toCents, toMoney } from '@/lib/money'
+import { isHouse } from '@/lib/revenue-model'
 import { friendlyStripeError, stripePost, stripeWritesEnabled } from '@/lib/stripe/client'
 
 // No-show and late-cancellation fees.
@@ -187,7 +188,7 @@ export async function chargeBookingFee(bookingId: string, kind: FeeKind): Promis
   // Connect account and quietly falls back to a platform charge, so without this the fee would
   // still be SPLIT in the ledger — half of it recorded as owed to a provider who does not
   // exist, on a row stamped 'paid'. Nothing would throw and the number would simply be wrong.
-  const house = provider?.revenueModel === 'house'
+  const house = !!provider && isHouse(provider.revenueModel)
 
   const { providerPayoutCents: providerCents, melaniteCutCents: melaniteCents } = house
     ? { providerPayoutCents: 0, melaniteCutCents: amountCents }

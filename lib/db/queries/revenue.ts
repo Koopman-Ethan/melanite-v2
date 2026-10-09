@@ -3,6 +3,7 @@ import 'server-only'
 import { and, desc, eq, sql } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
+import { notHouseSql } from '@/lib/db/revenue-model'
 import {
   bookings,
   ledgerEntries,
@@ -237,7 +238,10 @@ export async function getOwedByProvider(): Promise<OwedByProvider[]> {
         // `bookings` rather than the ledger, so it would pick one up the moment Keoni took a
         // cash or Groupon client — and hand her an invoice addressed to herself, counted into
         // a total she is meant to go and chase.
-        sql`${providers.revenueModel} <> 'house'`,
+        // ...and NOT `sharesRevenueSql`. These are pre-cutover external bookings, thirteen of
+        // which belong to providers who move to rent — narrowing this to the 50/50 three would
+        // drop their rows and understate what Keoni is owed. See `notHouseSql`.
+        notHouseSql(providers.revenueModel),
         sql`not exists (
           select 1 from ${ledgerEntries}
           where ${ledgerEntries}.subject_type = 'booking'

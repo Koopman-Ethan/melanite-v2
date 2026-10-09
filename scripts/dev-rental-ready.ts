@@ -9,6 +9,7 @@ import { stripeGet, stripePost } from '@/lib/stripe/client'
 
 import { describeDatabase, requireEnv } from '../lib/env-guard'
 import { db } from './db'
+import { paysRentSql } from '@/lib/db/revenue-model'
 
 // Gives dev providers a test card and an accepted set of rental terms.
 //
@@ -135,7 +136,7 @@ async function main() {
     .where(
       sql`${providers.status} = 'active'
           AND ${providers.bookingEnabled}
-          AND ${providers.revenueModel} <> 'house'`,
+          AND ${paysRentSql(providers.revenueModel)}`,
     )) as Target[]
 
   if (targets.length === 0) {
@@ -289,7 +290,7 @@ async function main() {
       sql`${providers.stripeBillingCustomerId} IS NOT NULL
           AND ${providers.billingPaymentMethodId} IS NULL
           AND ${providers.status} = 'active'
-          AND ${providers.revenueModel} <> 'house'`,
+          AND ${paysRentSql(providers.revenueModel)}`,
     )) as { id: string; email: string; customerId: string }[]
 
   for (const stray of strays) {

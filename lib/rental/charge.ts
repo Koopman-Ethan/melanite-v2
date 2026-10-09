@@ -3,9 +3,11 @@ import 'server-only'
 import { and, eq, sql } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
+import { paysRentSql } from '@/lib/db/revenue-model'
 import { bookings, ledgerEntries, providerServices, providers, services } from '@/lib/db/schema'
 import { toMoney } from '@/lib/money'
 import { feeForService } from '@/lib/rental/schedule'
+import { paysRent } from '@/lib/revenue-model'
 import { StripeApiError, stripePost, stripeWritesEnabled } from '@/lib/stripe/client'
 
 // Charging a provider to use the laser.
@@ -134,7 +136,7 @@ export async function chargeRentalFee(bookingId: string): Promise<RentalChargeRe
 
   // Melanite treating Melanite's own client. There is no rent to pay yourself, and a $0 ledger row
   // would only make "what does the laser earn" read low for no reason.
-  if (provider.revenueModel === 'house') {
+  if (!paysRent(provider.revenueModel)) {
     return { skipped: "Melanite's own appointment — no rental fee." }
   }
 
@@ -272,7 +274,7 @@ export async function unchargedRentalBookings(): Promise<
       JOIN services s           ON s.id = ps.service_id
       JOIN providers p          ON p.id = b.provider_id
      WHERE b.payment_source = 'rental'
-       AND p.revenue_model <> 'house'
+       AND ${paysRentSql(sql`p.revenue_model`)}
        AND NOT EXISTS (
          SELECT 1 FROM ledger_entries le
           WHERE le.subject_type = 'booking' AND le.subject_id = b.id

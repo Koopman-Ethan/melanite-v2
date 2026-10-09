@@ -5,6 +5,7 @@ import { and, eq, ne, sql } from 'drizzle-orm'
 import { clientLabel } from '@/lib/booking-labels'
 import { db } from '@/lib/db'
 import { isUniqueViolation } from '@/lib/db/errors'
+import { isHouse } from '@/lib/revenue-model'
 import {
   bookings,
   checkoutLinks,
@@ -452,7 +453,7 @@ async function isHousePayment(
     .where(eq(providers.id, providerId))
     .limit(1)
 
-  return provider?.revenueModel === 'house'
+  return !!provider && isHouse(provider.revenueModel)
 }
 
 async function serviceIdFor(providerServiceId: string): Promise<string | null> {

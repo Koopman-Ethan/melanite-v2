@@ -10,6 +10,8 @@ import { liveScheduleVersion } from '@/lib/rental/schedule'
 
 import { describeDatabase, requireEnv } from '../lib/env-guard'
 import { db } from './db'
+import { paysRentSql } from '@/lib/db/revenue-model'
+import { isHouse } from '@/lib/revenue-model'
 
 // Is this database actually usable as dev?
 //
@@ -163,7 +165,7 @@ const CHECKS: Check[] = [
       if (!owner) return 'no platform_owner row'
 
       const problems = [
-        owner.revenueModel !== 'house' && `revenue_model is '${owner.revenueModel}'`,
+        !isHouse(owner.revenueModel) && `revenue_model is '${owner.revenueModel}'`,
         !canBook(asSessionUser(owner)) &&
           `blocked by ${bookingBlockedReasons(asSessionUser(owner)).map((g) => g.gate).join(', ')}`,
         // NOT "has active services" any more. Nobody configures a service menu since the
@@ -209,7 +211,7 @@ const CHECKS: Check[] = [
         .where(
           sql`${providers.status} = 'active'
               AND ${providers.bookingEnabled}
-              AND ${providers.revenueModel} <> 'house'
+              AND ${paysRentSql(providers.revenueModel)}
               AND ${providers.billingCardLast4} IS NOT NULL
               AND ${providers.rentalTermsVersion} = ${RENTAL_TERMS_VERSION}
               AND ${providers.rentalScheduleVersion} = ${schedule}`,
@@ -236,7 +238,7 @@ const CHECKS: Check[] = [
           sql`${providers.stripeBillingCustomerId} IS NOT NULL
               AND ${providers.billingPaymentMethodId} IS NULL
               AND ${providers.status} = 'active'
-              AND ${providers.revenueModel} <> 'house'`,
+              AND ${paysRentSql(providers.revenueModel)}`,
         )
 
       const n = row?.n ?? 0

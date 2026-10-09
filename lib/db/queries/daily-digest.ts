@@ -4,6 +4,7 @@ import { and, asc, eq, gte, lt, ne, sql } from 'drizzle-orm'
 
 import { clientLabel } from '@/lib/booking-labels'
 import { db } from '@/lib/db'
+import { isHouseSql } from '@/lib/db/revenue-model'
 import { splitClientPayment, toCents } from '@/lib/money'
 import { PROVIDER_ALREADY_HOLDS } from '@/lib/payments/direction'
 import {
@@ -179,7 +180,7 @@ export async function getDigestDay(day: string): Promise<DigestDay> {
         serviceName: services.name,
         providerId: providers.id,
         providerName: sql<string>`${providers.firstName} || ' ' || ${providers.lastName}`,
-        isHouse: sql<boolean>`${providers.revenueModel} = 'house'`,
+        isHouse: isHouseSql(providers.revenueModel).mapWith(Boolean),
         status: bookings.status,
         price: bookings.price,
         paymentSource: bookings.paymentSource,

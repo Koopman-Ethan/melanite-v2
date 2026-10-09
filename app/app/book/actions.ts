@@ -23,6 +23,7 @@ import {
 } from '@/lib/rental/packs'
 import { hasAcceptedRentalTerms } from '@/lib/rental-terms'
 import { feeForService, liveScheduleVersion } from '@/lib/rental/schedule'
+import { paysRent } from '@/lib/revenue-model'
 
 export interface BookState {
   error?: string
@@ -117,7 +118,12 @@ export async function createBooking(_prev: BookState, formData: FormData): Promi
     .limit(1)
 
   // Melanite treating Melanite's own client. There is no rent to pay yourself.
-  const payingRent = provider?.revenueModel !== 'house'
+  //
+  // `requireProvider()` above guarantees the row, so the `!provider` arm never fires. It is
+  // written out rather than defaulted to false because the predicate this replaced treated a
+  // missing row as PAYING rent, and a missing row that silently books for free is the wrong
+  // direction to be wrong in.
+  const payingRent = !provider || paysRent(provider.revenueModel)
 
   const feeCents = await feeForService(svc.name)
   if (payingRent && feeCents === null) {

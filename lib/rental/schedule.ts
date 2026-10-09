@@ -3,6 +3,7 @@ import 'server-only'
 import { and, desc, eq, sql } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
+import { paysRentSql } from '@/lib/db/revenue-model'
 import { rentalFeeEntries, rentalFeeSchedules } from '@/lib/db/schema'
 import { RENTAL_TIERS, tierForService, type RentalTier } from '@/lib/rental-fees'
 
@@ -240,7 +241,10 @@ export async function providersNeedingReacceptance(): Promise<number> {
     .from(sql`providers`)
     .where(
       and(
-        sql`revenue_model <> 'house'`,
+        // Only a provider who pays rent is governed by the schedule. The 50/50 three never
+        // see a rental fee, so counting them here would tell Keoni three people are blocked on
+        // terms that do not apply to them.
+        paysRentSql(sql`revenue_model`),
         sql`status = 'active'`,
         sql`booking_enabled`,
         live === null

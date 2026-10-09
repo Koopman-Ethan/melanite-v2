@@ -14,6 +14,7 @@ import {
 import { packBalancesFor } from '@/lib/rental/packs'
 import { tierForService } from '@/lib/rental-fees'
 import { getLiveSchedule } from '@/lib/rental/schedule'
+import { paysRent } from '@/lib/revenue-model'
 import { hasAcceptedRentalTerms } from '@/lib/rental-terms'
 
 import { BookPanel } from './book-panel'
@@ -110,7 +111,7 @@ export default async function BookPage({
 
   // Melanite treating Melanite's own client pays no rent, so the whole fee panel is irrelevant
   // for the house account rather than showing it a charge of nothing.
-  const payingRent = provider?.revenueModel !== 'house'
+  const payingRent = !provider || paysRent(provider.revenueModel)
 
   return (
     <main className="mx-auto w-full max-w-2xl px-6 py-10 space-y-6">

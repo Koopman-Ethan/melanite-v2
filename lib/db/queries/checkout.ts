@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm'
 
 import { clientLabel } from '@/lib/booking-labels'
 import { db } from '@/lib/db'
+import { notHouse } from '@/lib/revenue-model'
 import {
   bookings,
   checkoutLinks,
@@ -145,9 +146,15 @@ export async function getBookingCheckout(token: string): Promise<BookingCheckout
             //
             // A house appointment is Melanite's own: the charge stays on the platform account,
             // so there is no Connect account to be missing and nothing to check.
+            //
+            // `notHouse`, NOT `sharesRevenue`. A checkout link is an old-model artefact and is
+            // settled the old way whatever its provider is on NOW — so a provider who has moved
+            // to rent still has to be payable through Connect for one of these. Production has
+            // eleven pending links and ten of them belong to providers moving to rent, so this
+            // is a live distinction rather than a hypothetical one.
             row.bookingStatus === 'cancelled' ||
             row.bookingStatus === 'no_show' ||
-            (row.providerRevenueModel !== 'house' && !row.providerStripeAccount)
+            (notHouse(row.providerRevenueModel) && !row.providerStripeAccount)
             ? 'unpayable'
             : 'payable'
 
@@ -246,7 +253,7 @@ export async function getPackageCheckout(token: string): Promise<PackageCheckout
         ? 'cancelled'
         : row.expiresAt < new Date()
           ? 'expired'
-          : row.providerRevenueModel !== 'house' && !row.providerStripeAccount
+          : notHouse(row.providerRevenueModel) && !row.providerStripeAccount
             ? 'unpayable'
             : 'payable'
 
@@ -320,7 +327,7 @@ export async function getPrepaidCheckout(token: string): Promise<PrepaidCheckout
           ? 'expired'
           : // Destination charge, same as a package: without a connected account the provider
             // cannot be paid their share, so there is nothing to collect into.
-            row.providerRevenueModel !== 'house' && !row.providerStripeAccount
+            notHouse(row.providerRevenueModel) && !row.providerStripeAccount
             ? 'unpayable'
             : 'payable'
 
