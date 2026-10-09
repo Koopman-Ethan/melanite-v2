@@ -68,9 +68,23 @@ export const practiceType = pgEnum('practice_type', ['laser', 'room_only'])
 
 /** Where the money from this provider's appointments ends up.
  *
- *  `split` — the normal arrangement. The client pays Melanite's platform account, the
- *  provider's share is forwarded to their Connect account as a destination charge, and
- *  Melanite keeps `platform_settings.provider_share_pct` as an application fee.
+ *  `rental` — THE DEFAULT, and what every provider onboarded from October 2026 onward is on.
+ *  The provider bills their own client, through their own system, at their own prices. Melanite
+ *  never sees that money and keeps no record of the client. What Melanite charges is a flat
+ *  rental fee per session for the laser, taken from a card the provider has on file — after the
+ *  session, not when they book it, because providers are frequently not paid by their own
+ *  client until the work is done.
+ *
+ *  `split` — the ORIGINAL arrangement, now closed to new providers. The client pays Melanite's
+ *  platform account, the provider's share is forwarded to their Connect account as a
+ *  destination charge, and Melanite keeps `platform_settings.provider_share_pct` as an
+ *  application fee.
+ *
+ *  Three providers are grandfathered onto `split` permanently — Leyla, Brittany and Karly —
+ *  because Keoni judged on 9 October 2026 that she would lose them otherwise ("I'm going to
+ *  lose those girls if I don't allow them the 50/50"). It is a hybrid nobody wanted, and the
+ *  cost of it is not this column but the branching it forces; `lib/revenue-model.ts` is where
+ *  that cost is paid down.
  *
  *  `house` — the provider IS Melanite. There is nobody to transfer to and no share to
  *  calculate: the charge stays on the platform account, the whole amount including any tip is
@@ -80,7 +94,11 @@ export const practiceType = pgEnum('practice_type', ['laser', 'room_only'])
  *  SEE; this decides where money GOES, and letting a permission field carry that means a second
  *  admin who is an ordinary revenue-share provider would silently keep 100%. Same reasoning
  *  that keeps `fee_provider_share_pct` separate from `provider_share_pct`. */
-export const providerRevenueModel = pgEnum('provider_revenue_model', ['split', 'house'])
+export const providerRevenueModel = pgEnum('provider_revenue_model', [
+  'split',
+  'house',
+  'rental',
+])
 
 export const medicalDirectorType = pgEnum('medical_director_type', ['melanite', 'own'])
 
@@ -372,8 +390,15 @@ export const providers = pgTable('providers', {
   /** Where this provider's client money ends up. See `providerRevenueModel`.
    *
    *  A `house` provider needs NO Connect account, and should not have one — that is the point.
-   *  Every other provider defaults to `split`, so this changes nothing for them. */
-  revenueModel: providerRevenueModel().notNull().default('split'),
+   *
+   *  THE DEFAULT IS THE LOAD-BEARING PART. A provider invited next March must land on `rental`:
+   *  if this defaulted to `split` they would silently join the closed model, be given Connect
+   *  and the client-payment screens, and — because `paysRent` would be false for them — never
+   *  be charged rent at all. Nothing would break. It would surface as a month's takings being
+   *  short, which is the same failure `createBooking` already refuses an unpriced service to
+   *  avoid. Grandfathering is therefore a deliberate act, done once by script, and NOT offered
+   *  anywhere in the invite form: a dropdown is a thing somebody picks from by accident. */
+  revenueModel: providerRevenueModel().notNull().default('rental'),
 
   // Stripe Connect (money out, to the provider).
   stripeAccountId: text(),

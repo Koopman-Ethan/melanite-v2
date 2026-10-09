@@ -33,11 +33,13 @@ export type RevenueModel = (typeof providerRevenueModel)['enumValues'][number]
  */
 export function paysRent(model: RevenueModel): boolean {
   switch (model) {
-    // TODO(hybrid): becomes `false` when 'rental' is added. Until then `split` is the only
-    // non-house value, so returning true here is what `!== 'house'` already did — which is the
-    // point: this commit changes no behaviour, and the next one changes it in one place.
-    case 'split':
+    case 'rental':
       return true
+    // The three grandfathered providers. They owe Melanite a share of what they charge their
+    // client, not a fee for the laser — so every rental gate has to let them through untouched.
+    // Charging them here would be charging twice.
+    case 'split':
+      return false
     case 'house':
       return false
     default:
@@ -51,14 +53,15 @@ export function paysRent(model: RevenueModel): boolean {
  * The original model. From October it is only Leyla, Brittany and Karly — grandfathered because
  * Keoni judged she would lose them otherwise. Nobody new is ever put on it.
  *
- * Identical to `paysRent` today, because `split` is the only non-house value. They diverge the
- * moment `'rental'` exists, which is why choosing between them at each call site is the real
- * work of this refactor rather than a formality.
+ * The mirror image of `paysRent`, and the two are now genuinely disjoint: no provider is ever
+ * on both, and a provider on neither is Melanite itself.
  */
 export function sharesRevenue(model: RevenueModel): boolean {
   switch (model) {
     case 'split':
       return true
+    case 'rental':
+      return false
     case 'house':
       return false
     default:
@@ -90,6 +93,8 @@ export function revenueModelLabel(model: RevenueModel): string {
   switch (model) {
     case 'split':
       return '50/50'
+    case 'rental':
+      return 'Rental'
     case 'house':
       return 'House'
     default:

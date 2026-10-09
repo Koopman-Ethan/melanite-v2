@@ -79,7 +79,7 @@ async function chargeRow(bookingId: string, amount: string, entryType = 'purchas
 
 beforeAll(async () => {
   const [prov] = (await sql.query(
-    `SELECT id FROM providers WHERE revenue_model = 'split' AND booking_enabled LIMIT 1`,
+    `SELECT id FROM providers WHERE revenue_model = 'rental' AND booking_enabled LIMIT 1`,
   )) as { id: string }[]
   providerId = prov.id
 

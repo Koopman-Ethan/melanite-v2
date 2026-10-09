@@ -82,7 +82,7 @@ async function heldBooking(status: 'cancelled' | 'no_show', reason: string | nul
 beforeAll(async () => {
   const [prov] = (await sql.query(
     `SELECT id FROM providers
-      WHERE revenue_model = 'split' AND billing_payment_method_id IS NULL LIMIT 1`,
+      WHERE revenue_model = 'rental' AND billing_payment_method_id IS NULL LIMIT 1`,
   )) as { id: string }[]
   if (!prov) throw new Error('no card-less provider in dev — these tests need one')
   providerId = prov.id

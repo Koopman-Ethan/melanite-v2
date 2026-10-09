@@ -92,7 +92,7 @@ beforeAll(async () => {
   // states its own requirement instead of depending on what the nightly copy happened to bring.
   const [prov] = (await sql.query(
     `SELECT id FROM providers
-      WHERE revenue_model = 'split' AND billing_payment_method_id IS NULL
+      WHERE revenue_model = 'rental' AND billing_payment_method_id IS NULL
       LIMIT 1`,
   )) as { id: string }[]
   if (!prov) throw new Error('no card-less provider in dev — these tests need one')

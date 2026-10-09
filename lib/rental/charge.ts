@@ -7,7 +7,7 @@ import { paysRentSql } from '@/lib/db/revenue-model'
 import { bookings, ledgerEntries, providerServices, providers, services } from '@/lib/db/schema'
 import { toMoney } from '@/lib/money'
 import { feeForService } from '@/lib/rental/schedule'
-import { paysRent } from '@/lib/revenue-model'
+import { isHouse, paysRent } from '@/lib/revenue-model'
 import { StripeApiError, stripePost, stripeWritesEnabled } from '@/lib/stripe/client'
 
 // Charging a provider to use the laser.
@@ -136,8 +136,24 @@ export async function chargeRentalFee(bookingId: string): Promise<RentalChargeRe
 
   // Melanite treating Melanite's own client. There is no rent to pay yourself, and a $0 ledger row
   // would only make "what does the laser earn" read low for no reason.
-  if (!paysRent(provider.revenueModel)) {
+  if (isHouse(provider.revenueModel)) {
     return { skipped: "Melanite's own appointment — no rental fee." }
+  }
+
+  // A grandfathered 50/50 provider. They owe Melanite a share of what they charge their client,
+  // never a fee for the laser, so there is correctly nothing to take here.
+  //
+  // BUT REACHING THIS LINE IS A BUG. The booking path branches on the model long before the
+  // charge, so a split provider with a rental booking means a gate was missed — and the cost of
+  // missing it is the one outcome Keoni was afraid of: Karly billed $30 for the laser on top of
+  // Melanite taking $25 of her $50. Logged at error level rather than raised, because the
+  // correct amount to charge really is nothing and failing the sweep would not make it righter.
+  if (!paysRent(provider.revenueModel)) {
+    console.error(
+      `[rental] booking ${booking.id} is marked rental but its provider is on ` +
+        `'${provider.revenueModel}' — a model gate was missed. Charged nothing.`,
+    )
+    return { skipped: 'This provider is on the 50/50 split and owes no rental fee.' }
   }
 
   const amountCents = await feeForService(booking.serviceName)

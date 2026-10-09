@@ -93,8 +93,11 @@ async function dayNow() {
 }
 
 beforeAll(async () => {
-  // A SPLIT provider, not the house one: a house appointment is deliberately worth nothing to
-  // collect, which would make the money assertions below pass for the wrong reason.
+  // A SPLIT provider specifically, and since October that is a narrow choice rather than
+  // "anybody but the house account". These fixtures are `external` bookings with a client price
+  // on them, which is the 50/50 shape — Melanite collects its half afterwards. A house
+  // appointment is deliberately worth nothing to collect, and a rental provider has no client
+  // price at all, so either would make the money assertions below pass for the wrong reason.
   const rows = (await sql.query(
     `SELECT ps.id, ps.provider_id
        FROM provider_services ps

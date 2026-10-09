@@ -17,14 +17,12 @@ import { sql, type SQL } from 'drizzle-orm'
 
 /** Providers who owe a flat rental fee. See `paysRent`. */
 export function paysRentSql(column: SQL | unknown): SQL {
-  // TODO(hybrid): becomes `= 'rental'` when the value is added. Written as the negation today so
-  // this commit is provably behaviour-preserving — every call site it replaces said exactly this.
-  return sql`${column} <> 'house'`
+  return sql`${column} = 'rental'`
 }
 
 /** Providers on the original revenue share. See `sharesRevenue`. */
 export function sharesRevenueSql(column: SQL | unknown): SQL {
-  return sql`${column} <> 'house'`
+  return sql`${column} = 'split'`
 }
 
 /** Melanite's own account. */

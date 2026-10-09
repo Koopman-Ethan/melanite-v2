@@ -165,12 +165,25 @@ describe('Melanite does not invoice itself', () => {
 
     // Restored in a finally: leaving a real dev provider marked 'house' would break every
     // payment path for them until somebody noticed.
+    //
+    // THE ORIGINAL IS READ BACK, not assumed. This used to restore a hardcoded 'split', which
+    // was harmless while that was the only non-house value and became data corruption the day a
+    // third one existed — the fixture picks whichever provider_service comes first, so it would
+    // have quietly moved a rental provider onto the closed 50/50 model and left them there.
+    const [original] = (await sql.query(
+      `SELECT revenue_model FROM providers WHERE id = $1`,
+      [providerId],
+    )) as { revenue_model: string }[]
+
     await sql.query(`UPDATE providers SET revenue_model = 'house' WHERE id = $1`, [providerId])
     try {
       const row = (await getOwedByProvider()).find((r) => r.providerId === providerId)
       expect(row, 'a house provider must not appear at all').toBeUndefined()
     } finally {
-      await sql.query(`UPDATE providers SET revenue_model = 'split' WHERE id = $1`, [providerId])
+      await sql.query(`UPDATE providers SET revenue_model = $2 WHERE id = $1`, [
+        providerId,
+        original.revenue_model,
+      ])
     }
 
     // Putting them back restores the debt, which is what proves the flag did it rather than
