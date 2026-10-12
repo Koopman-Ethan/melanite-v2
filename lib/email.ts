@@ -692,8 +692,10 @@ export function rentalDecisionEmail(input: {
   when: string
   /** The amount refunded, 'session' for a pack session returned, or null when nothing came back. */
   refunded: string | null
-  /** The amount taken, when Keoni decided the session was owed for after all. Null otherwise. */
+  /** The amount owed, when Keoni decided the session was chargeable after all. Null otherwise. */
   charged: string | null
+  /** It was not taken from a card — it is owed, and Melanite will collect it. */
+  invoiced?: boolean
   /** What the provider said happened, quoted back so the decision has its context attached. */
   reason: string | null
   url: string
@@ -704,7 +706,9 @@ export function rentalDecisionEmail(input: {
   const outcome = input.refunded
     ? (back ?? `${input.refunded} has been refunded to your card.`)
     : input.charged
-      ? `${input.charged} has been charged to your card for that session.`
+      ? input.invoiced
+        ? `${input.charged} is owed for that session — Melanite's half. It will be collected the usual way, not taken from a card.`
+        : `${input.charged} has been charged to your card for that session.`
       : 'Nothing has been charged for that session.'
 
   const said = input.reason ? [`You told us: “${input.reason}”`, ''] : []

@@ -27,8 +27,10 @@ import { appOrigin } from '@/lib/stripe/config'
 export type RentDecision =
   /** The amount refunded as a display string, or 'session' for a pack session returned. */
   | { refunded: string }
-  /** The amount taken, for a session Keoni decided was owed for after all. */
-  | { charged: string }
+  /** The amount owed, for a session Keoni decided was chargeable after all. `invoiced` means it
+   *  was not taken from a card — a 50/50 provider has none, so Melanite collects it the way it
+   *  already collects their Groupon share. */
+  | { charged: string; invoiced?: boolean }
   /** Nothing was taken and nothing will be. */
   | { waived: true }
 
@@ -69,6 +71,7 @@ export async function notifyRentDecision(
         when: appointmentWhen(row.startTime),
         refunded: 'refunded' in decision ? decision.refunded : null,
         charged: 'charged' in decision ? decision.charged : null,
+        invoiced: 'charged' in decision ? Boolean(decision.invoiced) : false,
         reason: row.reason,
         url: `${await appOrigin()}/app/charges`,
       }),

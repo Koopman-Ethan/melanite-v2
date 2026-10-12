@@ -3,7 +3,7 @@ import 'server-only'
 import { and, desc, eq, sql } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
-import { notHouseSql } from '@/lib/db/revenue-model'
+import { notHouseSql, sharesRevenueSql } from '@/lib/db/revenue-model'
 import {
   bookings,
   ledgerEntries,
@@ -231,9 +231,28 @@ export async function getOwedByProvider(): Promise<OwedByProvider[]> {
     .innerJoin(platformSettings, eq(platformSettings.id, 1))
     .where(
       and(
-        eq(bookings.paymentSource, 'external'),
-        sql`${bookings.externalMethod} <> 'cherry'`,
-        sql`${bookings.status} <> 'cancelled'`,
+        // TWO WAYS A PROVIDER COMES TO OWE MELANITE A SHARE, and both are collected the same
+        // way — Keoni invoices them, because the money never passed through the platform.
+        //
+        //   1. A session that HAPPENED and was paid for outside the app: Groupon, cash, a card
+        //      in person. The provider is holding Melanite's half.
+        //   2. A session that did NOT happen, where Keoni decided the half is still owed. Added
+        //      12 October with the review queue. Nobody paid anything, so there is nothing to
+        //      take a half from and nothing to refund — it is simply a debt, and this is the
+        //      one page that tracks debts.
+        //
+        // Without the second arm, pressing "Charge $57.50" in the queue records a decision that
+        // then appears nowhere at all.
+        sql`(
+          (${bookings.paymentSource} = 'external'
+             AND ${bookings.externalMethod} <> 'cherry'
+             AND ${bookings.status} <> 'cancelled')
+          OR
+          (${sharesRevenueSql(providers.revenueModel)}
+             AND ${bookings.status} IN ('cancelled', 'no_show')
+             AND ${bookings.rentalReviewedAt} IS NOT NULL
+             AND ${bookings.rentWaivedAt} IS NULL)
+        )`,
         // Melanite's own appointments are not a debt Melanite owes itself. This query reads
         // `bookings` rather than the ledger, so it would pick one up the moment Keoni took a
         // cash or Groupon client — and hand her an invoice addressed to herself, counted into

@@ -275,8 +275,13 @@ export async function collectOwedRent(bookingId: string): Promise<QueueState> {
   if (!('collected' in out)) return { error: 'Nothing was charged.' }
 
   const amount = `$${(out.collected / 100).toFixed(2)}`
-  await notifyRentDecision(bookingId, { charged: amount })
-  return { success: `${amount} charged. The provider has been told.` }
+  await notifyRentDecision(bookingId, { charged: amount, invoiced: out.invoiced })
+
+  return {
+    success: out.invoiced
+      ? `${amount} added to what ${'they'} owe — it shows on the revenue page to collect. The provider has been told.`
+      : `${amount} charged. The provider has been told.`,
+  }
 }
 
 /** Decides the session is not owed for: a fee already taken is refunded, a pack session goes

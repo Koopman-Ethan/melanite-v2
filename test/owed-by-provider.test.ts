@@ -215,3 +215,70 @@ describe('whose half is it', () => {
     }
   })
 })
+
+describe('a session that did not happen, charged anyway', () => {
+  it('becomes a debt on this page rather than a charge on a card', async () => {
+    // The 50/50 three have no card, deliberately — Melanite's half normally comes out of the
+    // client's payment, and asking them for one would impose the rental model on the people
+    // promised they would not be on it. When Keoni decides a cancelled session is still owed
+    // for, there is no payment to take a half from, so it is a debt and this is the page that
+    // tracks debts. Without this the button records a decision that appears nowhere.
+    const [prov] = (await sql.query(
+      `SELECT id FROM providers WHERE revenue_model = 'split' AND status = 'active' LIMIT 1`,
+    )) as { id: string }[]
+    if (!prov) return
+    const [ps] = (await sql.query(
+      `SELECT id FROM provider_services WHERE provider_id = $1 AND is_active LIMIT 1`,
+      [prov.id],
+    )) as { id: string }[]
+    if (!ps) return
+
+    const owedBefore =
+      (await getOwedByProvider()).find((r) => r.providerId === prov.id)?.owed ?? '0'
+
+    const rows = (await sql.query(
+      `INSERT INTO bookings
+         (provider_id, provider_service_id, client_name, original_price, price, payment_source,
+          duration_mins, start_time, end_time, status, rental_reviewed_at)
+       VALUES ($1, $2, 'ZZ owed after cancel', '200.00', '200.00', 'checkout_link', 60,
+               now() - interval '400 hours', now() - interval '399 hours', 'cancelled', now())
+       RETURNING id`,
+      [prov.id, ps.id],
+    )) as { id: string }[]
+    made.push(rows[0].id)
+
+    const after = (await getOwedByProvider()).find((r) => r.providerId === prov.id)
+    expect(after, 'the provider must appear as owing something').toBeDefined()
+    // Melanite's half of 200.
+    expect(Number(after!.owed) - Number(owedBefore)).toBeCloseTo(100, 2)
+  })
+
+  it('does not appear while she has waived it', async () => {
+    const [prov] = (await sql.query(
+      `SELECT id FROM providers WHERE revenue_model = 'split' AND status = 'active' LIMIT 1`,
+    )) as { id: string }[]
+    if (!prov) return
+    const [ps] = (await sql.query(
+      `SELECT id FROM provider_services WHERE provider_id = $1 AND is_active LIMIT 1`,
+      [prov.id],
+    )) as { id: string }[]
+    if (!ps) return
+
+    const before = (await getOwedByProvider()).find((r) => r.providerId === prov.id)?.owed ?? '0'
+
+    const rows = (await sql.query(
+      `INSERT INTO bookings
+         (provider_id, provider_service_id, client_name, original_price, price, payment_source,
+          duration_mins, start_time, end_time, status, rental_reviewed_at, rent_waived_at)
+       VALUES ($1, $2, 'ZZ waived after cancel', '200.00', '200.00', 'checkout_link', 60,
+               now() - interval '420 hours', now() - interval '419 hours', 'cancelled',
+               now(), now())
+       RETURNING id`,
+      [prov.id, ps.id],
+    )) as { id: string }[]
+    made.push(rows[0].id)
+
+    const after = (await getOwedByProvider()).find((r) => r.providerId === prov.id)?.owed ?? '0'
+    expect(Number(after)).toBeCloseTo(Number(before), 2)
+  })
+})

@@ -195,7 +195,9 @@ export async function rentOwedFor(bookingId: string): Promise<RentOwed | null> {
 export type ReviewDecision = 'collect' | 'release' | 'waive'
 
 export type ReviewResult =
-  | { collected: number }
+  /** `invoiced` means nothing moved at Stripe: it is owed and Keoni collects it, which is the
+   *  only shape available for a provider with no card on file. */
+  | { collected: number; invoiced?: boolean }
   | { released: RentalReleaseResult }
   | { waived: true }
   | { error: string }
@@ -251,6 +253,21 @@ export async function reviewRentalFee(
   if (decision === 'collect') {
     if (owed.kind !== 'due') {
       return { error: 'That fee has already been taken — release it instead.' }
+    }
+
+    // A 50/50 provider has no card, and that is not an oversight to work around. Melanite's
+    // half normally comes out of the client's payment; when the session did not happen there is
+    // no payment to take a half from, and asking the three grandfathered providers for a card
+    // would be imposing the rental model on exactly the people who were promised they would not
+    // be on it.
+    //
+    // So it becomes money OWED rather than money taken, which is how Melanite already collects
+    // from them for Groupon and cash sessions: the figure appears in "owed by provider" on the
+    // revenue page and Keoni invoices it. Stamping the review with no waiver is what records
+    // the decision; `getOwedByProvider` reads it from there.
+    if (owed.split) {
+      await stamp(bookingId, adminId)
+      return { collected: owed.cents, invoiced: true }
     }
 
     // The charge BEFORE the stamp, for the same reason the refund is: stamping first would mark
