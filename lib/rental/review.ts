@@ -50,7 +50,7 @@ export type RentOwed =
    *  nothing charged — and the old "is money held?" test answered no and quietly let the whole
    *  thing through: no reason asked, no queue item, no sweep. The session simply vanished and
    *  Melanite lost the rent without anybody seeing it. */
-  | { kind: 'due'; cents: number }
+  | { kind: 'due'; cents: number; split?: boolean }
   /** A session off a pack. Giving it back puts it on the pack.
    *
    *  Only Karly's grandfathered sessions, granted at cutover because her clients had already
@@ -77,8 +77,13 @@ export async function rentOwedFor(bookingId: string): Promise<RentOwed | null> {
       serviceName: services.name,
       waivedAt: bookings.rentWaivedAt,
       revenueModel: providers.revenueModel,
-      /** The provider's own price for this service, for a 50/50 booking. */
-      ownPrice: providerServices.price,
+      /** What this session was actually worth to the client — the booking's own price, after
+       *  any discount the provider applied.
+       *
+       *  NOT `provider_services.price`, which is the list price. A session discounted from $125
+       *  to $115 would otherwise have Melanite claiming half of $125, taking $62.50 of a sale
+       *  worth $115 and quietly keeping more than half. The split is of what the client pays. */
+      bookedPrice: bookings.price,
     })
     .from(bookings)
     .innerJoin(providerServices, eq(bookings.providerServiceId, providerServices.id))
@@ -107,12 +112,14 @@ export async function rentOwedFor(bookingId: string): Promise<RentOwed | null> {
   // Only the amount is derived differently: the published rental fee, or Melanite's half of
   // what the provider charges for that service.
   if (sharesRevenue(row.revenueModel)) {
-    const price = Number(row.ownPrice ?? 0)
+    const price = Number(row.bookedPrice ?? 0)
     if (!Number.isFinite(price) || price <= 0) return null
 
     const sharePct = await getProviderSharePct()
     const owed = Math.round(price * 100 * (1 - sharePct))
-    return owed > 0 ? { kind: 'due', cents: owed } : null
+    // Flagged, because the sentence a provider reads about it is different. Calling this a
+    // "rental fee" to one of the grandfathered three names a thing she is never charged.
+    return owed > 0 ? { kind: 'due', cents: owed, split: true } : null
   }
 
   if (row.paymentSource !== 'rental') return null

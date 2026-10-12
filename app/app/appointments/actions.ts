@@ -79,7 +79,14 @@ function rentalHeldNote(held: RentOwed | null): string {
     // Nothing has been taken, and this says so rather than implying a charge is sitting there.
     // Melanite may still decide the session is owed for — a slot nobody else could use — so it
     // must not read as "you are off the hook" either.
-    return ` The $${(held.cents / 100).toFixed(2)} rental fee has not been taken. Melanite reviews what happened and decides whether it is owed.`
+    //
+    // NAMED FOR THE ARRANGEMENT. One of the grandfathered three is never charged a rental fee,
+    // so calling it that would name a thing that does not exist for her; what is at stake is
+    // Melanite's half of the session.
+    const amount = `$${(held.cents / 100).toFixed(2)}`
+    return held.split
+      ? ` Nothing has been charged. Melanite reviews what happened and decides whether its ${amount} half of this session is still owed.`
+      : ` The ${amount} rental fee has not been taken. Melanite reviews what happened and decides whether it is owed.`
   }
   return ''
 }

@@ -132,12 +132,18 @@ describe('what a session that did not happen is holding', () => {
     expect(await rentOwedFor(id)).toEqual({ kind: 'charged', cents: 3500 })
   })
 
-  it('holds nothing against a booking that paid no rent', async () => {
-    // Four other paths reach `cancelled` — package restore, prepaid return, admin tools, the
-    // ETL — and none of them carries rent. Keoni must not be asked to adjudicate money that
-    // was never taken, which is what would fill her queue with the pre-cutover bookings.
+  it('holds nothing against a session nobody owes for', async () => {
+    // "Non-rental" STOPPED MEANING "nothing to decide" on 12 October, which is what this test
+    // originally assumed. A cancelled booking belonging to one of the grandfathered three is
+    // not a rental booking and is very much a decision — Melanite's half of it is owed or it is
+    // not. What is genuinely nothing is a session worth nothing to anybody: Melanite's own, or
+    // one comped to zero.
     const rows = (await sql.query(
-      `SELECT id FROM bookings WHERE payment_source <> 'rental' AND status = 'cancelled' LIMIT 1`,
+      `SELECT b.id FROM bookings b
+         JOIN providers p ON p.id = b.provider_id
+        WHERE b.status = 'cancelled'
+          AND (p.revenue_model = 'house' OR (b.payment_source <> 'rental' AND b.price = 0))
+        LIMIT 1`,
     )) as { id: string }[]
     if (rows.length === 0) return
     expect(await rentOwedFor(rows[0].id)).toBeNull()
@@ -228,9 +234,16 @@ describe('deciding', () => {
     expect(out).toHaveProperty('error')
   })
 
-  it('refuses a booking holding nothing', async () => {
+  it('refuses a session nobody owes for', async () => {
+    // Same correction as above, and it has to exclude anything already decided: the error for
+    // "you have already reviewed this" is a different and correct refusal.
     const rows = (await sql.query(
-      `SELECT id FROM bookings WHERE payment_source <> 'rental' AND status = 'cancelled' LIMIT 1`,
+      `SELECT b.id FROM bookings b
+         JOIN providers p ON p.id = b.provider_id
+        WHERE b.status = 'cancelled'
+          AND b.rental_reviewed_at IS NULL
+          AND (p.revenue_model = 'house' OR (b.payment_source <> 'rental' AND b.price = 0))
+        LIMIT 1`,
     )) as { id: string }[]
     if (rows.length === 0) return
 
@@ -295,5 +308,59 @@ describe('cancelling something that has already finished', () => {
       /isFinished = appointment\.endTime <= new Date\(\)/,
     )
     expect(card).toMatch(/\{!isFinished && \(/)
+  })
+})
+
+describe('what a 50/50 provider owes for a session that did not happen', () => {
+  it('is half of what the client was being charged, not half the list price', async () => {
+    // Found on screen: a session discounted from $125 to $115 reported $62.50 owed, because the
+    // split was taken against `provider_services.price` rather than the booking's own. Melanite
+    // would have claimed more than half of a sale worth $115 — and claimed it on the one screen
+    // a provider reads to decide whether the arrangement is being honoured.
+    const [prov] = (await sql.query(
+      `SELECT id FROM providers WHERE revenue_model = 'split' LIMIT 1`,
+    )) as { id: string }[]
+    if (!prov) return
+
+    const [ps] = (await sql.query(
+      `SELECT id FROM provider_services WHERE provider_id = $1 AND is_active AND price > 0
+       LIMIT 1`,
+      [prov.id],
+    )) as { id: string }[]
+    if (!ps) return
+
+    // Booked at 115 against a service listed higher, which is what a discount produces.
+    let bookingId = ''
+    for (let back = 1200; back < 1400; back += 2) {
+      try {
+        const rows = (await sql.query(
+          `INSERT INTO bookings
+             (provider_id, provider_service_id, client_name, original_price, discount_type,
+              discount_value, price, payment_source, duration_mins, start_time, end_time,
+              status, notes)
+           VALUES ($1, $2, 'ZZ split review', '125.00', 'amount', '10.00', '115.00',
+                   'checkout_link', 60,
+                   now() - ($3::int || ' hours')::interval,
+                   now() - (($3::int - 1) || ' hours')::interval, 'cancelled', $4)
+           RETURNING id`,
+          [prov.id, ps.id, String(back), TAG],
+        )) as { id: string }[]
+        bookingId = rows[0].id
+        bookingIds.push(bookingId)
+        break
+      } catch (err) {
+        const e = err as { cause?: { code?: string }; code?: string }
+        if ((e.code ?? e.cause?.code) !== '23P01') throw err
+      }
+    }
+    expect(bookingId).not.toBe('')
+
+    const owed = await rentOwedFor(bookingId)
+    expect(owed, 'a 50/50 session that did not happen is still a decision').not.toBeNull()
+    if (owed && owed.kind === 'due') {
+      // Half of 115, not half of 125.
+      expect(owed.cents).toBe(5750)
+      expect(owed.split, 'so the provider is not told she owes a "rental fee"').toBe(true)
+    }
   })
 })

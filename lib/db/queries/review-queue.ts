@@ -179,9 +179,9 @@ async function heldRent(): Promise<QueueItem[]> {
         where r.booking_id = bookings.id and r.voided_at is null
       )`,
       revenueModel: providers.revenueModel,
-      /** The provider's own price, for a 50/50 session. Melanite's share of it is what they
-       *  owe if Keoni decides the session is chargeable. */
-      ownPrice: providerServices.price,
+      /** What the session was worth to the client, after any discount — the booking's own
+       *  price, not the provider's list price. Melanite's half of THIS is what is owed. */
+      bookedPrice: bookings.price,
     })
     .from(bookings)
     .innerJoin(providers, eq(bookings.providerId, providers.id))
@@ -230,9 +230,9 @@ async function heldRent(): Promise<QueueItem[]> {
    *  Two derivations, one question. A provider on rent owes the published fee for the service's
    *  tier. A provider on the 50/50 owes Melanite's half of their own price — their client has
    *  not paid either, so this is not a refund, it is the same debt arrived at differently. */
-  const dueFor = (r: { serviceName: string; revenueModel: string; ownPrice: string | null }) => {
+  const dueFor = (r: { serviceName: string; revenueModel: string; bookedPrice: string | null }) => {
     if (sharesRevenue(r.revenueModel as never)) {
-      return Math.round(Number(r.ownPrice ?? 0) * 100 * (1 - sharePct))
+      return Math.round(Number(r.bookedPrice ?? 0) * 100 * (1 - sharePct))
     }
     const tier = tierForService(r.serviceName)
     if (!tier) return 0

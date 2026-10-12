@@ -17,6 +17,7 @@ import { appOrigin } from '@/lib/stripe/config'
 import { AppointmentActions } from './appointment-actions'
 import { closeoutWindowOpen } from '@/lib/end-of-use'
 import { tierForService } from '@/lib/rental-fees'
+import { sharesRevenue } from '@/lib/revenue-model'
 import { getLiveSchedule } from '@/lib/rental/schedule'
 
 import { EndOfUseChecklist } from './end-of-use-checklist'
@@ -336,6 +337,7 @@ export default async function AppointmentsPage({
           })}
           chargedCents={justBooked.chargedCents}
           packSession={justBooked.packSession}
+          sharesRevenue={sharesRevenue(user.revenueModel)}
         />
       )}
 

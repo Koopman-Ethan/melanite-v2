@@ -60,11 +60,15 @@ export function RentalBookedBanner({
   when,
   chargedCents,
   packSession,
+  sharesRevenue,
 }: {
   serviceName: string
   when: string
   chargedCents: number | null
   packSession: { index: number; total: number } | null
+  /** True for the three grandfathered onto the 50/50 split. Everything below reads the opposite
+   *  way round for them. */
+  sharesRevenue?: boolean
 }) {
   return (
     <div className="rounded-card border border-success/30 bg-success/10 p-5">
@@ -73,15 +77,23 @@ export function RentalBookedBanner({
       </h2>
 
       <p className="mt-1 text-xs text-ink-secondary">
-        {packSession
-          ? `Session ${packSession.index} of ${packSession.total} of your credited sessions. Nothing was charged to your card.`
-          : chargedCents !== null
-            ? `$${(chargedCents / 100).toFixed(2)} rental fee charged to your card on file.`
-            : 'No rental fee for this appointment.'}
+        {sharesRevenue
+          ? 'Your client’s payment link has been created.'
+          : packSession
+            ? `Session ${packSession.index} of ${packSession.total} of your credited sessions. Nothing was charged to your card.`
+            : chargedCents !== null
+              ? `$${(chargedCents / 100).toFixed(2)} rental fee charged to your card on file.`
+              : 'No rental fee charged yet — it is taken after the session.'}
       </p>
 
+      {/* The two arrangements are opposites here, and saying the wrong one is worse than saying
+          nothing. A provider on rent bills their own client and Melanite never sees it. One of
+          the grandfathered three bills THROUGH Melanite, which keeps half — so telling her
+          Melanite is not involved in that side of it is precisely backwards. */}
       <p className="mt-2 text-xs text-ink-faint">
-        Bill your client however you normally do — Melanite isn’t involved in that side of it.
+        {sharesRevenue
+          ? 'Your client pays Melanite and your share is forwarded to you.'
+          : 'Bill your client however you normally do — Melanite isn’t involved in that side of it.'}
       </p>
     </div>
   )
