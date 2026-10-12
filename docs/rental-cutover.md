@@ -225,6 +225,29 @@ appeared, it needs Keoni, not a default.
 
 ---
 
+## 5.5 Set the review start date
+
+`REVIEW_STARTED_AT` in `lib/rental/review.ts` is the day a session that did not happen becomes
+Keoni's decision. **Set it to the cutover date and commit that before deploying.**
+
+Left at its dev value, her queue opens on **seventeen** old cancellations belonging to the three
+grandfathered providers — back to 10 August, $812.88 of Melanite's half — none of which anybody
+was asked about at the time and all of which were settled between her and the provider months
+ago. A queue that opens with a pile of unanswerable decisions is one she stops opening, and the
+whole design rests on her working it.
+
+```bash
+MELANITE_ENV_FILE=.env.migration npx tsx --tsconfig scripts/tsconfig.json scripts/sql.ts   "select p.first_name, count(*), min(b.start_time)::date
+     from bookings b join providers p on p.id = b.provider_id
+    where p.revenue_model = 'split' and b.status in ('cancelled','no_show')
+    group by 1 order by 2 desc"
+```
+
+Whatever that returns is what she inherits if the date is wrong. It is a compiled-in constant,
+the same known limitation as `END_OF_USE_STARTED_AT` — one date for every environment.
+
+---
+
 ## 6. Deploy
 
 Environment variables apply at **build** time, so a redeploy rebuilds the old commit. Push.

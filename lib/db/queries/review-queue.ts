@@ -7,6 +7,7 @@ import { getProviderSharePct } from '@/lib/db/queries/admin-tools'
 import { sharesRevenueSql } from '@/lib/db/revenue-model'
 import { tierForService } from '@/lib/rental-fees'
 import { sharesRevenue } from '@/lib/revenue-model'
+import { REVIEW_STARTED_AT } from '@/lib/rental/review'
 import { getLiveSchedule } from '@/lib/rental/schedule'
 import { db } from '@/lib/db'
 import {
@@ -196,6 +197,10 @@ async function heldRent(): Promise<QueueItem[]> {
         // appointment gets cancelled".
         sql`(${bookings.paymentSource} = 'rental' OR ${sharesRevenueSql(providers.revenueModel)})`,
         sql`${bookings.status} IN ('cancelled', 'no_show')`,
+        // Nothing from before the policy existed. See REVIEW_STARTED_AT — without it the queue
+        // opens on seventeen cancellations going back to August, which is how it stops being
+        // read at all.
+        sql`${bookings.startTime} >= ${REVIEW_STARTED_AT.toISOString()}::timestamptz`,
         isNull(bookings.rentalReviewedAt),
         // A waived fee is a decision on the record, not an oversight.
         isNull(bookings.rentWaivedAt),

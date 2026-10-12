@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { getReviewQueue } from '@/lib/db/queries/review-queue'
-import { rentOwedFor, reviewRentalFee } from '@/lib/rental/review'
+import { REVIEW_STARTED_AT, rentOwedFor, reviewRentalFee } from '@/lib/rental/review'
 
 // Who decides whether a provider gets the rent back.
 //
@@ -41,7 +41,10 @@ async function heldBooking(status: 'cancelled' | 'no_show', reason: string | nul
 
   // The laser is one shared resource behind an exclusion constraint and dev carries real
   // appointments, so walk back until a slot is free.
-  for (let back = 500; back < 900; back += 2) {
+  // Inside the reviewable window. These used to sit three weeks back, which stopped meaning
+  // anything the moment REVIEW_STARTED_AT existed — a fixture before the policy began is
+  // correctly invisible, and every assertion here would have been passing for the wrong reason.
+  for (let back = 2; back < 120; back += 2) {
     try {
       const rows = (await sql.query(
         `INSERT INTO bookings
@@ -133,6 +136,8 @@ describe('what a session that did not happen is holding', () => {
   })
 
   it('holds nothing against a session nobody owes for', async () => {
+    // Read-only, so picking a real row is safe here — unlike the review test below, which
+    // decides money and therefore builds its own.
     // "Non-rental" STOPPED MEANING "nothing to decide" on 12 October, which is what this test
     // originally assumed. A cancelled booking belonging to one of the grandfathered three is
     // not a rental booking and is very much a decision — Melanite's half of it is owed or it is
@@ -235,19 +240,37 @@ describe('deciding', () => {
   })
 
   it('refuses a session nobody owes for', async () => {
-    // Same correction as above, and it has to exclude anything already decided: the error for
-    // "you have already reviewed this" is a different and correct refusal.
-    const rows = (await sql.query(
-      `SELECT b.id FROM bookings b
-         JOIN providers p ON p.id = b.provider_id
-        WHERE b.status = 'cancelled'
-          AND b.rental_reviewed_at IS NULL
-          AND (p.revenue_model = 'house' OR (b.payment_source <> 'rental' AND b.price = 0))
-        LIMIT 1`,
-    )) as { id: string }[]
-    if (rows.length === 0) return
+    // ITS OWN FIXTURE, never a row it found. The first version of this test picked the first
+    // cancelled booking in the database and called `reviewRentalFee(..., 'waive')` on it — and
+    // when 50/50 sessions became reviewable it started finding real ones. It waived a booking
+    // Ethan had just made, mid-test-pass, and the only sign was the item quietly leaving the
+    // queue. A test that decides real money is worse than no test.
+    //
+    // `comped` is a session worth nothing to anybody, which is the state being described.
+    let id = ''
+    for (let back = 2; back < 120; back += 2) {
+      try {
+        const rows = (await sql.query(
+          `INSERT INTO bookings
+             (provider_id, provider_service_id, client_name, original_price, price,
+              payment_source, duration_mins, start_time, end_time, status, notes)
+           VALUES ($1, $2, 'ZZ nothing owed', '0.00', '0.00', 'comped', 60,
+                   now() - ($3::int || ' hours')::interval,
+                   now() - (($3::int - 1) || ' hours')::interval, 'cancelled', $4)
+           RETURNING id`,
+          [providerId, providerServiceId, String(back), TAG],
+        )) as { id: string }[]
+        id = rows[0].id
+        bookingIds.push(id)
+        break
+      } catch (err) {
+        const e = err as { cause?: { code?: string }; code?: string }
+        if ((e.code ?? e.cause?.code) !== '23P01') throw err
+      }
+    }
+    expect(id).not.toBe('')
 
-    const out = await reviewRentalFee(rows[0].id, 'waive', adminId)
+    const out = await reviewRentalFee(id, 'waive', adminId)
     expect(out).toHaveProperty('error')
     if ('error' in out) expect(out.error).toMatch(/nothing to decide/i)
   })
@@ -331,7 +354,8 @@ describe('what a 50/50 provider owes for a session that did not happen', () => {
 
     // Booked at 115 against a service listed higher, which is what a discount produces.
     let bookingId = ''
-    for (let back = 1200; back < 1400; back += 2) {
+    // Inside the reviewable window, like every other fixture here.
+    for (let back = 2; back < 120; back += 2) {
       try {
         const rows = (await sql.query(
           `INSERT INTO bookings
@@ -362,5 +386,40 @@ describe('what a 50/50 provider owes for a session that did not happen', () => {
       expect(owed.cents).toBe(5750)
       expect(owed.split, 'so the provider is not told she owes a "rental fee"').toBe(true)
     }
+  })
+})
+
+describe('sessions from before the policy existed', () => {
+  it('are not hers to decide', async () => {
+    // Production holds seventeen cancellations for the three grandfathered providers going back
+    // to 10 August — $812.88 of Melanite's half. Without a start date the queue opens on all of
+    // them the morning this ships: decisions nobody was asked about at the time and that were
+    // settled months ago. A queue like that is one she stops opening.
+    const [prov] = (await sql.query(
+      `SELECT id FROM providers WHERE revenue_model = 'split' LIMIT 1`,
+    )) as { id: string }[]
+    if (!prov) return
+    const [ps] = (await sql.query(
+      `SELECT id FROM provider_services WHERE provider_id = $1 AND is_active AND price > 0 LIMIT 1`,
+      [prov.id],
+    )) as { id: string }[]
+    if (!ps) return
+
+    const before = new Date(REVIEW_STARTED_AT.getTime() - 7 * 86_400_000)
+    const rows = (await sql.query(
+      `INSERT INTO bookings
+         (provider_id, provider_service_id, client_name, original_price, price, payment_source,
+          duration_mins, start_time, end_time, status, notes)
+       VALUES ($1, $2, 'ZZ before policy', '100.00', '100.00', 'checkout_link', 60,
+               $3::timestamptz, $3::timestamptz + interval '1 hour', 'cancelled', $4)
+       RETURNING id`,
+      [prov.id, ps.id, before.toISOString(), TAG],
+    )) as { id: string }[]
+    bookingIds.push(rows[0].id)
+
+    expect(await rentOwedFor(rows[0].id)).toBeNull()
+
+    const queue = await getReviewQueue()
+    expect(queue.find((q) => q.id === rows[0].id)).toBeUndefined()
   })
 })

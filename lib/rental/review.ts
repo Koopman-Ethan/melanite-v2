@@ -39,6 +39,28 @@ import { feeForService } from './schedule'
 // declined, the hardest to explain, and it would show the provider two transactions for one
 // session. Holding costs nothing and moves no money until the decision is made.
 
+/** The day a session that did not happen became Keoni's decision.
+ *
+ *  Nothing before this is reviewable, and the number says why: production holds SEVENTEEN
+ *  cancellations for the three grandfathered providers, going back to 10 August and totalling
+ *  $812.88 of Melanite's half. Without a start date, the morning this deploys her queue fills
+ *  with every one of them — cancellations made before the policy existed, where nobody was
+ *  asked what happened, and which were settled between her and the provider months ago.
+ *
+ *  A queue that opens with a pile of decisions nobody can make is one she stops opening, and
+ *  the whole design rests on her working it. `lib/db/queries/review-queue.ts` says it directly:
+ *  an item that lingers after being resolved is worse than no queue at all.
+ *
+ *  Same shape and same reasoning as `END_OF_USE_STARTED_AT`, including the same limitation —
+ *  one compiled-in date for every environment. SET THIS TO THE CUTOVER DATE before deploying;
+ *  the runbook has it as a step.
+ *
+ *  It sits a week back rather than today so that dev has something to look at — a date of
+ *  "this morning" leaves every seeded session invisible and the queue permanently empty, which
+ *  looks exactly like the feature being broken.
+ */
+export const REVIEW_STARTED_AT = new Date('2026-10-06T00:00:00-06:00')
+
 /** What is riding on a booking that did not happen. */
 export type RentOwed =
   /** Money already taken. A decision to let it go gives this back. */
@@ -74,6 +96,7 @@ export async function rentOwedFor(bookingId: string): Promise<RentOwed | null> {
     .select({
       paymentSource: bookings.paymentSource,
       status: bookings.status,
+      startTime: bookings.startTime,
       serviceName: services.name,
       waivedAt: bookings.rentWaivedAt,
       revenueModel: providers.revenueModel,
@@ -95,6 +118,9 @@ export async function rentOwedFor(bookingId: string): Promise<RentOwed | null> {
   if (!row) return null
   if (row.waivedAt) return null
   if (isHouse(row.revenueModel)) return null
+  // Before the policy existed nobody was asked what happened, and these were settled another
+  // way at the time. See REVIEW_STARTED_AT.
+  if (row.startTime < REVIEW_STARTED_AT) return null
 
   // A SESSION THAT DID NOT HAPPEN RAISES THE SAME QUESTION IN BOTH MODELS, and that is the
   // thing worth getting right here.
