@@ -441,10 +441,14 @@ export function WeekGrid({
               </div>
               {selected.paymentSource === 'rental' && (
                 <div className="text-xs text-ink-faint">
+                  {/* "no rent recorded" was the alarm for a session billed to nobody. Since rent
+                      is swept twelve hours after the session, that is now what every booking
+                      looks like to begin with — so it says what is true rather than raising an
+                      alarm Keoni would learn to ignore. */}
                   {selected.paidFromCredit
                     ? 'credited session'
                     : selected.rentalCents === null
-                      ? 'no rent recorded'
+                      ? 'rent not taken yet'
                       : 'rent'}
                 </div>
               )}

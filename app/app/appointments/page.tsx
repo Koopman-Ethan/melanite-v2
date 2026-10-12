@@ -16,6 +16,8 @@ import { appOrigin } from '@/lib/stripe/config'
 
 import { AppointmentActions } from './appointment-actions'
 import { closeoutWindowOpen } from '@/lib/end-of-use'
+import { tierForService } from '@/lib/rental-fees'
+import { getLiveSchedule } from '@/lib/rental/schedule'
 
 import { EndOfUseChecklist } from './end-of-use-checklist'
 import { PaymentLink } from './payment-link'
@@ -68,8 +70,22 @@ const timeLabel = (d: Date) =>
     timeZone: 'America/Denver',
   })
 
-function AppointmentCard({ appointment, origin }: { appointment: Appointment; origin: string }) {
+function AppointmentCard({
+  appointment,
+  origin,
+  dueCents,
+}: {
+  appointment: Appointment
+  origin: string
+  /** What this session WILL cost, for one that has not been swept yet. Null when the service
+   *  has no published fee. */
+  dueCents: number | null
+}) {
   const discounted = appointment.discountType !== 'none' && Number(appointment.discountValue) > 0
+
+  // Has the rent been taken yet? Null means no ledger row, which since 12 October is the
+  // ORDINARY state of a session for its first twelve hours rather than a fault.
+  const unsettled = appointment.paymentSource === 'rental' && appointment.rentalCents === null
 
   return (
     <li className="rounded-card border border-line bg-surface p-5">
@@ -126,17 +142,28 @@ function AppointmentCard({ appointment, origin }: { appointment: Appointment; or
                 <div className="text-lg font-semibold tabular-nums">$0.00</div>
                 <div className="text-xs text-ink-faint">credited session</div>
               </>
+            ) : unsettled ? (
+              /* NOT "$0.00 — no rent recorded". That was the alarm for a session that used the
+                 laser and was never billed, and it was correct while the fee was taken at the
+                 moment of booking. Rent is now swept twelve hours after the session ends, so
+                 every booking looks exactly like that for its first half-day — and a provider
+                 reading "$0.00, no rent recorded" on a session they are about to be charged
+                 $95 for would reasonably conclude it was free. */
+              <>
+                <div className="text-lg font-semibold tabular-nums text-ink-secondary">
+                  {dueCents === null ? '—' : usd(dueCents / 100)}
+                </div>
+                <div className="text-xs text-ink-faint">
+                  {dueCents === null ? 'no fee set' : 'rent due'}
+                </div>
+              </>
             ) : (
               <>
                 <div className="text-lg font-semibold tabular-nums">
                   {usd((appointment.rentalCents ?? 0) / 100)}
                 </div>
                 <div className="text-xs text-ink-faint">
-                  {appointment.rentalCents === null
-                    ? 'no rent recorded'
-                    : appointment.rentalCents === 0
-                      ? 'rent refunded'
-                      : 'rent'}
+                  {appointment.rentalCents === 0 ? 'rent refunded' : 'rent'}
                 </div>
               </>
             )
@@ -225,10 +252,25 @@ async function AppointmentList({
     )
   }
 
+  // The live schedule, loaded ONCE and mapped in code rather than queried per row — the same
+  // trick `app/app/book/page.tsx` uses for its dropdown, and for the same reason: a provider
+  // with a month of appointments would otherwise be a round trip each.
+  const schedule = await getLiveSchedule()
+  const feeFor = (serviceName: string): number | null => {
+    const tier = tierForService(serviceName)
+    if (!tier) return null
+    return schedule.byTier.get(tier.key)?.singleCents ?? tier.singleCents
+  }
+
   return (
     <ul className="space-y-3">
       {appointments.map((a) => (
-        <AppointmentCard key={a.id} appointment={a} origin={origin} />
+        <AppointmentCard
+          key={a.id}
+          appointment={a}
+          origin={origin}
+          dueCents={feeFor(a.serviceName)}
+        />
       ))}
     </ul>
   )
