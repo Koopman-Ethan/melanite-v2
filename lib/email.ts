@@ -851,6 +851,14 @@ export function bookingPaymentSummary(input: {
   rentCents?: number | null
   /** A credited session covered it, so nothing was charged and nothing is missing. */
   paidFromPack?: boolean
+  /** Keoni decided this session was not owed for. A decision on the record, never a gap. */
+  rentWaived?: boolean
+  /** True once the session is far enough past that the sweep should have taken the fee. Before
+   *  that, no ledger row is the ordinary state and not worth a word. */
+  rentPastDue?: boolean
+  /** Cancelled or missed, so the sweep deliberately never touches it and the fee waits for a
+   *  human. Not a billing failure. */
+  rentAwaitingDecision?: boolean
 }): string {
   const amount = `$${Number(input.price).toFixed(2)}`
 
@@ -861,6 +869,17 @@ export function bookingPaymentSummary(input: {
       // every other branch here answers.
       if (input.paidFromPack) return 'Laser rental, covered by a credited session — nothing charged'
       if (input.rentCents === null || input.rentCents === undefined) {
+        // NO LEDGER ROW IS NOT AUTOMATICALLY AN ALARM any more, and this line is where that was
+        // still being got wrong. It was written when the fee was taken at booking, so a missing
+        // row could only mean a session had slipped through. Rent is now swept twelve hours
+        // after the session, and three ordinary states share that shape: not due yet, waiting on
+        // Keoni, and settled by her deciding not to charge.
+        //
+        // Shouting NO FEE RECORDED at her about a fee she personally waived is how a report
+        // stops being read — and this one is the only alarm Melanite has.
+        if (input.rentWaived) return 'Laser rental — rent waived, nothing owed'
+        if (input.rentAwaitingDecision) return 'Laser rental — rent not taken, waiting on you'
+        if (!input.rentPastDue) return 'Laser rental — rent not due yet'
         return 'Laser rental — NO FEE RECORDED'
       }
       if (input.rentCents === 0) return 'Laser rental, refunded — nothing kept'

@@ -472,3 +472,51 @@ describe('the recipient', () => {
     expect(fresh.MELANITE_NOTIFY_EMAIL).toBe('someone.else@example.com')
   })
 })
+
+describe('the rental payment line, once rent is taken after the session', () => {
+  // A missing ledger row used to mean exactly one thing — a session that slipped through — so
+  // the line shouted NO FEE RECORDED and was right to. Since 12 October rent is swept twelve
+  // hours after the session, and three ordinary states look identical to it. Keoni's digest
+  // telling her a fee she personally waived was NOT RECORDED is how a report stops being read,
+  // and this is the only alarm Melanite has.
+  const rental = {
+    paymentSource: 'rental',
+    externalMethod: null,
+    price: '0.00',
+    rentCents: null,
+    paidFromPack: false,
+  }
+
+  it('says nothing is due yet for a session that has just finished', () => {
+    const line = bookingPaymentSummary({ ...rental, rentPastDue: false })
+    expect(line).toMatch(/not due yet/i)
+    expect(line).not.toMatch(/NO FEE RECORDED/)
+  })
+
+  it('says a cancelled or missed session is waiting on Keoni', () => {
+    const line = bookingPaymentSummary({
+      ...rental,
+      rentPastDue: true,
+      rentAwaitingDecision: true,
+    })
+    expect(line).toMatch(/waiting on you/i)
+    expect(line).not.toMatch(/NO FEE RECORDED/)
+  })
+
+  it('does not report a fee she waived as a failure', () => {
+    const line = bookingPaymentSummary({ ...rental, rentPastDue: true, rentWaived: true })
+    expect(line).toMatch(/waived/i)
+    expect(line).not.toMatch(/NO FEE RECORDED/)
+  })
+
+  it('still shouts about a session that is genuinely past due and unbilled', () => {
+    // The alarm has to survive all of the above, or the fix has simply silenced it.
+    const line = bookingPaymentSummary({
+      ...rental,
+      rentPastDue: true,
+      rentAwaitingDecision: false,
+      rentWaived: false,
+    })
+    expect(line).toMatch(/NO FEE RECORDED/)
+  })
+})

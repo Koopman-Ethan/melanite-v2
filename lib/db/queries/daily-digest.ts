@@ -66,6 +66,12 @@ export interface DigestAppointment {
    *  for the rest of time — and an email that cries wolf about everything is one nobody reads,
    *  which would cost Melanite the only alarm it has. */
   unbilled: boolean
+  /** Keoni decided this one was not owed for. A decision, never a gap. */
+  rentWaived: boolean
+  /** Far enough past that the sweep should have taken the fee by now. */
+  rentPastDue: boolean
+  /** Cancelled or missed, so the sweep never touches it and the fee waits on a human. */
+  rentAwaitingDecision: boolean
   /** How the suite was signed off after this session, or null if nobody did.
    *
    *  A left join rather than a correlated subquery: `end_of_use_checklists` is unique on
@@ -112,6 +118,11 @@ function asDigestAppointment(row: RawDigestAppointment): DigestAppointment {
       // A cancelled or missed session is never swept; whether anything is owed is Keoni's call
       // and it waits in the queue rather than being flagged as a billing failure here.
       (row.status === 'upcoming' || row.status === 'completed'),
+    // Derived here beside `unbilled` rather than at render, so one place decides what a missing
+    // ledger row means and the email cannot reach a different answer from the alarm.
+    rentWaived: rentWaivedAt !== null,
+    rentPastDue: endTime.getTime() < Date.now() - CLOSEOUT_GRACE_HOURS * 60 * 60_000,
+    rentAwaitingDecision: row.status === 'cancelled' || row.status === 'no_show',
     // A rental booking has no client — see `lib/booking-labels.ts`.
     clientName: clientLabel(row.clientName),
     closeout:
@@ -128,7 +139,13 @@ function asDigestAppointment(row: RawDigestAppointment): DigestAppointment {
 
 type RawDigestAppointment = Omit<
   DigestAppointment,
-  'closeout' | 'clientName' | 'unbilled' | 'rentalCents'
+  | 'closeout'
+  | 'clientName'
+  | 'unbilled'
+  | 'rentalCents'
+  | 'rentWaived'
+  | 'rentPastDue'
+  | 'rentAwaitingDecision'
 > & {
   rentalCents: number | null
   /** Whether any rental_fee row exists at all, refund included. */
