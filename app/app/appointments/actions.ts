@@ -134,7 +134,17 @@ export async function cancelBooking(
 
   // Checked BEFORE anything is written. A cancellation that went through and then complained
   // about the reason would have freed the slot and taken the explanation with it.
-  const held = await rentOwedFor(bookingId)
+  // Asked only inside the late window. `rentOwedFor` cannot answer this yet — it reads the
+  // booking's status, and the booking is still `upcoming` for a few lines yet — so the same
+  // question is put directly: how much notice is Melanite actually getting?
+  //
+  // Outside the window the slot goes back with time for somebody else to take it, nothing is
+  // owed, and collecting a written reason would be paperwork about a non-event.
+  const cancelSettings = await getCheckoutSettings()
+  const hoursNotice = (booking.startTime.getTime() - Date.now()) / 3_600_000
+  const isLate = hoursNotice < cancelSettings.lateCancellationHours
+
+  const held = isLate ? await rentOwedFor(bookingId) : null
   const outcomeReason = reason.trim()
 
   if (held && outcomeReason.length < MIN_REASON) {
@@ -177,7 +187,13 @@ export async function cancelBooking(
 
   await db
     .update(bookings)
-    .set({ status: 'cancelled', outcomeReason: outcomeReason || null })
+    .set({
+      status: 'cancelled',
+      outcomeReason: outcomeReason || null,
+      // Stamped so "was this late?" stays answerable afterwards. Without it the queue cannot
+      // tell a cancellation made an hour before from one made a fortnight ahead.
+      cancelledAt: new Date(),
+    })
     .where(eq(bookings.id, bookingId))
 
   // Only a PENDING link is cancelled. A paid one is never silently voided — refunds are

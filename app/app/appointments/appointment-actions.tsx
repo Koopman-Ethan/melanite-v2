@@ -34,7 +34,14 @@ import {
  *  a provider is not told "too short" after pressing it. */
 const MIN_REASON = 10
 
-export function AppointmentActions({ appointment }: { appointment: Appointment }) {
+export function AppointmentActions({
+  appointment,
+  lateCancellationHours,
+}: {
+  appointment: Appointment
+  /** From `platform_settings`, so Keoni can move the window without a deploy. */
+  lateCancellationHours: number
+}) {
   const [pending, startTransition] = useTransition()
   const [state, setState] = useState<ActionState>({})
   const [confirming, setConfirming] = useState<'cancel' | 'no_show' | null>(null)
@@ -110,7 +117,22 @@ export function AppointmentActions({ appointment }: { appointment: Appointment }
   const holdsRent =
     isRental && (appointment.paidFromCredit || appointment.rentalCents !== 0)
   const owesSplit = !isRental && Number(appointment.price) > 0
-  const asksWhy = holdsRent || owesSplit
+
+  // ...and only inside the late window, which is Keoni's rule of 12 October. A cancellation a
+  // week out hands the slot back with time for somebody else to take it, so nothing is owed and
+  // asking for a written reason collects paperwork about a non-event — every one of those in
+  // her queue makes the ones that matter harder to see.
+  //
+  // A no-show cannot be marked before the appointment has started, so it is always late.
+  // Compared as dates rather than via `Date.now()`, which the compiler rejects as an impure
+  // call during render — the same shape `isPast` above already uses.
+  const lateWindowOpens = new Date(
+    appointment.startTime.getTime() - lateCancellationHours * 3_600_000,
+  )
+  const isLate = lateWindowOpens <= new Date()
+
+  const asksWhy = (holdsRent || owesSplit) && isLate
+  const noShowAsksWhy = holdsRent || owesSplit
 
   const rentLabel = appointment.paidFromCredit
     ? 'pack session'
@@ -131,6 +153,7 @@ export function AppointmentActions({ appointment }: { appointment: Appointment }
       : `Your ${rentLabel} has not been taken. Melanite decides whether it is owed.`
 
   const reasonOk = !asksWhy || reason.trim().length >= MIN_REASON
+  const noShowReasonOk = !noShowAsksWhy || reason.trim().length >= MIN_REASON
 
   /** The reason box, worded for which of the two endings this is.
    *
@@ -143,8 +166,8 @@ export function AppointmentActions({ appointment }: { appointment: Appointment }
    *  somebody else can take it; a no-show burns it on a single shared machine that nobody could
    *  book. That is usually the difference between waiving the fee and charging it, so the
    *  prompt says so rather than leaving her to infer it from free text. */
-  const reasonBox = (kind: 'cancel' | 'no_show') =>
-    asksWhy ? (
+  const reasonBox = (kind: 'cancel' | 'no_show', force = false) =>
+    force || asksWhy ? (
     <label className="block space-y-1.5">
       <span className="text-xs font-medium text-ink">
         {kind === 'no_show' ? 'What happened? Nobody came.' : 'What happened?'}
@@ -183,7 +206,7 @@ export function AppointmentActions({ appointment }: { appointment: Appointment }
               ? `Mark this as a no-show — the hour is gone and nobody else could book it. ${rentSentence} You will hear once it has been looked at.`
               : `Mark ${appointment.clientName} as a no-show. Charging the fee uses the card they left on file — if there is none, the status is still recorded and nothing is charged.`}
           </p>
-          {reasonBox('no_show')}
+          {noShowAsksWhy ? reasonBox('no_show', true) : null}
           <div className="flex flex-wrap gap-2">
             {canCharge && (
               <Button
@@ -198,7 +221,7 @@ export function AppointmentActions({ appointment }: { appointment: Appointment }
             <Button
               size="sm"
               variant={canCharge ? 'outline' : 'danger'}
-              disabled={pending || !reasonOk}
+              disabled={pending || !noShowReasonOk}
               onClick={() => run((id) => markNoShow(id, reason, false))}
             >
               {pending ? 'Working…' : canCharge ? 'No-show, no fee' : 'Mark as no-show'}

@@ -12,6 +12,7 @@ import {
 } from '@/lib/db/schema'
 
 import { getProviderSharePct } from '@/lib/db/queries/admin-tools'
+import { getCheckoutSettings } from '@/lib/db/queries/checkout'
 import { isHouse, sharesRevenue } from '@/lib/revenue-model'
 
 import { chargeRentalFee } from './charge'
@@ -61,6 +62,37 @@ import { feeForService } from './schedule'
  */
 export const REVIEW_STARTED_AT = new Date('2026-10-06T00:00:00-06:00')
 
+/** Was this session called off late enough to be anybody's decision?
+ *
+ *  Keoni's rule, 12 October: the provider is asked what happened only when a cancellation falls
+ *  inside `platform_settings.late_cancellation_hours` — 24 by default, and configurable, so she
+ *  can move it without a deploy.
+ *
+ *  The reasoning is the hour, not the money. A cancellation a week out hands the slot back with
+ *  time for somebody else to take it, so Melanite has lost nothing and there is nothing to
+ *  decide; asking for a written reason would be collecting paperwork about a non-event, and
+ *  every one of those in the queue makes the ones that matter harder to see. Inside the window
+ *  the hour is realistically gone.
+ *
+ *  A NO-SHOW IS ALWAYS LATE, by definition — it cannot be marked until the appointment has
+ *  started, so there was never any notice at all.
+ *
+ *  Null `cancelledAt` means a cancellation from before the column existed. Treated as NOT late,
+ *  because the alternative is asking Keoni to adjudicate a pile of history nobody recorded the
+ *  timing of — the same reasoning as REVIEW_STARTED_AT, which already excludes most of them.
+ */
+export function cancelledLate(
+  booking: { status: string; startTime: Date; cancelledAt: Date | null },
+  lateHours: number,
+): boolean {
+  if (booking.status === 'no_show') return true
+  if (booking.status !== 'cancelled') return false
+  if (!booking.cancelledAt) return false
+
+  const noticeHours = (booking.startTime.getTime() - booking.cancelledAt.getTime()) / 3_600_000
+  return noticeHours < lateHours
+}
+
 /** What is riding on a booking that did not happen. */
 export type RentOwed =
   /** Money already taken. A decision to let it go gives this back. */
@@ -97,6 +129,7 @@ export async function rentOwedFor(bookingId: string): Promise<RentOwed | null> {
       paymentSource: bookings.paymentSource,
       status: bookings.status,
       startTime: bookings.startTime,
+      cancelledAt: bookings.cancelledAt,
       serviceName: services.name,
       waivedAt: bookings.rentWaivedAt,
       revenueModel: providers.revenueModel,
@@ -121,6 +154,11 @@ export async function rentOwedFor(bookingId: string): Promise<RentOwed | null> {
   // Before the policy existed nobody was asked what happened, and these were settled another
   // way at the time. See REVIEW_STARTED_AT.
   if (row.startTime < REVIEW_STARTED_AT) return null
+
+  // Cancelled with proper notice is nobody's decision — the slot went back in time for somebody
+  // else to use it. See `cancelledLate`.
+  const settings = await getCheckoutSettings()
+  if (!cancelledLate(row, settings.lateCancellationHours)) return null
 
   // A SESSION THAT DID NOT HAPPEN RAISES THE SAME QUESTION IN BOTH MODELS, and that is the
   // thing worth getting right here.

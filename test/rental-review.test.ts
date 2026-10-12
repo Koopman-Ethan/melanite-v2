@@ -49,11 +49,15 @@ async function heldBooking(status: 'cancelled' | 'no_show', reason: string | nul
       const rows = (await sql.query(
         `INSERT INTO bookings
            (provider_id, provider_service_id, original_price, price, payment_source,
-            duration_mins, start_time, end_time, status, outcome_reason, notes)
+            duration_mins, start_time, end_time, status, outcome_reason, notes, cancelled_at)
          VALUES ($1, $2, '0.00', '0.00', 'rental', 60,
                  now() - ($3::int || ' hours')::interval,
                  now() - (($3::int - 1) || ' hours')::interval,
-                 $4, $5, $6)
+                 $4, $5, $6,
+                 -- An hour's notice, so these are LATE cancellations. Without a cancelled_at
+                 -- they read as proper notice and are correctly nobody's decision, which would
+                 -- have every assertion below passing for the wrong reason.
+                 now() - (($3::int + 1) || ' hours')::interval)
          RETURNING id`,
         [providerId, providerServiceId, String(back), status, reason, TAG],
       )) as { id: string }[]
@@ -361,11 +365,13 @@ describe('what a 50/50 provider owes for a session that did not happen', () => {
           `INSERT INTO bookings
              (provider_id, provider_service_id, client_name, original_price, discount_type,
               discount_value, price, payment_source, duration_mins, start_time, end_time,
-              status, notes)
+              status, notes, cancelled_at)
            VALUES ($1, $2, 'ZZ split review', '125.00', 'amount', '10.00', '115.00',
                    'checkout_link', 60,
                    now() - ($3::int || ' hours')::interval,
-                   now() - (($3::int - 1) || ' hours')::interval, 'cancelled', $4)
+                   now() - (($3::int - 1) || ' hours')::interval, 'cancelled', $4,
+                   -- An hour's notice, so it is a LATE cancellation and therefore a decision.
+                   now() - (($3::int + 1) || ' hours')::interval)
            RETURNING id`,
           [prov.id, ps.id, String(back), TAG],
         )) as { id: string }[]
@@ -421,5 +427,41 @@ describe('sessions from before the policy existed', () => {
 
     const queue = await getReviewQueue()
     expect(queue.find((q) => q.id === rows[0].id)).toBeUndefined()
+  })
+})
+
+describe('how much notice was given', () => {
+  it('asks nothing of a cancellation made well ahead', async () => {
+    // Keoni's rule of 12 October: the reason box and the queue item are for cancellations inside
+    // `late_cancellation_hours`. A week's notice hands the slot back in time for somebody else,
+    // so Melanite has lost nothing and there is nothing to decide — and a queue full of
+    // non-events is one where the real ones stop being visible.
+    const id = await heldBooking('cancelled', 'Client rebooked for next month.')
+
+    // Cancelled a fortnight before it was due, rather than an hour.
+    await sql.query(
+      `UPDATE bookings SET cancelled_at = start_time - interval '14 days' WHERE id = $1`,
+      [id],
+    )
+
+    expect(await rentOwedFor(id)).toBeNull()
+    const queue = await getReviewQueue()
+    expect(queue.find((q) => q.id === id)).toBeUndefined()
+  })
+
+  it('still asks when the notice is short', async () => {
+    const id = await heldBooking('cancelled', 'Client cancelled an hour before.')
+    await sql.query(
+      `UPDATE bookings SET cancelled_at = start_time - interval '1 hour' WHERE id = $1`,
+      [id],
+    )
+    expect(await rentOwedFor(id)).not.toBeNull()
+  })
+
+  it('always asks about a no-show, whatever the clock says', async () => {
+    // It cannot be marked before the appointment has started, so there was never any notice.
+    const id = await heldBooking('no_show', 'Nobody came.')
+    await sql.query(`UPDATE bookings SET cancelled_at = NULL WHERE id = $1`, [id])
+    expect(await rentOwedFor(id)).not.toBeNull()
   })
 })

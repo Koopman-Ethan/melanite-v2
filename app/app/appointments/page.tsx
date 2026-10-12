@@ -18,6 +18,7 @@ import { AppointmentActions } from './appointment-actions'
 import { closeoutWindowOpen } from '@/lib/end-of-use'
 import { tierForService } from '@/lib/rental-fees'
 import { sharesRevenue } from '@/lib/revenue-model'
+import { getCheckoutSettings } from '@/lib/db/queries/checkout'
 import { getLiveSchedule } from '@/lib/rental/schedule'
 
 import { EndOfUseChecklist } from './end-of-use-checklist'
@@ -75,9 +76,13 @@ function AppointmentCard({
   appointment,
   origin,
   dueCents,
+  lateCancellationHours,
 }: {
   appointment: Appointment
   origin: string
+  /** From `platform_settings`. Cancelling with more notice than this asks for no reason, and
+   *  nothing is owed — Keoni's rule of 12 October. */
+  lateCancellationHours: number
   /** What this session WILL cost, for one that has not been swept yet. Null when the service
    *  has no published fee. */
   dueCents: number | null
@@ -187,7 +192,10 @@ function AppointmentCard({
       </div>
 
       <div className="mt-4">
-        <AppointmentActions appointment={appointment} />
+        <AppointmentActions
+          appointment={appointment}
+          lateCancellationHours={lateCancellationHours}
+        />
         {appointment.checkoutToken && appointment.checkoutStatus && appointment.checkoutExpiresAt && (
           <PaymentLink
             bookingId={appointment.id}
@@ -256,7 +264,7 @@ async function AppointmentList({
   // The live schedule, loaded ONCE and mapped in code rather than queried per row — the same
   // trick `app/app/book/page.tsx` uses for its dropdown, and for the same reason: a provider
   // with a month of appointments would otherwise be a round trip each.
-  const schedule = await getLiveSchedule()
+  const [schedule, settings] = await Promise.all([getLiveSchedule(), getCheckoutSettings()])
   const feeFor = (serviceName: string): number | null => {
     const tier = tierForService(serviceName)
     if (!tier) return null
@@ -271,6 +279,7 @@ async function AppointmentList({
           appointment={a}
           origin={origin}
           dueCents={feeFor(a.serviceName)}
+          lateCancellationHours={settings.lateCancellationHours}
         />
       ))}
     </ul>

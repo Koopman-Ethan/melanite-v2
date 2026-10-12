@@ -201,6 +201,15 @@ async function heldRent(): Promise<QueueItem[]> {
         // opens on seventeen cancellations going back to August, which is how it stops being
         // read at all.
         sql`${bookings.startTime} >= ${REVIEW_STARTED_AT.toISOString()}::timestamptz`,
+        // Late, or a no-show. A cancellation with proper notice handed the slot back in time
+        // for somebody else and is nobody's decision — see `cancelledLate`. Expressed in SQL
+        // rather than filtered afterwards so the count on the page is the count in the list.
+        sql`(
+          ${bookings.status} = 'no_show'
+          OR (${bookings.cancelledAt} IS NOT NULL
+              AND ${bookings.startTime} - ${bookings.cancelledAt}
+                  < make_interval(hours => (SELECT late_cancellation_hours FROM platform_settings WHERE id = 1)))
+        )`,
         isNull(bookings.rentalReviewedAt),
         // A waived fee is a decision on the record, not an oversight.
         isNull(bookings.rentWaivedAt),

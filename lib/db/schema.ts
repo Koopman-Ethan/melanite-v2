@@ -713,6 +713,19 @@ export const bookings = pgTable('bookings', {
   feeWaivedAt: timestamp({ withTimezone: true }),
   feeWaivedBy: uuid().references(() => providers.id, { onDelete: 'set null' }),
 
+  /** When the appointment was called off.
+   *
+   *  Recorded because "was this cancelled late?" is unanswerable afterwards without it, and from
+   *  12 October that question decides real money: a cancellation inside
+   *  `platform_settings.late_cancellation_hours` asks the provider what happened and goes to
+   *  Keoni; one made a week ahead hands the slot back in good time, costs Melanite nothing, and
+   *  is nobody's decision.
+   *
+   *  The status alone cannot answer it. `roomBookings` has carried the same column for the same
+   *  reason since v1 — this one was simply never added, because until now nothing downstream
+   *  cared when a cancellation happened, only that it had. */
+  cancelledAt: timestamp({ withTimezone: true }),
+
   /** The provider's account of why this appointment did not happen.
    *
    *  Required by the UI on every cancellation and every no-show — Keoni's rule, in her words:
