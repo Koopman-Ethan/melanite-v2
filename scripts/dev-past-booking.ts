@@ -3,7 +3,7 @@ import '../envConfig'
 import { and, eq } from 'drizzle-orm'
 
 import { bookings, providerServices, providers, services } from '@/lib/db/schema'
-import { chargeRentalFee } from '@/lib/rental/charge'
+import { CLOSEOUT_GRACE_HOURS } from '@/lib/end-of-use'
 import { feeForService } from '@/lib/rental/schedule'
 
 import { describeDatabase, requireEnv } from '../lib/env-guard'
@@ -20,14 +20,17 @@ import { db } from './db'
 // future one is always a mistake, and `markNoShow` refuses it server-side. So testing the refund
 // means waiting for a booking to age, which nobody is going to do.
 //
-// IT MAKES A REAL CHARGE. The whole point is the refund at the end of it, and `refundRentalFee`
-// refunds an actual Stripe PaymentIntent — a hand-written ledger row with an invented intent id
-// would fail at Stripe with "No such payment_intent", which is a worse lie than not seeding at
-// all. So this goes through `chargeRentalFee`, the same function the booking path calls.
+// IT LEAVES THE FEE UNPAID, which is the whole point since 12 October.
 //
-// Since 7 October the refund is no longer the next step. Marking the no-show HOLDS the fee and
-// queues it for Keoni, so testing the whole path means seeding here, marking it as the provider,
-// and then deciding as an admin in `/app/admin/queue`.
+// Rent is no longer taken at booking; it is swept twelve hours after the session ends, by
+// `lib/rental/settle.ts`. A seeded past booking with no ledger row is exactly the state the
+// sweep exists to find, and `--hours-ago` puts a session on either side of the grace period:
+//
+//   --hours-ago 2     inside the window, so the sweep must IGNORE it
+//   --hours-ago 20    past due, so the sweep must CHARGE it
+//
+// It used to charge inline, because what was being tested was the refund on a no-show. Neither
+// half of that is true any more: nothing refunds automatically, and nothing charges at booking.
 //
 // The booking is left `upcoming` deliberately. That is the real state of an appointment nobody
 // has closed out: the hour has passed and the provider has not said what happened.
@@ -183,28 +186,22 @@ async function main() {
     return
   }
 
-  // A real charge, so there is a real payment to refund.
-  const charged = await chargeRentalFee(bookingId)
-
-  if ('error' in charged) {
-    console.error(`  FAILED   the rental fee did not go through: ${charged.error}`)
-    process.exitCode = 1
-    return
-  }
-  if ('skipped' in charged) {
-    console.log(`  skipped  ${charged.skipped}`)
-    return
-  }
-
+  const dueIn = hoursAgo - CLOSEOUT_GRACE_HOURS
   console.log(
-    `  charged  $${(charged.charged.amountCents / 100).toFixed(2)} to the card ending ${provider.cardLast4}\n`,
+    `  unpaid   $${(fee / 100).toFixed(2)} owed, nothing charged yet (card ends ${provider.cardLast4})`,
   )
-  console.log('Now open Appointments as that provider. "Completed" and "No-show" are both there,')
-  console.log('because the hour has passed.')
+  console.log(
+    dueIn >= 0
+      ? `  due      ${dueIn}h past the ${CLOSEOUT_GRACE_HOURS}h grace - the sweep will take it`
+      : `  not due  ${-dueIn}h of the ${CLOSEOUT_GRACE_HOURS}h grace left - the sweep must skip it`,
+  )
   console.log('')
-  console.log('No-show now ASKS WHAT HAPPENED and holds the fee — it does not refund. The session')
-  console.log('then appears in /app/admin/queue with what you typed, for Keoni to refund or let')
-  console.log('stand. Charges nets to zero only once she refunds it.')
+  console.log('To take it now rather than waiting for the sweep:')
+  console.log('  /app/admin/revenue -> "Settle rent now"')
+  console.log('')
+  console.log('Or open Appointments as that provider: "Completed" and "No-show" are both')
+  console.log('there, because the hour has passed. A no-show ASKS WHAT HAPPENED and is never')
+  console.log('swept - it goes to /app/admin/queue for Keoni to decide whether rent is owed.')
 }
 
 main().catch((err) => {

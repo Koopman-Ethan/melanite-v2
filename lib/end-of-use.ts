@@ -455,11 +455,24 @@ export function reportedLabelsFor(keys: readonly string[]): string[] {
  * Moved here from `lib/equipment-checks.ts` when the before/after photographs were dropped; it was
  * the only thing in that module still wanted, and the rest went with the brackets.
  */
+/** How long after a session ends a provider still has to deal with it.
+ *
+ *  ONE NUMBER, THREE CONSEQUENCES, and they have to agree. It is how long the close-out form
+ *  stays open (`closeoutWindowOpen`), how long before a missing close-out is Keoni's problem
+ *  rather than the provider's (`getSessionsWithoutCloseout`), and — since October — how long
+ *  before the rental fee is swept and charged (`lib/rental/settle.ts`).
+ *
+ *  That last one is why this is now exported rather than written out three times. The moment a
+ *  provider can no longer file a close-out is the moment the session is unambiguously history,
+ *  so it is the earliest honest moment to bill for it. If the two ever drifted apart, somebody
+ *  would be charged for a session they were still allowed to tell us had not happened. */
+export const CLOSEOUT_GRACE_HOURS = 12
+
 export function closeoutWindowOpen(
   session: { startTime: Date; endTime: Date },
   now: Date = new Date(),
 ): boolean {
   const opensAt = session.startTime.getTime() - 60 * 60_000
-  const closesAt = session.endTime.getTime() + 12 * 60 * 60_000
+  const closesAt = session.endTime.getTime() + CLOSEOUT_GRACE_HOURS * 60 * 60_000
   return now.getTime() >= opensAt && now.getTime() <= closesAt
 }

@@ -743,6 +743,30 @@ export const bookings = pgTable('bookings', {
    *  `lib/db/queries/review-queue.ts`, which derives the whole queue rather than keeping one. */
   rentalReviewedAt: timestamp({ withTimezone: true }),
   rentalReviewedBy: uuid().references(() => providers.id, { onDelete: 'set null' }),
+
+  /** A rental fee the sweep tried to take and could not.
+   *
+   *  DELIBERATELY NOT `feeChargeFailedAt`, which is the CLIENT's no-show fee. Sharing that
+   *  column would put rental rows into the `failed_fee` queue, where they render with
+   *  `clientLabel(null)` as the person and `bookings.price` — forced to zero on a rental
+   *  booking — as the amount. A queue item naming nobody, for $0.00.
+   *
+   *  This exists at all because the charge moved off the request. While a provider was sitting
+   *  in front of the booking form, a decline was a message they read and acted on; nothing
+   *  needed recording. Charged twelve hours later by a sweep, a decline with nowhere to go is
+   *  money silently never collected. */
+  rentChargeFailedAt: timestamp({ withTimezone: true }),
+  rentChargeError: text(),
+  /** Stops a dead card generating a Stripe decline on every run — and, with receipts on, a wall
+   *  of email. The sweep gives up after a handful and leaves it to Keoni. */
+  rentChargeAttempts: integer().notNull().default(0),
+
+  /** Keoni deciding this session's rent is not worth pursuing.
+   *
+   *  The counterpart to `feeWaivedAt` and the same distinction: "looked at, and no" has to be
+   *  tellable from "nobody has looked", or the queue never empties and stops being read. */
+  rentWaivedAt: timestamp({ withTimezone: true }),
+  rentWaivedBy: uuid().references(() => providers.id, { onDelete: 'set null' }),
 }, (t) => [
   index().on(t.providerId, t.startTime),
   index().on(t.startTime, t.endTime),

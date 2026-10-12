@@ -6,6 +6,7 @@ import { db } from '@/lib/db'
 import { paysRentSql } from '@/lib/db/revenue-model'
 import { bookings, ledgerEntries, providerServices, providers, services } from '@/lib/db/schema'
 import { toMoney } from '@/lib/money'
+import { notifyProviderCharged } from '@/lib/notify-melanite'
 import { feeForService } from '@/lib/rental/schedule'
 import { isHouse, paysRent } from '@/lib/revenue-model'
 import { StripeApiError, stripePost, stripeWritesEnabled } from '@/lib/stripe/client'
@@ -212,10 +213,14 @@ export async function chargeRentalFee(bookingId: string): Promise<RentalChargeRe
           `[rental] charge FAILED for booking ${booking.id} — not a decline: ` +
             `${err.status} ${err.stripeCode ?? ''} ${err.message}`,
         )
+        await recordRentFailure(
+          booking.id,
+          `Melanite could not take the fee: ${err.status} ${err.stripeCode ?? ''}`.trim(),
+        )
         return {
           error:
-            'Melanite could not take the rental fee just now, so the booking was not made. ' +
-            'Nothing has been charged. Try again shortly, and tell Melanite if it keeps happening.',
+            'Melanite could not take the rental fee just now. Nothing has been charged. ' +
+            'It will be tried again, and Melanite can see that it failed.',
         }
       }
 
@@ -227,6 +232,7 @@ export async function chargeRentalFee(bookingId: string): Promise<RentalChargeRe
       // The reason is logged rather than thrown away: a provider reporting "it says declined"
       // is unanswerable without it, and it is the only record of why.
       console.warn(`[rental] card declined for booking ${booking.id}: ${err.message}`)
+      await recordRentFailure(booking.id, err.message)
       return { error: 'Your card was declined. Try again, or use a different card.' }
     }
     throw err
@@ -257,7 +263,52 @@ export async function chargeRentalFee(bookingId: string): Promise<RentalChargeRe
     })
     .returning({ id: ledgerEntries.id })
 
+  // A retry that works takes the item out of the queue rather than leaving a solved problem
+  // sitting in it. Same reasoning as `lib/stripe/fees.ts` clearing its own stamp.
+  await db
+    .update(bookings)
+    .set({ rentChargeFailedAt: null, rentChargeError: null })
+    .where(eq(bookings.id, booking.id))
+
+  // The receipt, sent from HERE rather than from the caller.
+  //
+  // It used to live in `createBooking`, which was the only place a charge could succeed. Now
+  // there are three — the sweep, Keoni retrying a failure, and the dev seeding script — and a
+  // receipt that only one of them sends is a provider whose card was charged with no word about
+  // it. This is the single point where money has definitely moved.
+  //
+  // Best effort, and after the ledger row: a bounced email must never undo a charge that went
+  // through.
+  await notifyProviderCharged({
+    providerId: booking.providerId,
+    serviceName: booking.serviceName,
+    when: booking.startTime,
+    amountCents,
+  })
+
   return { charged: { amountCents, ledgerEntryId: entry.id } }
+}
+
+/**
+ * Stamps a failed rental charge onto the booking so somebody sees it.
+ *
+ * The rental path had nothing like this, and did not need it: the only caller was the booking
+ * form, with a provider reading the result. Now that the sweep charges twelve hours after the
+ * session, a decline with nowhere to go is money quietly never collected — so it goes on the
+ * booking, which is where `review-queue.ts` looks.
+ *
+ * `rentChargeAttempts` increments on every failure and is never reset by a later failure, only
+ * by a success. The sweep's predicate uses it to stop retrying a dead card forever.
+ */
+async function recordRentFailure(bookingId: string, reason: string): Promise<void> {
+  await db
+    .update(bookings)
+    .set({
+      rentChargeFailedAt: new Date(),
+      rentChargeError: reason,
+      rentChargeAttempts: sql`${bookings.rentChargeAttempts} + 1`,
+    })
+    .where(eq(bookings.id, bookingId))
 }
 
 /**

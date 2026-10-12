@@ -2,6 +2,8 @@
 
 import { requireAdmin } from '@/lib/auth/dal'
 import { runEveningDigest } from '@/lib/digest/run'
+import { toMoney } from '@/lib/money'
+import { settleDueRent } from '@/lib/rental/settle'
 import { isProduction } from '@/lib/env-guard'
 
 export interface DigestState {
@@ -66,5 +68,44 @@ export async function sendDigestPreview(
   } catch (error) {
     console.error('[digest] the rehearsal send failed', error)
     return { error: 'The digest could not be built. The server log has the detail.' }
+  }
+}
+
+/** Collects every rental fee that is due now, rather than waiting for tonight.
+ *
+ *  THE BUTTON EXISTS BECAUSE CRON IS NOT TRUSTWORTHY ENOUGH TO BE THE ONLY WAY. Four things
+ *  drain the queue — the nightly digest, the settle-rent route, an opportunistic trigger on app
+ *  page loads, and this. None of them is load-bearing, because every item is idempotent and
+ *  stays eligible until it is charged, waived or decided.
+ *
+ *  Unlike `sendDigestPreview` this is NOT refused in production. It takes money that is already
+ *  owed, twelve hours after the session, on exactly the terms the provider accepted — so there
+ *  is nothing about doing it early that needs protecting against. It is the lever Keoni pulls
+ *  when something is obviously stuck.
+ */
+export async function settleRentNow(
+  _prev: DigestState,
+  _formData: FormData,
+): Promise<DigestState> {
+  await requireAdmin()
+
+  try {
+    const r = await settleDueRent()
+
+    if (r.charged === 0 && r.failed === 0) {
+      return { success: 'Nothing was due. Every session past its grace period is settled.' }
+    }
+
+    const parts = [
+      `${r.charged} session${r.charged === 1 ? '' : 's'} charged, $${toMoney(r.chargedCents)}`,
+      ...(r.failed > 0 ? [`${r.failed} FAILED — see the queue`] : []),
+      // -1 is the sentinel for "the batch was full", i.e. there is more behind this run.
+      ...(r.remaining !== 0 ? ['more still due — run it again'] : []),
+    ]
+
+    return { success: parts.join(' · ') }
+  } catch (error) {
+    console.error('[settle] the manual sweep failed', error)
+    return { error: 'The sweep could not run. The server log has the detail.' }
   }
 }

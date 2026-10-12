@@ -6,6 +6,7 @@ import { GROWTH_HUB } from '@/lib/product-names'
 import { getAdminRevenue } from '@/lib/db/queries/revenue'
 
 import { DigestButton } from './digest-button'
+import { SettleButton } from './settle-button'
 
 export const metadata: Metadata = { title: 'Revenue · Melanite Admin' }
 
@@ -398,6 +399,24 @@ export default async function AdminRevenuePage() {
           Vercel Cron only ever fires against the production deployment, so without this there
           is nowhere to see the digest before it reaches Keoni. The action re-checks the
           environment itself — hiding a button is presentation, not a control. */}
+      {/* Rent collection, and NOT gated on the environment — the sweep takes money already owed
+          on terms already accepted, so there is nothing about pulling it early that needs
+          protecting against. The digest below is gated because that one emails Keoni. */}
+      <section className="space-y-3 rounded-card border border-line p-5">
+        <div>
+          <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">
+            Rent collection
+          </h2>
+          <p className="mt-1 text-xs text-ink-faint">
+            A session&rsquo;s rent is taken twelve hours after it ends — the same window a
+            provider has to tell you it did not happen. That runs on its own, several times over,
+            so this is only here for when something is obviously stuck. Anything it cannot
+            charge lands in the queue.
+          </p>
+        </div>
+        <SettleButton />
+      </section>
+
       {!isProduction() && (
         <section className="space-y-3 rounded-card border border-dashed border-line p-5">
           <div>

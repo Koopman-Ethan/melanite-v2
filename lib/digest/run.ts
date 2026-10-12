@@ -6,6 +6,7 @@ import { db } from '@/lib/db'
 import { webhookEvents } from '@/lib/db/schema'
 import { labelsFor, missingKeys } from '@/lib/end-of-use'
 import { getDigestDay, toCollectCents } from '@/lib/db/queries/daily-digest'
+import { settleDueRent } from '@/lib/rental/settle'
 import { getLaserHours } from '@/lib/db/queries/availability'
 import {
   MELANITE_NOTIFY_EMAIL,
@@ -40,6 +41,12 @@ export interface DigestRunResult {
   rent: string
   /** Sessions that used the laser with no rent recorded — a bug, not a quiet day. */
   unbilled: number
+  /** What this run collected, and what it could not. The sweep is reported by the digest so a
+   *  stalled one shows up in Keoni's inbox the next morning rather than at month end — which,
+   *  with four separate things able to drain the queue, is the only way anybody would notice. */
+  settledCount: number
+  settledCents: number
+  settleFailed: number
   delivered: boolean
   /** Set when nothing was sent because this day had already gone out. */
   skipped?: 'already-sent'
@@ -92,11 +99,27 @@ export async function runEveningDigest(
         toCollect: '0.00',
         rent: '0.00',
         unbilled: 0,
+        settledCount: 0,
+        settledCents: 0,
+        settleFailed: 0,
         delivered: false,
         skipped: 'already-sent',
       }
     }
   }
+
+  // Collect the rent BEFORE reading the day, so the digest reports what it just took rather
+  // than describing a day's sessions as unbilled and then billing them a millisecond later.
+  //
+  // Riding inside the digest is deliberate and is what makes the sweep independent of the Vercel
+  // plan tier. Hobby allows two cron jobs and both are already this endpoint (DST), so there is
+  // no free slot for a dedicated schedule — and a dedicated schedule is not needed, because
+  // every item is idempotent and the predicate has no upper time bound. On Pro the sweep also
+  // gets its own hourly route and this call becomes a harmless no-op.
+  //
+  // OUTSIDE the already-sent guard above on purpose: `force` makes the admin rehearsal button
+  // re-send without consuming the day's key, and rent still wants collecting either way.
+  const settled = await settleDueRent()
 
   const data = await getDigestDay(denverDay)
 
@@ -160,6 +183,9 @@ export async function runEveningDigest(
     toCollect,
     rent: toMoney(rentCents),
     unbilled: rows.filter((r) => r.unbilled).length,
+    settledCount: settled.charged,
+    settledCents: settled.chargedCents,
+    settleFailed: settled.failed,
     delivered: result.delivered,
     ...(result.detail ? { reason: result.detail } : {}),
   }

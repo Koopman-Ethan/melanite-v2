@@ -3,6 +3,7 @@ import 'server-only'
 import { and, asc, eq, gte, lt, ne, sql } from 'drizzle-orm'
 
 import { clientLabel } from '@/lib/booking-labels'
+import { CLOSEOUT_GRACE_HOURS } from '@/lib/end-of-use'
 import { db } from '@/lib/db'
 import { isHouseSql } from '@/lib/db/revenue-model'
 import { splitClientPayment, toCents } from '@/lib/money'
@@ -54,12 +55,16 @@ export interface DigestAppointment {
   rentalCents: number | null
   /** A credited session covered it, so nothing was charged and nothing is missing. */
   paidFromPack: boolean
-  /** A rental booking that was never billed and no pack paid for.
+  /** A rental booking that is PAST DUE and still unbilled.
    *
-   *  This is the crash window from `app/app/book/actions.ts` showing up where somebody will
-   *  actually see it. Zero rent on a session that used the laser is the one thing in this email
-   *  that means a bug rather than a quiet day.
-   */
+   *  Zero rent on a session that used the laser is the one thing in this email that means a bug
+   *  rather than a quiet day — but only once the rent was actually due.
+   *
+   *  THE GRACE PERIOD IS LOAD-BEARING HERE. Since 9 October the fee is taken twelve hours after
+   *  a session ends, and this digest goes out at about 8pm Denver. Without the time bound every
+   *  session of the day would be flagged "NOT BILLED" on the first night, in the subject line,
+   *  for the rest of time — and an email that cries wolf about everything is one nobody reads,
+   *  which would cost Melanite the only alarm it has. */
   unbilled: boolean
   /** How the suite was signed off after this session, or null if nobody did.
    *
@@ -78,7 +83,15 @@ export interface DigestAppointment {
  *  to check rather than three that can disagree. `itemCount` is NOT NULL on the table, so a
  *  non-null value is what proves a row exists. */
 function asDigestAppointment(row: RawDigestAppointment): DigestAppointment {
-  const { closeoutItems, closeoutItemCount, closeoutDeviceIssue, hasRentalRow, ...rest } = row
+  const {
+    closeoutItems,
+    closeoutItemCount,
+    closeoutDeviceIssue,
+    hasRentalRow,
+    endTime,
+    rentWaivedAt,
+    ...rest
+  } = row
   return {
     ...rest,
     rentalCents: row.rentalCents === null ? null : Number(row.rentalCents),
@@ -86,7 +99,19 @@ function asDigestAppointment(row: RawDigestAppointment): DigestAppointment {
     // no-show nets to zero and was billed perfectly correctly; treating that as unbilled would
     // put a false alarm in the email every time somebody did not turn up.
     unbilled:
-      row.paymentSource === 'rental' && !row.isHouse && !row.paidFromPack && !hasRentalRow,
+      row.paymentSource === 'rental' &&
+      !row.isHouse &&
+      !row.paidFromPack &&
+      !hasRentalRow &&
+      // Past due, not merely past. A session that ended two hours ago has not been swept yet
+      // and is not a problem.
+      endTime.getTime() < Date.now() - CLOSEOUT_GRACE_HOURS * 60 * 60_000 &&
+      // And not one Keoni has already decided to let go. A waived fee is a decision on the
+      // record, not an oversight — the same reasoning as `feeWaivedAt`.
+      rentWaivedAt === null &&
+      // A cancelled or missed session is never swept; whether anything is owed is Keoni's call
+      // and it waits in the queue rather than being flagged as a billing failure here.
+      (row.status === 'upcoming' || row.status === 'completed'),
     // A rental booking has no client — see `lib/booking-labels.ts`.
     clientName: clientLabel(row.clientName),
     closeout:
@@ -108,6 +133,10 @@ type RawDigestAppointment = Omit<
   rentalCents: number | null
   /** Whether any rental_fee row exists at all, refund included. */
   hasRentalRow: boolean
+  /** Inputs to `unbilled` only, and destructured away before the row is returned — the digest
+   *  template has no use for either, and leaking them would widen the public shape for nothing. */
+  endTime: Date
+  rentWaivedAt: Date | null
   /** Null on a rental booking. Resolved by `asDigestAppointment`, so the digest template never
    *  has to decide what to print for a client Melanite deliberately does not know about. */
   clientName: string | null
@@ -182,6 +211,8 @@ export async function getDigestDay(day: string): Promise<DigestDay> {
         providerName: sql<string>`${providers.firstName} || ' ' || ${providers.lastName}`,
         isHouse: isHouseSql(providers.revenueModel).mapWith(Boolean),
         status: bookings.status,
+        endTime: bookings.endTime,
+        rentWaivedAt: bookings.rentWaivedAt,
         price: bookings.price,
         paymentSource: bookings.paymentSource,
         externalMethod: bookings.externalMethod,

@@ -342,7 +342,7 @@ export function BookForm({
             </div>
           ) : needsCard ? (
             <Notice>
-              Add a card before booking — the rental fee is charged when you reserve the laser.{' '}
+              Add a card before booking — the rental fee is charged after your session.{' '}
               <Link href="/app/account" className="underline underline-offset-4">
                 Add one now
               </Link>
@@ -354,14 +354,18 @@ export function BookForm({
                 {service?.rentalFeeCents !== null && service?.rentalFeeCents !== undefined
                   ? usd(service.rentalFeeCents)
                   : ''}{' '}
-                charged now
+                after your session
               </strong>{' '}
-              to {cardLast4 ? `the card ending ${cardLast4}` : 'your payment method on file'},
-              for the equipment and the room. What you charge your
-              client is between you and them.
+              — taken from {cardLast4 ? `the card ending ${cardLast4}` : 'your payment method on file'}{' '}
+              about twelve hours after it ends, for the equipment and the room. Nothing is charged
+              now. What you charge your client is between you and them.
               <br />
-              If the card is declined the slot isn’t held — the laser is shared, so an unpaid
-              reservation would take the time away from everyone else for nothing.
+              {/* Replaces "if the card is declined the slot isn't held", which was true while the
+                  fee was taken up front and is now the opposite of what happens. The twelve hours
+                  is the same window the close-out form stays open — tell Melanite inside it and
+                  nothing is taken until Keoni has read why. */}
+              If the session doesn’t go ahead, cancel it or mark it a no-show within that window
+              and say what happened — nothing is charged until Melanite has read it.
             </div>
           )}
         </section>
@@ -375,7 +379,7 @@ export function BookForm({
           !payingRent || pack
             ? 'Book appointment'
             : service?.rentalFeeCents
-              ? `Book and pay ${usd(service.rentalFeeCents)}`
+              ? `Book — ${usd(service.rentalFeeCents)} after the session`
               : 'Book appointment'
         }
       />

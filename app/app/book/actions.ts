@@ -12,9 +12,8 @@ import {
 } from '@/lib/db/queries/availability'
 import { db } from '@/lib/db'
 import { isExclusionViolation } from '@/lib/db/errors'
-import { bookings, providerServices, providers, services } from '@/lib/db/schema'
-import { notifyMelaniteBooked, notifyProviderCharged } from '@/lib/notify-melanite'
-import { chargeRentalFee } from '@/lib/rental/charge'
+import { providerServices, providers, services } from '@/lib/db/schema'
+import { notifyMelaniteBooked } from '@/lib/notify-melanite'
 import {
   claimPackSession,
   recordPackRedemption,
@@ -23,7 +22,9 @@ import {
 } from '@/lib/rental/packs'
 import { hasAcceptedRentalTerms } from '@/lib/rental-terms'
 import { feeForService, liveScheduleVersion } from '@/lib/rental/schedule'
+import { toMoney } from '@/lib/money'
 import { paysRent, sharesRevenue } from '@/lib/revenue-model'
+import { unsettledRent } from '@/lib/rental/settle'
 
 export interface BookState {
   error?: string
@@ -157,7 +158,29 @@ export async function createBooking(_prev: BookState, formData: FormData): Promi
   // out here costs nobody an appointment that gets created and deleted.
   if (payingRent && (!provider?.customerId || !provider?.paymentMethodId)) {
     return {
-      error: 'Add a card before booking — Melanite charges the rental fee when you reserve the laser.',
+      error:
+        'Add a card before booking — Melanite charges the rental fee after your session, not now.',
+    }
+  }
+
+  // UNPAID RENT BLOCKS THE NEXT BOOKING. This is what replaced "a declined card fails the
+  // booking", and it is weaker on purpose: the fee is no longer taken up front, so there is
+  // nothing to refuse at the moment the laser is used. The lever left is the session after.
+  //
+  // FAILED rent only, never merely-unswept. Blocking on "last night's sweep has not run yet"
+  // would shut the calendar every morning the cron drifted — turning a latency problem into a
+  // correctness one and throwing away the property the whole design rests on. See
+  // `unsettledRent`.
+  if (payingRent) {
+    const owed = await unsettledRent(user.id)
+    if (owed.failedCount > 0) {
+      return {
+        error:
+          `Melanite could not take the rent for ${owed.failedCount} ` +
+          `${owed.failedCount === 1 ? 'session' : 'sessions'} ($${toMoney(owed.failedCents)}). ` +
+          'Update your card on your account page and it will be tried again — booking reopens ' +
+          'once it clears.',
+      }
     }
   }
 
@@ -289,37 +312,23 @@ export async function createBooking(_prev: BookState, formData: FormData): Promi
     // A pack session covers the fee, so no card is touched. Recorded against the booking so
     // cancelling it can give the session back — and so that one appointment cannot spend two.
     await recordPackRedemption(claim, bookingId)
-  } else if (payingRent) {
-    const charged = await chargeRentalFee(bookingId)
-
-    if ('error' in charged) {
-      // Ethan's rule: a declined card fails the booking. The slot goes back rather than being
-      // held against a fee nobody paid — on a single shared laser an unpaid reservation is a
-      // slot removed from everybody else for nothing.
-      //
-      // Deleting rather than cancelling, because this appointment never really existed: it was a
-      // row held for the few hundred milliseconds the charge took. A cancelled booking in the
-      // provider's history would be a record of something that did not happen.
-      await db.delete(bookings).where(eq(bookings.id, bookingId))
-      return { error: charged.error }
-    }
-
-    // The receipt, to the person whose card it was. Only here — a credited session charges
-    // nothing, and a $0.00 receipt teaches somebody to stop reading this sender.
-    //
-    // Takes the amount the charge reported rather than re-reading the ledger, so the figure in
-    // the email is the one Stripe actually took.
-    // `skipped` is a deliberate non-charge — an already-billed retry, or Melanite's own
-    // appointment — so there is nothing to send a receipt for.
-    if ('charged' in charged) {
-      await notifyProviderCharged({
-        providerId: user.id,
-        serviceName: svc.name,
-        when: startTime,
-        amountCents: charged.charged.amountCents,
-      })
-    }
   }
+
+  // NOTHING IS CHARGED HERE ANY MORE, and that is the change Keoni asked for on 9 October.
+  //
+  // Until then this is where the money moved: `chargeRentalFee` ran inline, and a declined card
+  // deleted the booking again — "a declined card fails the booking", which was self-enforcing
+  // because no money meant no slot. Her objection was about the industry, not the mechanism:
+  // providers are frequently not paid by their own client until the work is done, so taking
+  // their money to hold a slot is the wrong way round.
+  //
+  // The fee is now taken twelve hours after the session ends, by `lib/rental/settle.ts`. The
+  // provider sees the amount before they book and gets a receipt when it is actually taken.
+  //
+  // WHAT MELANITE GAVE UP. The old rule needed no enforcement; this one does. A provider can
+  // take a slot, use the laser and then decline, and the only lever left is refusing their NEXT
+  // booking. Four things replace one guarantee: the unpaid-rent gate on booking, the queue item,
+  // the nightly digest line, and a person. That is the whole list, and it is weaker on purpose.
 
   // Melanite hears about every appointment the moment it takes the laser. Best effort, like
   // every send here — a booking that succeeded and was paid for must not report failure because

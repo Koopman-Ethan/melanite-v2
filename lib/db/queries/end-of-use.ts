@@ -11,6 +11,7 @@ import {
   services,
 } from '@/lib/db/schema'
 import {
+  CLOSEOUT_GRACE_HOURS,
   END_OF_USE_ITEMS,
   END_OF_USE_STARTED_AT,
   labelsFor,
@@ -27,12 +28,9 @@ import {
 //
 // Nothing here is scoped to a provider: every caller is an admin page behind `requireAdmin()`.
 
-/** How long after a session ends before a missing close-out becomes an exception rather than a
- *  task.
- *
- *  The same twelve hours `closeoutWindowOpen` gives a provider to file one. Before that it is
- *  still theirs to do, and listing it would nag Keoni about something nobody is late for. */
-const CLOSEOUT_GRACE_HOURS = 12
+// `CLOSEOUT_GRACE_HOURS` is imported rather than declared: before it elapses a missing
+// close-out is still the provider's to file, and listing it would nag Keoni about something
+// nobody is late for. It used to be a local copy of the same 12.
 
 export interface CloseoutRecord {
   id: string
