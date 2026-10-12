@@ -56,7 +56,7 @@ export async function saveProfile(input: {
   if (!firstName || !lastName) return { error: 'Enter your first and last name.' }
   const phoneProblem = phoneError(phone)
   if (phoneProblem) {
-    return { error: `${phoneProblem} Bookings and client messages use it.` }
+    return { error: `${phoneProblem} Melanite uses it to reach you about bookings.` }
   }
   if (!credentials) {
     return { error: 'Enter your professional credentials — clients see them at checkout.' }

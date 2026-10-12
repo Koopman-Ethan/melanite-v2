@@ -72,9 +72,12 @@ export function ProfileForm({
         value={phone}
         onChange={setPhone}
         placeholder="(208) 555-0142"
-        hint="Used for booking notifications and client messages. Not shown publicly."
+        hint="Used for booking notifications from Melanite. Not shown publicly, and never given to anybody's client."
       />
 
+      {/* The hint used to say these appear "on client checkout pages". Melanite does not show a
+          rental provider's name to anybody's client — it holds no client records at all — so
+          that named a page they will never have. */}
       <Field
         id="credentials"
         label="Professional credentials"
@@ -82,12 +85,15 @@ export function ProfileForm({
         value={credentials}
         onChange={(e) => setCredentials(e.target.value)}
         placeholder="RN, NP, PA, MD, DO, Esthetician, or Other"
-        hint="Appears next to your name (e.g. “Jane Doe, RN”) on client checkout pages."
+        hint="Appears next to your name (e.g. “Jane Doe, RN”) on your Melanite records."
       />
 
-      {/* Asked here because it decides which of the remaining steps apply. A room renter needs
-          no Connect account and no laser service menu, and finding that out after making them
-          do both would be too late to spare them either. */}
+      {/* Asked here because it decides which of the remaining steps apply. A room renter never
+          books laser time, so the card on file has nothing to be charged for — and finding that
+          out after making them add one would be too late to spare them it.
+          
+          The old wording said "no Connect account and no laser service menu". Neither exists
+          any more: Connect went with the rental model, and the services step with it. */}
       <fieldset className="space-y-2">
         <legend className="text-sm font-medium text-ink-secondary">
           How will you be working at Melanite?{' '}

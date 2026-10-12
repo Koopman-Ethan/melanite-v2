@@ -17,7 +17,9 @@ import { canOpenStep, isOnboarding, nextStepSlug, type OnboardingSlug } from '@/
  *
  * Two rules:
  *  - Finished accounts belong in the app, not back in setup. Letting an active provider re-run
- *    step 6 would wipe and rewrite their whole service menu.
+ *    step 6 would wipe and rewrite their whole service menu. (There is no step 6 any more —
+ *    it was "Select services" and went with the rental model — but the reasoning holds for any
+ *    step that rewrites rather than adds.)
  *  - You cannot skip ahead. Going back is always allowed — revisiting a finished step to fix a
  *    typo is not an attack, and v1 enforced the same `<= onboarding_step + 1` rule server-side.
  */

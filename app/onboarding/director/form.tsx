@@ -175,7 +175,11 @@ export function DirectorForm({
             })
           }
         >
-          {pending ? 'Saving…' : 'Continue to services'}
+          {/* This is the LAST step. It used to be followed by "Select services", which was
+              removed when the rental model arrived — every active service is bookable by
+              everybody, so there was no menu left to curate. The button kept pointing at it,
+              so a provider finished setup being promised a step that never comes. */}
+          {pending ? 'Saving…' : 'Finish setup'}
         </Button>
       )}
     </div>
