@@ -115,22 +115,43 @@ export function AppointmentActions({ appointment }: { appointment: Appointment }
 
   const reasonOk = !holdsRent || reason.trim().length >= MIN_REASON
 
-  const reasonBox = holdsRent ? (
+  /** The reason box, worded for which of the two endings this is.
+   *
+   *  The mechanics are identical — both ask, neither charges, both go to Keoni — and that is
+   *  exactly why the copy has to differ. Two dialogs that read the same make the two buttons
+   *  look like a redundant choice, which is how somebody ends up picking either one and losing
+   *  the distinction Keoni decides on.
+   *
+   *  What separates them is what happened to the HOUR. A cancellation hands the slot back and
+   *  somebody else can take it; a no-show burns it on a single shared machine that nobody could
+   *  book. That is usually the difference between waiving the fee and charging it, so the
+   *  prompt says so rather than leaving her to infer it from free text. */
+  const reasonBox = (kind: 'cancel' | 'no_show') =>
+    holdsRent ? (
     <label className="block space-y-1.5">
-      <span className="text-xs font-medium text-ink">What happened?</span>
+      <span className="text-xs font-medium text-ink">
+        {kind === 'no_show' ? 'What happened? Nobody came.' : 'What happened?'}
+      </span>
       <textarea
         value={reason}
         onChange={(e) => setReason(e.target.value)}
         rows={3}
-        placeholder="e.g. Client cancelled the morning of and would not reschedule."
+        placeholder={
+          kind === 'no_show'
+            ? 'e.g. Client confirmed the day before and never arrived or replied.'
+            : 'e.g. Client asked to move it and I could not fill the slot.'
+        }
         className="w-full rounded-field border border-line-control bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-faint focus:border-gold"
       />
       <span className="block text-xs text-ink-faint">
+        {kind === 'no_show'
+          ? 'Nobody else could use that hour, so Melanite weighs this one differently. '
+          : 'The slot has gone back on the calendar for somebody else. '}
         Melanite reads this to decide whether your {rentLabel} is owed. Your side of it is the
         only side there is, so say enough to be going on with.
       </span>
     </label>
-  ) : null
+    ) : null
 
   return (
     <div className="space-y-2">
@@ -142,10 +163,10 @@ export function AppointmentActions({ appointment }: { appointment: Appointment }
         <div className="space-y-2 rounded-field border border-line bg-overlay p-3">
           <p className="text-xs text-ink-secondary">
             {holdsRent
-              ? `Mark this as a no-show. ${rentSentence} You will hear once it has been looked at.`
+              ? `Mark this as a no-show — the hour is gone and nobody else could book it. ${rentSentence} You will hear once it has been looked at.`
               : `Mark ${appointment.clientName} as a no-show. Charging the fee uses the card they left on file — if there is none, the status is still recorded and nothing is charged.`}
           </p>
-          {reasonBox}
+          {reasonBox('no_show')}
           <div className="flex flex-wrap gap-2">
             {canCharge && (
               <Button
@@ -178,12 +199,12 @@ export function AppointmentActions({ appointment }: { appointment: Appointment }
               : returnsBalance
                 ? 'Cancel this appointment and put the money back on the client’s prepaid balance? Anything they have already paid on a card is refunded in Stripe, not here.'
                 : holdsRent
-                  ? `Cancel this appointment? The slot reopens straight away. ${rentSentence}`
+                  ? `Cancel this appointment? The slot reopens straight away for somebody else. ${rentSentence}`
                   : isRental
                     ? 'Cancel this appointment? The slot reopens.'
                     : 'Cancel this appointment? The client’s payment link will be cancelled if it is still unpaid.'}
           </p>
-          {reasonBox}
+          {reasonBox('cancel')}
           <div className="flex flex-wrap gap-2">
             <Button
               size="sm"
