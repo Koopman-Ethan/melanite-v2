@@ -2002,3 +2002,44 @@ and at different rates.
 apply here: a booking gate derived from a license or a director agreement is a safety decision with
 a regulator behind it. A rental fee is a commercial one with a counterparty who is told about it
 and asked to agree.
+
+---
+
+## A confirmation cannot live inside the thing it is confirming
+
+**2026-10-12.** Keoni charged a provider $57.50 from the review queue, saw a green message flash
+and vanish before she could read it, and had no way to tell what had happened. Ethan reported it
+as a UI nicety and then said the useful part: *"that's a general principle that can be applied
+everywhere."*
+
+It is, and we had already hit it once. `appointment-actions.tsx` carries the earlier diagnosis:
+
+> The provider sees a green flash too brief to read and has no way to tell a cancellation that
+> returned $75 from one that did not. Fixing it with a timer would not work: the message is not
+> fading, it is being unmounted.
+
+That is the whole of it. The action resolves an item, the list revalidates, the item leaves the
+list, and the component rendering the confirmation stops existing. No delay helps, because there
+is nothing left to delay.
+
+**The rule.** When an action's success removes the control that triggered it, the outcome has to
+be recorded somewhere that outlives the control. `components/ui/outcome-log.tsx` is that place:
+it sits above the list, survives the list changing underneath it, and holds each message until
+somebody dismisses it.
+
+**Not everywhere.** If the control survives its own success — a settings form that stays on
+screen, a toggle that flips — a `Notice` beside it is correct and the log is ceremony. The test
+is whether the thing that showed the message is still there afterwards.
+
+**Messages are not auto-dismissed**, which is a deliberate cost. An outcome that disappears on a
+timer is an outcome somebody can miss, and the ones that reach this log are the ones that moved
+money or sent a provider an email. Three seconds of screen time is not a record.
+
+**Errors stay local.** A failed action leaves the row on screen, so the message belongs next to
+the button that produced it — moving it to the top would make the reader hunt for which row it
+was about.
+
+**Still local, not yet migrated:** `appointment-actions.tsx` solves the same problem its own way
+(the buttons go, the message stays) and works; the admin calendar's blocked-time list has the
+same shape and has not been reported. Neither is urgent. The queue was, because what disappears
+there is the record of money moving.

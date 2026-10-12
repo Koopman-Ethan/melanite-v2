@@ -4,6 +4,8 @@ import { requireAdmin } from '@/lib/auth/dal'
 import { getReviewQueue, getTransferTargets } from '@/lib/db/queries/review-queue'
 import { todayInDenver } from '@/lib/validation'
 
+import { OutcomeLog } from '@/components/ui/outcome-log'
+
 import { QueueRow } from './queue-item'
 
 export const metadata: Metadata = { title: 'Queue · Melanite Admin' }
@@ -63,6 +65,10 @@ export default async function AdminQueuePage() {
 
           {/* Oldest first. Age is what matters in a queue — the thing waiting longest is the
               thing most likely to have been forgotten about. */}
+          {/* The log sits ABOVE the list and outlives it, which is the whole point: a row that
+              has been resolved is gone from the queue a moment later, and its confirmation
+              cannot live inside it. */}
+          <OutcomeLog>
           <ul className="space-y-3">
             {queue.map((item) => (
               <QueueRow
@@ -72,6 +78,7 @@ export default async function AdminQueuePage() {
               />
             ))}
           </ul>
+          </OutcomeLog>
         </>
       )}
 

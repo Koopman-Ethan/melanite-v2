@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Notice } from '@/components/ui/field'
+import { useOutcomeLog } from '@/components/ui/outcome-log'
 import { cn } from '@/lib/cn'
 import type { QueueItem } from '@/lib/db/queries/review-queue'
 
@@ -61,21 +62,23 @@ export function QueueRow({
   const [target, setTarget] = useState(transferTargets[0]?.id ?? '')
   const [pending, start] = useTransition()
 
+  const record = useOutcomeLog()
+
   const run = (fn: () => Promise<QueueState>) =>
     start(async () => {
-      setState(await fn())
+      const result = await fn()
       setShowPartial(false)
-    })
 
-  // Resolved rows disappear on revalidate, so a success message here is transient by design —
-  // it exists to confirm what happened before the row goes.
-  if (state.success) {
-    return (
-      <li className="rounded-card border border-success/30 bg-success/10 p-4 text-sm">
-        {state.success}
-      </li>
-    )
-  }
+      // A SUCCESS IS REPORTED UPWARD, never rendered here. Resolving an item revalidates the
+      // queue, the item leaves it, and this component unmounts — taking any confirmation it was
+      // showing with it. Keoni saw a green flash too brief to read after charging a provider
+      // $57.50, which is money moving on her word with no record that it happened.
+      //
+      // Errors stay local: the row is still on screen, and the message belongs next to the
+      // button that produced it.
+      if (result.success) record(result.success)
+      else setState(result)
+    })
 
   return (
     <li className="rounded-card border border-line bg-surface p-4">
