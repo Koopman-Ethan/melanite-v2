@@ -14,10 +14,11 @@ import {
 import { packBalancesFor } from '@/lib/rental/packs'
 import { tierForService } from '@/lib/rental-fees'
 import { getLiveSchedule } from '@/lib/rental/schedule'
-import { paysRent } from '@/lib/revenue-model'
+import { paysRent, sharesRevenue } from '@/lib/revenue-model'
 import { hasAcceptedRentalTerms } from '@/lib/rental-terms'
 
 import { BookPanel } from './book-panel'
+import { SplitBookPage } from './split-page'
 
 export const metadata: Metadata = { title: 'Book laser time · Melanite' }
 export const dynamic = 'force-dynamic'
@@ -44,6 +45,13 @@ export default async function BookPage({
         <BookingGates gates={bookingBlockedReasons(user)} heading="Booking isn’t available yet" />
       </main>
     )
+  }
+
+  // The 50/50 three take a different path from here down, and it is a different page rather
+  // than a branch inside this one. Their form asks who the client is and what they are paying;
+  // this one quotes a rental fee and deliberately knows about neither. See `split-form.tsx`.
+  if (sharesRevenue(user.revenueModel)) {
+    return <SplitBookPage user={user} params={params} />
   }
 
   const services = await getBookableServices(user.id)

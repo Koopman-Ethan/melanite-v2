@@ -336,14 +336,19 @@ export interface PricedService {
   name: string
   category: string | null
   price: string
+  durationMins: number
 }
 
 /** The services a provider has configured, WITH the price they charge a client.
  *
- *  Only the prepaid flow still wants this: spending a client's balance needs a figure to spend
- *  against, and that figure is the provider's own. It goes with the rest of the client-payment
- *  code — see `docs/decisions.md` — and is kept separate so `getBookableServices` can stop
- *  pretending Melanite knows what anybody charges. */
+ *  Kept separate from `getBookableServices` so that one can stop pretending Melanite knows what
+ *  anybody charges — under the rental model it genuinely does not, and `provider_services.price`
+ *  is written once at zero and never read.
+ *
+ *  For the three providers grandfathered onto the 50/50 split it is read, and it is load-bearing:
+ *  their price is what their client pays and what Melanite takes half of, so a session cannot be
+ *  booked without one. This is the query behind their booking page as well as the prepaid flow,
+ *  which is why it carries `durationMins` — the availability grid is sized by it. */
 export async function getPricedServices(providerId: string): Promise<PricedService[]> {
   return db
     .select({
@@ -351,6 +356,7 @@ export async function getPricedServices(providerId: string): Promise<PricedServi
       name: services.name,
       category: services.category,
       price: providerServices.price,
+      durationMins: providerServices.durationMins,
     })
     .from(providerServices)
     .innerJoin(services, eq(providerServices.serviceId, services.id))
