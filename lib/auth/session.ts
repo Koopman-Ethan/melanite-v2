@@ -77,6 +77,17 @@ export interface SessionUser {
    *  create endpoint rather than alongside the other two gates. */
   licenseExpiry: string | null
   requiresPasswordReset: boolean
+  /** Which billing model this provider is on. See `lib/revenue-model.ts`.
+   *
+   *  ON THE SESSION because the navigation needs it, and the navigation is rendered by client
+   *  components that cannot query. Three surfaces ask the same question — which pages exist for
+   *  this person, which booking form they get, and what their account page offers — and all
+   *  three would otherwise need their own lookup.
+   *
+   *  Note `practises()` in `lib/nav.ts` stays keyed on `bookingEnabled` rather than on this, as
+   *  its comment argues: whether somebody treats clients and how their money works are separate
+   *  questions, and conflating them is how an admin who is also a provider loses a menu. */
+  revenueModel: (typeof providers.$inferSelect)['revenueModel']
 }
 
 /** Resolves the cookie to a live provider, or null. Reads the provider row every time on
@@ -104,6 +115,7 @@ export async function getSessionUser(): Promise<SessionUser | null> {
       hasMedicalDirectorOnFile: sql<boolean>`${medicalDirectorCredentials.providerId} is not null`,
       licenseExpiry: providers.licenseExpiry,
       requiresPasswordReset: providers.requiresPasswordReset,
+      revenueModel: providers.revenueModel,
     })
     .from(sessions)
     .innerJoin(providers, eq(sessions.providerId, providers.id))

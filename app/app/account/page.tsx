@@ -4,9 +4,11 @@ import { requireProvider } from '@/lib/auth/dal'
 import { licenseMessage, licenseStatus } from '@/lib/license'
 import { hasAcceptedRentalTerms } from '@/lib/rental-terms'
 import { liveScheduleVersion } from '@/lib/rental/schedule'
+import { paysRent, sharesRevenue } from '@/lib/revenue-model'
 import { getAccount, getActiveSessions, getDocuments } from '@/lib/db/queries/account'
 
 import { NotificationsForm, PasswordForm, ProfileForm } from './forms'
+import { Payouts } from './payouts'
 import { RentalCard } from './rental-card'
 
 export const metadata: Metadata = { title: 'Account · Melanite' }
@@ -100,9 +102,37 @@ export default async function AccountPage() {
         <ProfileForm values={account} licenseRequired={user.role === 'provider'} />
       </Section>
 
+      {/* Rent, and only for somebody who pays it.
+          
+          It rendered for everybody until 12 October, so Leyla — who is on the original 50/50
+          and will never be charged a rental fee — was asked for a card she does not need and
+          nagged to accept terms that do not bind her. Accepting them would have changed
+          nothing, which is the worst kind of prompt: it teaches somebody that the ones here
+          are noise.
+          
+          Deliberately NOT replaced with a general "terms" section for her. There is nothing a
+          50/50 provider is bound by today that she has not already agreed to, and a consent box
+          with nothing substantive in it is how the next real one gets clicked through. What she
+          has accepted already shows further down, on the account line. */}
+      {/* Getting paid, for the three still on the 50/50 split. Their clients pay Melanite and
+          Melanite forwards their share, so without a connected account they can work, be owed
+          money, and never receive any of it — which nothing else on this page can cost them.
+
+          Remounted on 12 October. It was unmounted when the rental model arrived, correctly:
+          Melanite had stopped paying anybody. It still does not pay the five on rent. */}
+      {sharesRevenue(user.revenueModel) && (
+        <Section
+          title="Payouts"
+          description="Your clients pay Melanite and your share is forwarded to you. Melanite keeps its half of what you charge, and never charges you a rental fee."
+        >
+          <Payouts connected={account.stripeOnboardingComplete} />
+        </Section>
+      )}
+
+      {paysRent(user.revenueModel) && (
       <Section
         title="Equipment rental"
-        description="Melanite charges this card when you reserve the laser. What you charge your own clients never comes through here."
+        description="Melanite charges this card after your session, not when you reserve the laser. What you charge your own clients never comes through here."
       >
         <RentalCard
           card={
@@ -119,6 +149,7 @@ export default async function AccountPage() {
           termsAckAt={account.rentalTermsAckAt}
         />
       </Section>
+      )}
 
       <Section
         title="Notifications"

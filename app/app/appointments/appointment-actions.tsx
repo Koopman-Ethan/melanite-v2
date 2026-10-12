@@ -95,8 +95,23 @@ export function AppointmentActions({ appointment }: { appointment: Appointment }
   //
   // `rentalCents === null` means nothing charged YET, which is the ordinary state and still
   // owes a reason. Only an explicit zero — charged and fully refunded — is settled.
+  // EVERY provider is asked what happened, not only the ones who pay rent.
+  //
+  // Keoni's instruction was unconditional — "no matter how the appointment gets cancelled,
+  // whether its a noshow or a cancellation, there needs to be a popup that asks what happened
+  // that will allow keoni to review it" — and gating it on rent made it true for five providers
+  // and false for the three she grandfathered.
+  //
+  // The two arrangements turn out to be the same shape. On the 50/50 the provider sends a link
+  // and the client pays AFTER the service, exactly as rent is now taken after the session, so
+  // at the moment of a cancellation nobody has paid anything either way. The question Keoni
+  // answers is the same one: does the provider owe Melanite for a session that did not happen?
+  // Only the amount differs — the published fee, or Melanite's half of their own price.
   const holdsRent =
     isRental && (appointment.paidFromCredit || appointment.rentalCents !== 0)
+  const owesSplit = !isRental && Number(appointment.price) > 0
+  const asksWhy = holdsRent || owesSplit
+
   const rentLabel = appointment.paidFromCredit
     ? 'pack session'
     : appointment.rentalCents === null
@@ -109,11 +124,13 @@ export function AppointmentActions({ appointment }: { appointment: Appointment }
   // Whether the money has actually moved yet, which decides the wording. "Held, not refunded"
   // is true of a fee already taken and a lie about one that never was.
   const rentTaken = appointment.paidFromCredit || (appointment.rentalCents ?? 0) > 0
-  const rentSentence = rentTaken
-    ? `Your ${rentLabel} is held, not refunded — Melanite decides whether it stands.`
-    : `Your ${rentLabel} has not been taken. Melanite decides whether it is owed.`
+  const rentSentence = !isRental
+    ? 'Nothing has been charged. Melanite decides whether its half of this session is still owed.'
+    : rentTaken
+      ? `Your ${rentLabel} is held, not refunded — Melanite decides whether it stands.`
+      : `Your ${rentLabel} has not been taken. Melanite decides whether it is owed.`
 
-  const reasonOk = !holdsRent || reason.trim().length >= MIN_REASON
+  const reasonOk = !asksWhy || reason.trim().length >= MIN_REASON
 
   /** The reason box, worded for which of the two endings this is.
    *
@@ -127,7 +144,7 @@ export function AppointmentActions({ appointment }: { appointment: Appointment }
    *  book. That is usually the difference between waiving the fee and charging it, so the
    *  prompt says so rather than leaving her to infer it from free text. */
   const reasonBox = (kind: 'cancel' | 'no_show') =>
-    holdsRent ? (
+    asksWhy ? (
     <label className="block space-y-1.5">
       <span className="text-xs font-medium text-ink">
         {kind === 'no_show' ? 'What happened? Nobody came.' : 'What happened?'}
@@ -147,7 +164,7 @@ export function AppointmentActions({ appointment }: { appointment: Appointment }
         {kind === 'no_show'
           ? 'Nobody else could use that hour, so Melanite weighs this one differently. '
           : 'The slot has gone back on the calendar for somebody else. '}
-        Melanite reads this to decide whether your {rentLabel} is owed. Your side of it is the
+        Melanite reads this to decide whether this session is owed for. Your side of it is the
         only side there is, so say enough to be going on with.
       </span>
     </label>
@@ -162,7 +179,7 @@ export function AppointmentActions({ appointment }: { appointment: Appointment }
       {confirming === 'no_show' ? (
         <div className="space-y-2 rounded-field border border-line bg-overlay p-3">
           <p className="text-xs text-ink-secondary">
-            {holdsRent
+            {asksWhy
               ? `Mark this as a no-show — the hour is gone and nobody else could book it. ${rentSentence} You will hear once it has been looked at.`
               : `Mark ${appointment.clientName} as a no-show. Charging the fee uses the card they left on file — if there is none, the status is still recorded and nothing is charged.`}
           </p>
@@ -198,7 +215,7 @@ export function AppointmentActions({ appointment }: { appointment: Appointment }
               ? 'Cancel this appointment and return the session to the client’s package?'
               : returnsBalance
                 ? 'Cancel this appointment and put the money back on the client’s prepaid balance? Anything they have already paid on a card is refunded in Stripe, not here.'
-                : holdsRent
+                : asksWhy
                   ? `Cancel this appointment? The slot reopens straight away for somebody else. ${rentSentence}`
                   : isRental
                     ? 'Cancel this appointment? The slot reopens.'
@@ -253,7 +270,7 @@ export function AppointmentActions({ appointment }: { appointment: Appointment }
                 // most needs asking: the provider is about to keep or lose real money on the
                 // strength of what they type.
                 onClick={() =>
-                  canCharge || holdsRent
+                  canCharge || asksWhy
                     ? setConfirming('no_show')
                     : run((id) => markNoShow(id, '', false))
                 }

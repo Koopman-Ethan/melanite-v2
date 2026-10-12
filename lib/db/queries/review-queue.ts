@@ -3,7 +3,10 @@ import 'server-only'
 import { and, asc, eq, isNotNull, isNull, sql } from 'drizzle-orm'
 
 import { clientLabel } from '@/lib/booking-labels'
+import { getProviderSharePct } from '@/lib/db/queries/admin-tools'
+import { sharesRevenueSql } from '@/lib/db/revenue-model'
 import { tierForService } from '@/lib/rental-fees'
+import { sharesRevenue } from '@/lib/revenue-model'
 import { getLiveSchedule } from '@/lib/rental/schedule'
 import { db } from '@/lib/db'
 import {
@@ -175,6 +178,10 @@ async function heldRent(): Promise<QueueItem[]> {
         select 1 from provider_pack_redemptions r
         where r.booking_id = bookings.id and r.voided_at is null
       )`,
+      revenueModel: providers.revenueModel,
+      /** The provider's own price, for a 50/50 session. Melanite's share of it is what they
+       *  owe if Keoni decides the session is chargeable. */
+      ownPrice: providerServices.price,
     })
     .from(bookings)
     .innerJoin(providers, eq(bookings.providerId, providers.id))
@@ -182,7 +189,12 @@ async function heldRent(): Promise<QueueItem[]> {
     .innerJoin(services, eq(providerServices.serviceId, services.id))
     .where(
       and(
-        eq(bookings.paymentSource, 'rental'),
+        // BOTH MODELS, not just rental. A session that did not happen raises the same question
+        // whoever the provider is: do they owe Melanite a fee for it? Restricting this to
+        // payment_source = 'rental' made Keoni's review true for five providers and false for
+        // the three she grandfathered — and her instruction was explicitly "no matter how the
+        // appointment gets cancelled".
+        sql`(${bookings.paymentSource} = 'rental' OR ${sharesRevenueSql(providers.revenueModel)})`,
         sql`${bookings.status} IN ('cancelled', 'no_show')`,
         isNull(bookings.rentalReviewedAt),
         // A waived fee is a decision on the record, not an oversight.
@@ -211,8 +223,18 @@ async function heldRent(): Promise<QueueItem[]> {
   // name-to-tier map lives in `lib/rental-fees.ts` because the ETL truncates the catalogue —
   // there is no key in the database to join on. One schedule load, mapped in code.
   const schedule = await getLiveSchedule()
-  const dueFor = (serviceName: string): number => {
-    const tier = tierForService(serviceName)
+  const sharePct = await getProviderSharePct()
+
+  /** What this session would cost the provider if Keoni decides it is owed for.
+   *
+   *  Two derivations, one question. A provider on rent owes the published fee for the service's
+   *  tier. A provider on the 50/50 owes Melanite's half of their own price — their client has
+   *  not paid either, so this is not a refund, it is the same debt arrived at differently. */
+  const dueFor = (r: { serviceName: string; revenueModel: string; ownPrice: string | null }) => {
+    if (sharesRevenue(r.revenueModel as never)) {
+      return Math.round(Number(r.ownPrice ?? 0) * 100 * (1 - sharePct))
+    }
+    const tier = tierForService(r.serviceName)
     if (!tier) return 0
     return schedule.byTier.get(tier.key)?.singleCents ?? tier.singleCents
   }
@@ -230,13 +252,14 @@ async function heldRent(): Promise<QueueItem[]> {
       amount: r.heldSession
         ? '0.00'
         : (
-            (Number(r.heldCents) > 0 ? Number(r.heldCents) : dueFor(r.serviceName)) / 100
+            (Number(r.heldCents) > 0 ? Number(r.heldCents) : dueFor(r)) / 100
           ).toFixed(2),
       who: `${r.firstName} ${r.lastName}`,
       detail:
         `${r.status === 'no_show' ? 'No-show' : 'Cancelled'} · ${r.serviceName} on ` +
         `${dateLabel(r.startTime.toISOString().slice(0, 10))}` +
         (r.heldSession ? ' · paid with a pack session' : '') +
+        (sharesRevenue(r.revenueModel as never) ? ' · 50/50, Melanite’s half of their price' : '') +
         ` — they said: “${r.reason ?? 'nothing recorded'}”`,
       meta: {
         bookingStatus: r.status,
@@ -244,6 +267,8 @@ async function heldRent(): Promise<QueueItem[]> {
         heldSession: r.heldSession ? 'yes' : null,
         /** Whether the money has already moved, which decides which way the buttons point. */
         rentTaken: r.heldSession || Number(r.heldCents) > 0 ? 'yes' : null,
+        /** Which arrangement the provider is on, so the row can say what the figure means. */
+        model: sharesRevenue(r.revenueModel as never) ? 'split' : 'rental',
       },
     }))
 }

@@ -11,7 +11,8 @@ import {
   services,
 } from '@/lib/db/schema'
 
-import { paysRent } from '@/lib/revenue-model'
+import { getProviderSharePct } from '@/lib/db/queries/admin-tools'
+import { isHouse, sharesRevenue } from '@/lib/revenue-model'
 
 import { chargeRentalFee } from './charge'
 import { releaseRentalForBooking, type RentalReleaseResult } from './release'
@@ -76,6 +77,8 @@ export async function rentOwedFor(bookingId: string): Promise<RentOwed | null> {
       serviceName: services.name,
       waivedAt: bookings.rentWaivedAt,
       revenueModel: providers.revenueModel,
+      /** The provider's own price for this service, for a 50/50 booking. */
+      ownPrice: providerServices.price,
     })
     .from(bookings)
     .innerJoin(providerServices, eq(bookings.providerServiceId, providerServices.id))
@@ -84,9 +87,35 @@ export async function rentOwedFor(bookingId: string): Promise<RentOwed | null> {
     .where(eq(bookings.id, bookingId))
     .limit(1)
 
-  if (!row || row.paymentSource !== 'rental') return null
-  if (!paysRent(row.revenueModel)) return null
+  if (!row) return null
   if (row.waivedAt) return null
+  if (isHouse(row.revenueModel)) return null
+
+  // A SESSION THAT DID NOT HAPPEN RAISES THE SAME QUESTION IN BOTH MODELS, and that is the
+  // thing worth getting right here.
+  //
+  // It looked at first as though the 50/50 three were different — that Melanite was holding
+  // their client's money and the decision was whether to refund it. It is not: under the
+  // grandfathered arrangement the provider sends a link and the client pays AFTER the service,
+  // exactly as rent is now taken after the session. So at the moment of a cancellation nobody
+  // has paid anything, in either model.
+  //
+  // What Keoni decides is therefore identical: does the PROVIDER owe Melanite a fee for a
+  // session that did not happen? And in both cases, if she says yes, recovering it from the
+  // client is the provider's own business — Melanite's books are square either way.
+  //
+  // Only the amount is derived differently: the published rental fee, or Melanite's half of
+  // what the provider charges for that service.
+  if (sharesRevenue(row.revenueModel)) {
+    const price = Number(row.ownPrice ?? 0)
+    if (!Number.isFinite(price) || price <= 0) return null
+
+    const sharePct = await getProviderSharePct()
+    const owed = Math.round(price * 100 * (1 - sharePct))
+    return owed > 0 ? { kind: 'due', cents: owed } : null
+  }
+
+  if (row.paymentSource !== 'rental') return null
 
   // The pack first, for the reason `releaseRentalForBooking` checks it first: a pack-covered
   // booking has no ledger row at all, so looking for money and finding none would report

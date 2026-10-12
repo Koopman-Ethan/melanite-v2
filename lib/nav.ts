@@ -1,5 +1,6 @@
 import { isAdmin, isMedicalDirector } from '@/lib/auth/roles'
 import type { SessionUser } from '@/lib/auth/session'
+import { paysRent, sharesRevenue } from '@/lib/revenue-model'
 
 // The provider sidebar, ported from v1's nav wiring.
 //
@@ -25,6 +26,16 @@ export interface NavItem {
    *  on `isAdminView`, which is wider — a medical director sees the platform nav but would be
    *  redirected straight back out of these. */
   adminOnly?: boolean
+  /** Shown only to a provider on the original 50/50 split — Leyla, Brittany and Karly.
+   *
+   *  These are the client-payment surfaces. They are not legacy: those three bill their clients
+   *  through Melanite, so their own price list and their payouts are how they work. For
+   *  everybody else the pages exist and mean nothing, which is why they were unlinked rather
+   *  than deleted when the rental model arrived. */
+  splitOnly?: boolean
+  /** Shown only to a provider who pays rent. Charges is empty and misleading for anybody else:
+   *  a 50/50 provider is never charged a rental fee, so the page would list nothing for ever. */
+  rentalOnly?: boolean
 }
 
 /** Roles that see the platform rather than their own practice. Matches v1's "admin-view
@@ -68,18 +79,23 @@ const ITEMS: NavItem[] = [
   { label: 'Book Laser Time', href: '/app/book', providerOnly: true },
   { label: 'Dashboard', href: '/app/dashboard' },
   { label: 'Appointments', href: '/app/appointments', providerOnly: true },
-  { label: 'Charges', href: '/app/charges', providerOnly: true },
-  // Packages, Prepaid and My Services are GONE from here, and the pages are not. All three are
-  // client-payment features that stop meaning anything under the rental model: a package and a
-  // prepaid balance are a client paying Melanite in advance, which Melanite no longer does, and
-  // My Services curated a menu that nobody browses now — every active service is bookable by
-  // everybody and `provider_services` is just where a remembered length lives.
+  { label: 'Charges', href: '/app/charges', providerOnly: true, rentalOnly: true },
+  // Packages, Prepaid, My Services and Earnings came BACK on 12 October, for the three
+  // providers Keoni grandfathered onto the 50/50 split.
   //
-  // Unlinked rather than deleted, because they still hold real history: Karly's clients have
-  // ten sessions outstanding, honoured at cutover as credited sessions. The pages go with the
-  // rest of the client-payment code in one revertible commit; until then they are reachable by
-  // URL and by the dashboard panel that chases an unpaid package link, which is the one place
-  // somebody might still need them.
+  // They were unlinked in October when the rental model arrived, on the reasoning that a
+  // package and a prepaid balance are a client paying Melanite in advance — which Melanite no
+  // longer did — and that My Services curated a menu nobody browses. All true of a provider who
+  // pays rent, and none of it true of Leyla, Brittany or Karly: they still bill their clients
+  // through Melanite, so their own price list is how they set what a session costs and their
+  // earnings are what they are owed.
+  //
+  // The pages were never deleted, which is the only reason this is a one-line change rather
+  // than a rebuild. The planned post-cutover commit that removed them does not happen now.
+  { label: 'My Services', href: '/app/services', providerOnly: true, splitOnly: true },
+  { label: 'Packages', href: '/app/packages', providerOnly: true, splitOnly: true },
+  { label: 'Prepaid', href: '/app/prepaid', providerOnly: true, splitOnly: true },
+  { label: 'Earnings', href: '/app/earnings', providerOnly: true, splitOnly: true },
   { label: 'Daily Room Rental', href: '/app/room-rental', providerOnly: true },
   { label: 'Membership', href: '/app/membership', providerOnly: true },
   { label: 'Calendar', href: '/app/admin/calendar', adminOnly: true },
@@ -104,6 +120,11 @@ export function navFor(user: SessionUser): NavItem[] {
       !(item.providerOnly && adminView && !practises(user)) &&
       !(item.adminOnly && !admin) &&
       !(item.directorOnly && !director) &&
+      // The billing model decides which half of the app exists for somebody. Note these are
+      // asked of every role, including the house account: Melanite's own appointments are
+      // neither rented nor split, so it gets neither set.
+      !(item.splitOnly && !sharesRevenue(user.revenueModel)) &&
+      !(item.rentalOnly && !paysRent(user.revenueModel)) &&
       // Dashboard is the director's Oversight page, so listing both is one link too many.
       !(item.label === 'Dashboard' && director),
   ).map((item) => (item.label === 'Dashboard' ? { ...item, href: dashboardHref(user) } : item))

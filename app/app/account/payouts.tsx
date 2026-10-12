@@ -9,9 +9,13 @@ import { openStripeDashboard, startStripeOnboarding, type StripeRedirect } from 
 
 /** Getting paid.
  *
- *  NO LONGER MOUNTED. Melanite does not pay providers — they bill their own clients — so the
- *  account page shows `rental-card.tsx` here instead, which answers the opposite question.
- *  Kept with the rest of the Connect code until it is removed as one revertible commit.
+ *  MOUNTED FOR THE 50/50 THREE ONLY. Melanite does not pay the providers on rent — they bill
+ *  their own clients — so for them the account page shows `rental-card.tsx` here instead, which
+ *  answers the opposite question: not how money reaches them, but how it reaches Melanite.
+ *
+ *  It was unmounted entirely when the rental model arrived, and the plan was to delete it with
+ *  the rest of the Connect code. That deletion does not happen now: Leyla, Brittany and Karly
+ *  are grandfathered onto the split permanently, and this is how they are paid.
  *
  *
  *  Separated from the rest of Account because the consequence is different in kind: without a
