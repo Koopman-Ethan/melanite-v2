@@ -191,9 +191,24 @@ export async function chargeRentalFee(bookingId: string): Promise<RentalChargeRe
         provider_id: booking.providerId,
       },
     },
-    // Keyed on the booking, so a double submit or a retry cannot take the fee twice even if it
-    // races the ledger check above. One session, one charge, enforced at Stripe as well as here.
-    { idempotencyKey: `rental-fee:${booking.id}` })
+    // Keyed on the booking AND the card, so a double submit or a retry cannot take the fee twice
+    // even if it races the ledger check above. One session, one charge, enforced at Stripe as
+    // well as here.
+    //
+    // THE CARD HAS TO BE IN THE KEY. Stripe refuses a key reused with different parameters —
+    // "Keys for idempotent requests can only be used with the same parameters they were first
+    // used with" — so keying on the booking alone meant that once a session had been attempted
+    // against one card it could never be charged against another, for the twenty-four hours
+    // Stripe remembers the key.
+    //
+    // That is precisely the sequence this feature is built around: the card declines, the
+    // provider is blocked from booking and told to update it, they do, and the retry fails with
+    // a 400 that has nothing to do with their new card. Found by walking through it.
+    //
+    // Two attempts with the SAME card still share a key, which is what stops a double charge.
+    // Two attempts with DIFFERENT cards are genuinely different requests, and the only way to
+    // reach Stripe twice at all is for the ledger guard above to have found no purchase row.
+    { idempotencyKey: `rental-fee:${booking.id}:${provider.paymentMethodId}` })
     intentId = intent.id
   } catch (err) {
     if (err instanceof StripeApiError) {

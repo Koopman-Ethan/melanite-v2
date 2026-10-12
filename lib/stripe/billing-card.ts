@@ -1,9 +1,9 @@
 import 'server-only'
 
-import { eq } from 'drizzle-orm'
+import { and, eq, isNotNull, isNull } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
-import { providers } from '@/lib/db/schema'
+import { bookings, providers } from '@/lib/db/schema'
 
 import { stripeGet, stripePost } from './client'
 
@@ -96,6 +96,32 @@ export async function saveRentalCard(
       billingCardExpYear: method.card?.exp_year ?? null,
     })
     .where(eq(providers.id, providerId))
+
+  // A NEW CARD CLEARS THE BACK-OFF, and without this the block on booking is a trap.
+  //
+  // A rental fee that declines is stamped on the booking and not retried for twenty hours, so a
+  // dead card does not decline on every sweep and email the provider each time. Sensible on its
+  // own. But unpaid rent also stops the provider booking again, and the message telling them so
+  // says to update their card and that it will be tried again — so somebody who does exactly
+  // that stays locked out for most of a day, with nothing they can do and no sign anything
+  // changed. Ethan walked into it within a minute of adding the working card back.
+  //
+  // A fresh card is precisely the signal that retrying is worth it: the reason it failed has
+  // just been addressed. Clearing the stamp puts those sessions back in front of the next
+  // sweep, which runs on the next page load at the latest.
+  //
+  // The attempt count goes back to zero for the same reason. It exists to stop a dead card
+  // being hammered forever, not to ration how many cards somebody may try.
+  await db
+    .update(bookings)
+    .set({ rentChargeFailedAt: null, rentChargeError: null, rentChargeAttempts: 0 })
+    .where(
+      and(
+        eq(bookings.providerId, providerId),
+        isNotNull(bookings.rentChargeFailedAt),
+        isNull(bookings.rentWaivedAt),
+      ),
+    )
 
   return { saved: true }
 }
