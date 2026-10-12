@@ -249,6 +249,18 @@ describe('running the sweep', () => {
     expect(out).toHaveProperty('chargedCents', 0)
   })
 
+  it('counts a backed-off failure as deferred, not as nothing owed', async () => {
+    // The sweep that already ran and declined leaves the row inside its twenty-hour back-off,
+    // so the next run skips it and charges nothing. Reporting that as "nothing was due" told
+    // Keoni every session was settled while one sat failing — which is the opposite of the
+    // truth about money she is owed. Ethan hit it because the opportunistic sweep fired on a
+    // page load and got there before the button did.
+    await session({ hoursAgo: 60, attempts: 1, failedHoursAgo: 1 })
+
+    const out = await settleDueRent({ limit: 5 })
+    expect(out.deferred, 'a recent failure must be visible as deferred').toBeGreaterThan(0)
+  })
+
   it('is safe to run twice in a row', async () => {
     // Idempotency is at the item, not the run — there is deliberately no once-per-day key. Two
     // runs back to back must not double anything.

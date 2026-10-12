@@ -92,7 +92,17 @@ export async function settleRentNow(
   try {
     const r = await settleDueRent()
 
+    // "Nothing charged" is not "nothing owed". A card that declined earlier is inside its
+    // back-off and will not be tried again for twenty hours — saying everything was settled
+    // would be telling Keoni the opposite of the truth about money she is owed.
     if (r.charged === 0 && r.failed === 0) {
+      if (r.deferred > 0) {
+        return {
+          error:
+            `Nothing could be taken. ${r.deferred} session${r.deferred === 1 ? '' : 's'} ` +
+            'failed earlier and will not be retried for a few hours — they are in the queue.',
+        }
+      }
       return { success: 'Nothing was due. Every session past its grace period is settled.' }
     }
 

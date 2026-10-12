@@ -74,6 +74,12 @@ export interface SettleResult {
   skipped: number
   /** Still eligible and not attempted, because the batch or the clock ran out. */
   remaining: number
+  /** Past due, and deliberately NOT attempted on this run: the card already declined and is
+   *  inside its back-off, or it has used up its attempts.
+   *
+   *  Reported because "nothing was charged" and "nothing is owed" are different facts, and a
+   *  sweep that conflated them told Keoni every session was settled while one sat failing. */
+  deferred: number
 }
 
 interface Due extends Record<string, unknown> {
@@ -126,12 +132,37 @@ export async function settleDueRent(options: { limit?: number } = {}): Promise<S
   `)
 
   const due = rows ?? []
+
+  // Past due, unsettled, and excluded above by the back-off or the attempt cap. Counted
+  // separately so the caller can say "nothing could be taken" rather than "nothing is owed".
+  const deferredRows = await db.execute<{ n: number }>(sql`
+    SELECT count(*)::int AS n
+      FROM bookings b
+      JOIN providers p ON p.id = b.provider_id
+     WHERE b.payment_source = 'rental'
+       AND ${paysRentSql(sql`p.revenue_model`)}
+       AND b.status IN ('upcoming', 'completed')
+       AND b.end_time < now() - ${sql.raw(`interval '${CLOSEOUT_GRACE_HOURS} hours'`)}
+       AND b.rent_waived_at IS NULL
+       AND b.rent_charge_failed_at IS NOT NULL
+       AND (
+         b.rent_charge_attempts >= ${MAX_ATTEMPTS}
+         OR b.rent_charge_failed_at >= now() - ${sql.raw(`interval '${RETRY_AFTER_HOURS} hours'`)}
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM ledger_entries le
+          WHERE le.subject_type = 'booking' AND le.subject_id = b.id
+            AND le.source = 'rental_fee' AND le.entry_type = 'purchase'
+       )
+  `)
+
   const result: SettleResult = {
     charged: 0,
     chargedCents: 0,
     failed: 0,
     skipped: 0,
     remaining: 0,
+    deferred: deferredRows.rows?.[0]?.n ?? 0,
   }
 
   for (const [i, row] of due.entries()) {
