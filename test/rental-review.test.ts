@@ -269,3 +269,31 @@ describe('a fee already given back', () => {
     expect(queue.find((q) => q.id === id)).toBeUndefined()
   })
 })
+
+describe('cancelling something that has already finished', () => {
+  it('is refused by the action, and not offered by the card', async () => {
+    // Until 12 October `cancelBooking` checked the status and never the clock, while
+    // markCompleted and markNoShow both refuse a session that has not started. The asymmetry
+    // cost little when a cancellation merely freed a slot; it matters now that the hour was
+    // taken off everybody else and may already have been charged, and that "Cancelled" on
+    // Keoni's queue reads as a session that never happened. Ethan cancelled one from the
+    // previous afternoon during testing and it went straight through.
+    //
+    // Asserted against the source, the way `test/blocked-time.test.ts` asserts its five insert
+    // sites: both of these live behind `requireProvider()`, so there is no seam to drive them
+    // through without a session, and a rule enforced in one of the two places is the bug.
+    const { readFileSync } = await import('node:fs')
+
+    const action = readFileSync('app/app/appointments/actions.ts', 'utf8')
+    expect(action, 'cancelBooking must refuse a session that is over').toMatch(
+      /booking\.endTime <= new Date\(\)/,
+    )
+    expect(action).toMatch(/already finished/i)
+
+    const card = readFileSync('app/app/appointments/appointment-actions.tsx', 'utf8')
+    expect(card, 'the card must not offer a control the action will refuse').toMatch(
+      /isFinished = appointment\.endTime <= new Date\(\)/,
+    )
+    expect(card).toMatch(/\{!isFinished && \(/)
+  })
+})

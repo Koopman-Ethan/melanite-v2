@@ -26,7 +26,9 @@ const KIND_LABELS: Record<QueueItem['kind'], string> = {
   room_refund: 'Room refund',
   failed_fee: 'Fee not collected',
   cancelled_course_deposit: 'Cancelled course',
-  held_rent: 'Rent held',
+  // Not "Rent held". Since rent is taken after the session, most of these have had nothing
+  // taken — the item is a decision to make, not money sitting somewhere.
+  held_rent: 'Rent decision',
 }
 
 const KIND_STYLES: Record<QueueItem['kind'], string> = {
@@ -194,7 +196,10 @@ export function QueueRow({
                   : `Refund ${usd(item.amount)}`
                 : 'Don’t charge it'}
             </Button>
-            <span className="text-xs text-ink-faint">
+            {/* `self-center` because the row is `items-end` for the room-refund kind, which has
+                an input to line up with. A bare sentence bottom-aligned against two buttons
+                reads as though it has slipped. */}
+            <span className="self-center text-xs text-ink-faint">
               {item.meta.rentTaken === 'yes'
                 ? 'Already taken — refunding is the only way back.'
                 : 'Nothing taken yet. Either way the provider is emailed the outcome.'}

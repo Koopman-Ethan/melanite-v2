@@ -92,12 +92,35 @@ export async function cancelBooking(
   const user = await requireProvider()
 
   const [booking] = await db
-    .select({ id: bookings.id, status: bookings.status, startTime: bookings.startTime })
+    .select({
+      id: bookings.id,
+      status: bookings.status,
+      startTime: bookings.startTime,
+      endTime: bookings.endTime,
+    })
     .from(bookings)
     .where(and(eq(bookings.id, bookingId), eq(bookings.providerId, user.id)))
     .limit(1)
 
   if (!booking) return { error: 'Appointment not found.' }
+
+  // CANCELLING SOMETHING THAT HAS ALREADY FINISHED is not a cancellation, and until now nothing
+  // stopped it — this checked the status and never the clock, while `markCompleted` and
+  // `markNoShow` both refuse a session that has not started. The asymmetry mattered little when
+  // a cancellation merely freed a slot. It matters now: the hour was taken off everybody else
+  // and may already have been charged, and "Cancelled" on Keoni's queue reads as a session that
+  // never happened when it may well have gone ahead.
+  //
+  // A session that is over has two honest endings, and both are already offered on the same row:
+  // Completed, or No-show.
+  if (booking.endTime <= new Date()) {
+    return {
+      error:
+        'That appointment has already finished, so it cannot be cancelled. ' +
+        'Mark it Completed, or a No-show if nobody came.',
+    }
+  }
+
   if (booking.status !== 'upcoming') {
     return { error: 'Only upcoming appointments can be cancelled.' }
   }

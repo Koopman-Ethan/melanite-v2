@@ -60,6 +60,9 @@ export function AppointmentActions({ appointment }: { appointment: Appointment }
   }
 
   const isPast = appointment.startTime <= new Date()
+  // Over, not merely started. A session still running can be called off; one that has finished
+  // has two honest endings, Completed or No-show, and `cancelBooking` refuses it server-side.
+  const isFinished = appointment.endTime <= new Date()
   const restoresSession = appointment.isPackageRedemption
   const returnsBalance = appointment.isPrepaidRedemption
   // Either kind of prepaid value coming back. Both refuse the ordinary cancel server-side, so
@@ -238,6 +241,10 @@ export function AppointmentActions({ appointment }: { appointment: Appointment }
               </Button>
             </>
           )}
+          {/* Hidden rather than disabled once the session is over: a greyed-out Cancel invites
+              somebody to hunt for why, when the answer is that Completed and No-show beside it
+              are the two things they actually want. */}
+          {!isFinished && (
           <Button size="sm" variant="ghost" disabled={pending} onClick={() => setConfirming('cancel')}>
             {restoresSession
               ? 'Cancel and restore session'
@@ -245,6 +252,7 @@ export function AppointmentActions({ appointment }: { appointment: Appointment }
                 ? 'Cancel and return the balance'
                 : 'Cancel'}
           </Button>
+          )}
         </div>
       )}
     </div>
