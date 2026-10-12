@@ -6,6 +6,7 @@ import {
   refundRentalFee,
   rentalFeeForBooking,
 } from '@/lib/rental/charge'
+import { feeForService } from '@/lib/rental/schedule'
 import { StripeApiError } from '@/lib/stripe/client'
 
 // Charging a provider to use the laser.
@@ -122,8 +123,17 @@ afterAll(async () => {
 })
 
 describe('what a session costs', () => {
-  it('reads the fee off the service', async () => {
-    expect(await rentalFeeForBooking(priced.bookingId)).toBe(3500)
+  it('reads the fee off the service, at whatever the live schedule says', async () => {
+    // NOT a hardcoded 3500. That is a real price Keoni can change from /app/admin/pricing, and
+    // she did — the moment a market review was published in dev this test failed, reporting a
+    // pricing decision as a code defect.
+    //
+    // What is worth pinning is the WIRING: the fee for a booking is the fee for its service's
+    // tier, read from the published schedule. `feeForService` is the one function that knows,
+    // and the point is that the booking path reaches the same answer by a different route.
+    const expected = await feeForService('Laser Hair Removal — Chin')
+    expect(expected, 'Chin must be priced for this fixture to mean anything').not.toBeNull()
+    expect(await rentalFeeForBooking(priced.bookingId)).toBe(expected)
   })
 
   it('is null for a service with no published fee', async () => {

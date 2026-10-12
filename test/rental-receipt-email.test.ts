@@ -33,12 +33,19 @@ describe('the one sentence about money', () => {
 
   it('distinguishes a refund from a session that was never billed', () => {
     const refunded = bookingPaymentSummary({ ...RENTAL, rentCents: 0, paidFromPack: false })
-    const never = bookingPaymentSummary({ ...RENTAL, rentCents: null, paidFromPack: false })
+    // `rentPastDue` is what makes a missing row an alarm rather than a session whose twelve
+    // hours have not elapsed. Before rent moved to after the session there was no such state.
+    const never = bookingPaymentSummary({
+      ...RENTAL,
+      rentCents: null,
+      paidFromPack: false,
+      rentPastDue: true,
+    })
 
     expect(refunded).toMatch(/refunded/i)
     expect(refunded).not.toMatch(/NO FEE/i)
-    // The alarm. A rental booking with no fee row at all is the crash window from the booking
-    // path, and it is the only one of these four that means something is broken.
+    // The alarm. A rental booking past its grace period with no fee row, nobody having waived
+    // it and no decision pending, is the only one of these that means something is broken.
     expect(never).toMatch(/NO FEE RECORDED/)
   })
 
