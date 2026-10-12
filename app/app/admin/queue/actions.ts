@@ -250,44 +250,62 @@ export async function transferEnrollment(
 // — the automatic no-show refund it replaced was deciding every time, always the same way, on no
 // information at all.
 //
+// The DIRECTION inverted on 12 October, when rent moved to being taken after the session. The
+// usual case is now a fee that was never taken, so the question is whether to take it rather
+// than whether to give it back — which is the safer way round, because Melanite never has to
+// claw money back from somebody who has already spent it.
+//
 // Both end with `rentalReviewedAt` stamped, so the item leaves the queue either way. "She looked
 // at it and the fee stands" has to be distinguishable from "nobody has looked".
 // ---------------------------------------------------------------------------------------------
 
-/** Gives the provider their rent back — the fee refunded, or the pack session returned. */
-export async function refundHeldRent(bookingId: string): Promise<QueueState> {
+/** Takes the fee for a session that did not happen, or gives back one already taken.
+ *
+ *  ONE BUTTON, TWO DIRECTIONS, because which way the money goes depends on whether the sweep had
+ *  reached the session before it was cancelled — an accident of timing that Keoni should not have
+ *  to think about. She is answering one question: is this session owed for? */
+export async function collectOwedRent(bookingId: string): Promise<QueueState> {
   const admin = await requireAdmin()
 
-  const out = await reviewRentalFee(bookingId, 'refund', admin.id)
+  const out = await reviewRentalFee(bookingId, 'collect', admin.id)
   revalidatePath('/app/admin/queue')
   revalidatePath('/app/charges')
 
   if ('error' in out) return { error: out.error }
-  if ('kept' in out) return { error: 'Nothing was refunded.' }
+  if (!('collected' in out)) return { error: 'Nothing was charged.' }
 
-  const released = out.refunded
-  if ('returnedSession' in released) {
-    await notifyRentDecision(bookingId, { refunded: 'session' })
-    return { success: 'Session returned to the pack. The provider has been told.' }
-  }
-  if ('refundedCents' in released) {
-    const amount = `$${(released.refundedCents / 100).toFixed(2)}`
-    await notifyRentDecision(bookingId, { refunded: amount })
-    return { success: `${amount} refunded. The provider has been told.` }
-  }
-  return { success: 'Reviewed. There was nothing held to give back.' }
+  const amount = `$${(out.collected / 100).toFixed(2)}`
+  await notifyRentDecision(bookingId, { charged: amount })
+  return { success: `${amount} charged. The provider has been told.` }
 }
 
-/** Records that the fee stands. No money moves; the provider is told, because a decision they
- *  never hear about is the same to them as one nobody made. */
-export async function keepHeldRent(bookingId: string): Promise<QueueState> {
+/** Decides the session is not owed for: a fee already taken is refunded, a pack session goes
+ *  back on the pack, and one never taken is simply never taken.
+ *
+ *  The provider is told either way, because a decision they never hear about is the same to them
+ *  as one nobody made. */
+export async function waiveOwedRent(bookingId: string): Promise<QueueState> {
   const admin = await requireAdmin()
 
-  const out = await reviewRentalFee(bookingId, 'keep', admin.id)
+  const out = await reviewRentalFee(bookingId, 'release', admin.id)
   revalidatePath('/app/admin/queue')
+  revalidatePath('/app/charges')
 
   if ('error' in out) return { error: out.error }
 
-  await notifyRentDecision(bookingId, { kept: true })
-  return { success: 'The fee stands. The provider has been told.' }
+  if ('released' in out) {
+    const released = out.released
+    if ('returnedSession' in released) {
+      await notifyRentDecision(bookingId, { refunded: 'session' })
+      return { success: 'Session returned to the pack. The provider has been told.' }
+    }
+    if ('refundedCents' in released) {
+      const amount = `$${(released.refundedCents / 100).toFixed(2)}`
+      await notifyRentDecision(bookingId, { refunded: amount })
+      return { success: `${amount} refunded. The provider has been told.` }
+    }
+  }
+
+  await notifyRentDecision(bookingId, { waived: true })
+  return { success: 'Nothing charged for that session. The provider has been told.' }
 }

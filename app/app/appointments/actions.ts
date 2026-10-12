@@ -3,7 +3,7 @@
 import { and, eq, isNull, sql } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 
-import { heldRentalFor, type HeldRental } from '@/lib/rental/review'
+import { rentOwedFor, type RentOwed } from '@/lib/rental/review'
 
 import { clientLabel } from '@/lib/booking-labels'
 import { requireProvider } from '@/lib/auth/dal'
@@ -57,18 +57,29 @@ export interface ActionState {
  *  nothing can enforce that — it is a speed bump in front of the reflex to skip the dialog. */
 const MIN_REASON = 10
 
+/** The fee as a phrase, whether or not it has been taken. A pack session has no cash amount. */
+function rentAmount(owed: RentOwed): string {
+  return owed.kind === 'pack' ? '' : `$${(owed.cents / 100).toFixed(2)}`
+}
+
 /** What the provider is told about their rent, now that nothing refunds itself.
  *
  *  It used to announce a refund that had already happened. Saying that now would be a lie: the
  *  fee is held, Keoni decides, and the provider finds out when she does. Promising nothing is
  *  the point — "sometimes its the clients fault, and not the providers", and this message is
  *  written before anybody knows which. */
-function rentalHeldNote(held: HeldRental | null): string {
+function rentalHeldNote(held: RentOwed | null): string {
   if (held?.kind === 'pack') {
     return ' Your pack session is held while Melanite reviews what happened.'
   }
-  if (held?.kind === 'card') {
+  if (held?.kind === 'charged') {
     return ` The $${(held.cents / 100).toFixed(2)} rental fee is held while Melanite reviews what happened. You will hear once it has been looked at.`
+  }
+  if (held?.kind === 'due') {
+    // Nothing has been taken, and this says so rather than implying a charge is sitting there.
+    // Melanite may still decide the session is owed for — a slot nobody else could use — so it
+    // must not read as "you are off the hook" either.
+    return ` The $${(held.cents / 100).toFixed(2)} rental fee has not been taken. Melanite reviews what happened and decides whether it is owed.`
   }
   return ''
 }
@@ -93,12 +104,14 @@ export async function cancelBooking(
 
   // Checked BEFORE anything is written. A cancellation that went through and then complained
   // about the reason would have freed the slot and taken the explanation with it.
-  const held = await heldRentalFor(bookingId)
+  const held = await rentOwedFor(bookingId)
   const outcomeReason = reason.trim()
 
   if (held && outcomeReason.length < MIN_REASON) {
     return {
-      error: `Tell Melanite what happened, in a sentence or so, before cancelling. Keoni reads these to decide whether the $${held.kind === 'card' ? (held.cents / 100).toFixed(2) : '0.00'} rental fee stands.`,
+      error:
+        'Tell Melanite what happened, in a sentence or so, before cancelling. ' +
+        `Keoni reads these to decide whether the ${rentAmount(held)} rental fee is owed.`,
     }
   }
 
@@ -449,7 +462,7 @@ export async function markNoShow(
     return { error: "That appointment hasn't happened yet." }
   }
 
-  const held = await heldRentalFor(bookingId)
+  const held = await rentOwedFor(bookingId)
   const outcomeReason = reason.trim()
 
   if (held && outcomeReason.length < MIN_REASON) {

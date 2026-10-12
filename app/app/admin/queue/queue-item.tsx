@@ -9,9 +9,9 @@ import type { QueueItem } from '@/lib/db/queries/review-queue'
 
 import {
   declineRoomRefund,
-  keepHeldRent,
+  collectOwedRent,
   refundEnrollment,
-  refundHeldRent,
+  waiveOwedRent,
   refundRoomRental,
   retryFee,
   transferEnrollment,
@@ -172,30 +172,32 @@ export function QueueRow({
 
         {item.kind === 'held_rent' && (
           <>
+            {/* The primary action is now CHARGING, not refunding. Rent is taken after the
+                session, so a cancelled one has usually had nothing taken — and the question is
+                whether it is owed for, not whether to give it back. */}
             <Button
               size="sm"
-              disabled={pending}
-              onClick={() => run(() => refundHeldRent(item.id))}
+              disabled={pending || item.meta.rentTaken === 'yes'}
+              onClick={() => run(() => collectOwedRent(item.id))}
             >
-              {pending
-                ? 'Working…'
-                : item.meta.heldSession
-                  ? 'Give the session back'
-                  : `Refund ${usd(item.amount)}`}
+              {pending ? 'Working…' : `Charge ${usd(item.amount)}`}
             </Button>
-            {/* Not "Decline". Keoni is not refusing a request, she is deciding that the fee is
-                owed — and the provider gets told in those terms, so the button says the same
-                thing the email will. */}
             <Button
               size="sm"
               variant="ghost"
               disabled={pending}
-              onClick={() => run(() => keepHeldRent(item.id))}
+              onClick={() => run(() => waiveOwedRent(item.id))}
             >
-              The fee stands
+              {item.meta.rentTaken === 'yes'
+                ? item.meta.heldSession
+                  ? 'Give the session back'
+                  : `Refund ${usd(item.amount)}`
+                : 'Don’t charge it'}
             </Button>
             <span className="text-xs text-ink-faint">
-              Either way the provider is emailed the outcome.
+              {item.meta.rentTaken === 'yes'
+                ? 'Already taken — refunding is the only way back.'
+                : 'Nothing taken yet. Either way the provider is emailed the outcome.'}
             </span>
           </>
         )}

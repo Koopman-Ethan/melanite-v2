@@ -27,7 +27,10 @@ import { appOrigin } from '@/lib/stripe/config'
 export type RentDecision =
   /** The amount refunded as a display string, or 'session' for a pack session returned. */
   | { refunded: string }
-  | { kept: true }
+  /** The amount taken, for a session Keoni decided was owed for after all. */
+  | { charged: string }
+  /** Nothing was taken and nothing will be. */
+  | { waived: true }
 
 /**
  * Best effort, and never throws.
@@ -65,6 +68,7 @@ export async function notifyRentDecision(
         serviceName: row.serviceName,
         when: appointmentWhen(row.startTime),
         refunded: 'refunded' in decision ? decision.refunded : null,
+        charged: 'charged' in decision ? decision.charged : null,
         reason: row.reason,
         url: `${await appOrigin()}/app/charges`,
       }),

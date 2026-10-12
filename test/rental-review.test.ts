@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { getReviewQueue } from '@/lib/db/queries/review-queue'
-import { heldRentalFor, reviewRentalFee } from '@/lib/rental/review'
+import { rentOwedFor, reviewRentalFee } from '@/lib/rental/review'
 
 // Who decides whether a provider gets the rent back.
 //
@@ -122,14 +122,14 @@ describe('what a session that did not happen is holding', () => {
     // The whole change, in one assertion. This used to be refunded by `cancelBooking` before
     // the request finished.
     const id = await heldBooking('cancelled', 'Client cancelled on the morning.')
-    expect(await heldRentalFor(id)).toEqual({ kind: 'card', cents: 3500 })
+    expect(await rentOwedFor(id)).toEqual({ kind: 'charged', cents: 3500 })
   })
 
   it('still holds the fee after a no-show', async () => {
     // And this used to be refunded by `markNoShow`, which is what v2 of the rental terms told
     // providers in as many words. v3 withdrew it, which is why that bump forces re-acceptance.
     const id = await heldBooking('no_show', 'Client did not turn up and has not replied.')
-    expect(await heldRentalFor(id)).toEqual({ kind: 'card', cents: 3500 })
+    expect(await rentOwedFor(id)).toEqual({ kind: 'charged', cents: 3500 })
   })
 
   it('holds nothing against a booking that paid no rent', async () => {
@@ -140,7 +140,7 @@ describe('what a session that did not happen is holding', () => {
       `SELECT id FROM bookings WHERE payment_source <> 'rental' AND status = 'cancelled' LIMIT 1`,
     )) as { id: string }[]
     if (rows.length === 0) return
-    expect(await heldRentalFor(rows[0].id)).toBeNull()
+    expect(await rentOwedFor(rows[0].id)).toBeNull()
   })
 })
 
@@ -177,7 +177,7 @@ describe('deciding', () => {
   it('lets the fee stand, and takes it off the list', async () => {
     const id = await heldBooking('cancelled', 'Changed my mind the day before.')
 
-    expect(await reviewRentalFee(id, 'keep', adminId)).toEqual({ kept: true })
+    expect(await reviewRentalFee(id, 'waive', adminId)).toEqual({ waived: true })
 
     // Nothing moved.
     const [led] = (await sql.query(
@@ -195,7 +195,7 @@ describe('deciding', () => {
 
   it('records who decided and when', async () => {
     const id = await heldBooking('no_show', 'Client no-showed, second time this month.')
-    await reviewRentalFee(id, 'keep', adminId)
+    await reviewRentalFee(id, 'waive', adminId)
 
     const [row] = (await sql.query(
       `SELECT rental_reviewed_at, rental_reviewed_by FROM bookings WHERE id = $1`,
@@ -209,9 +209,9 @@ describe('deciding', () => {
     // The underlying refund is idempotent, but a second stamp would overwrite who decided and
     // when — and on the refund path would attempt a second refund of the same charge.
     const id = await heldBooking('cancelled', 'Double-click guard.')
-    expect(await reviewRentalFee(id, 'keep', adminId)).toEqual({ kept: true })
+    expect(await reviewRentalFee(id, 'waive', adminId)).toEqual({ waived: true })
 
-    const again = await reviewRentalFee(id, 'keep', adminId)
+    const again = await reviewRentalFee(id, 'waive', adminId)
     expect(again).toHaveProperty('error')
     if ('error' in again) expect(again.error).toMatch(/already been reviewed/i)
   })
@@ -224,7 +224,7 @@ describe('deciding', () => {
     )) as { id: string }[]
     if (rows.length === 0) return
 
-    const out = await reviewRentalFee(rows[0].id, 'keep', adminId)
+    const out = await reviewRentalFee(rows[0].id, 'waive', adminId)
     expect(out).toHaveProperty('error')
   })
 
@@ -234,13 +234,13 @@ describe('deciding', () => {
     )) as { id: string }[]
     if (rows.length === 0) return
 
-    const out = await reviewRentalFee(rows[0].id, 'keep', adminId)
+    const out = await reviewRentalFee(rows[0].id, 'waive', adminId)
     expect(out).toHaveProperty('error')
-    if ('error' in out) expect(out.error).toMatch(/nothing held/i)
+    if ('error' in out) expect(out.error).toMatch(/nothing to decide/i)
   })
 
   it('refuses one that does not exist', async () => {
-    const out = await reviewRentalFee('00000000-0000-0000-0000-000000000000', 'keep', adminId)
+    const out = await reviewRentalFee('00000000-0000-0000-0000-000000000000', 'waive', adminId)
     expect(out).toHaveProperty('error')
   })
 })
@@ -264,7 +264,7 @@ describe('a fee already given back', () => {
     )) as { id: string }[]
     ledgerIds.push(led[0].id)
 
-    expect(await heldRentalFor(id)).toBeNull()
+    expect(await rentOwedFor(id)).toBeNull()
     const queue = await getReviewQueue()
     expect(queue.find((q) => q.id === id)).toBeUndefined()
   })

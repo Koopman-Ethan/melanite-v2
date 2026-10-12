@@ -3,6 +3,8 @@ import 'server-only'
 import { and, asc, eq, isNotNull, isNull, sql } from 'drizzle-orm'
 
 import { clientLabel } from '@/lib/booking-labels'
+import { tierForService } from '@/lib/rental-fees'
+import { getLiveSchedule } from '@/lib/rental/schedule'
 import { db } from '@/lib/db'
 import {
   bookings,
@@ -138,14 +140,20 @@ async function failedFees(): Promise<QueueItem[]> {
 
 /** Laser sessions that did not happen, with the provider's rent still held.
  *
- *  Derived, like everything else here. Three conditions: the appointment is cancelled or missed,
- *  nobody has reviewed it, and there is still something to give back. That last one is what lets
- *  a resolved item leave without a flag saying it has — a refund nets the ledger to zero, and a
- *  returned pack session is voided.
+ *  Derived, like everything else here: the appointment is cancelled or missed, nobody has
+ *  reviewed it, and nobody has waived it.
  *
- *  BOTH held-checks matter. A pack-covered session has no ledger row at all, so looking only at
- *  money would report nothing held for a session the provider genuinely paid for; a card-charged
- *  session has no redemption row. Every rental booking has exactly one of the two.
+ *  IT NO LONGER REQUIRES MONEY TO HAVE MOVED, which is the 12 October fix and the reason this
+ *  comment is longer than the query. Rent is swept twelve hours after a session ends, so a
+ *  booking cancelled before then has had nothing charged — and the old filter, which kept only
+ *  rows still "holding" something, dropped exactly those. The session vanished: no reason asked
+ *  of the provider, no item here, and the sweep skips cancelled bookings by design. Melanite
+ *  lost the rent and nobody saw it happen. Found one minute into testing, which is roughly how
+ *  long it would have taken in production.
+ *
+ *  So the question became "is there a decision to make?" rather than "is money held?". A
+ *  resolved item still leaves without a flag: a refund nets the ledger to zero, a returned pack
+ *  session is voided, a charge stamps the review, and a waiver stamps its own column.
  */
 async function heldRent(): Promise<QueueItem[]> {
   const rows = await db
@@ -177,12 +185,39 @@ async function heldRent(): Promise<QueueItem[]> {
         eq(bookings.paymentSource, 'rental'),
         sql`${bookings.status} IN ('cancelled', 'no_show')`,
         isNull(bookings.rentalReviewedAt),
+        // A waived fee is a decision on the record, not an oversight.
+        isNull(bookings.rentWaivedAt),
+        // ...and neither is a refunded one. A session that WAS charged and has been given back
+        // nets to zero and is settled — it must leave without a flag saying so, which is the
+        // property the derived queue is built on. Dropping this when the "is money held?"
+        // filter went would have left every refund sitting in the list for ever.
+        sql`NOT (
+          exists (
+            select 1 from ledger_entries le
+             where le.subject_type = 'booking' and le.subject_id = bookings.id
+               and le.source = 'rental_fee' and le.entry_type = 'purchase'
+          )
+          AND coalesce((
+            select round(sum(l.gross_amount) * 100)::int from ledger_entries l
+             where l.subject_type = 'booking' and l.subject_id = bookings.id
+               and l.source = 'rental_fee'
+          ), 0) <= 0
+        )`,
       ),
     )
     .orderBy(asc(bookings.startTime))
 
+  // Priced in TypeScript, not in the query. A service's fee is its TIER's fee, and the
+  // name-to-tier map lives in `lib/rental-fees.ts` because the ETL truncates the catalogue —
+  // there is no key in the database to join on. One schedule load, mapped in code.
+  const schedule = await getLiveSchedule()
+  const dueFor = (serviceName: string): number => {
+    const tier = tierForService(serviceName)
+    if (!tier) return 0
+    return schedule.byTier.get(tier.key)?.singleCents ?? tier.singleCents
+  }
+
   return rows
-    .filter((r) => r.heldSession || Number(r.heldCents) > 0)
     .map((r) => ({
       kind: 'held_rent' as const,
       id: r.id,
@@ -190,7 +225,13 @@ async function heldRent(): Promise<QueueItem[]> {
       // provider been waiting to hear", and the session is what they are waiting about.
       since: r.startTime,
       waitingDays: 0,
-      amount: r.heldSession ? '0.00' : (Number(r.heldCents) / 100).toFixed(2),
+      // The amount at stake, taken or not. `heldCents` is what has actually moved; `dueCents`
+      // is what the session costs if Keoni decides it is owed for.
+      amount: r.heldSession
+        ? '0.00'
+        : (
+            (Number(r.heldCents) > 0 ? Number(r.heldCents) : dueFor(r.serviceName)) / 100
+          ).toFixed(2),
       who: `${r.firstName} ${r.lastName}`,
       detail:
         `${r.status === 'no_show' ? 'No-show' : 'Cancelled'} · ${r.serviceName} on ` +
@@ -201,6 +242,8 @@ async function heldRent(): Promise<QueueItem[]> {
         bookingStatus: r.status,
         outcomeReason: r.reason,
         heldSession: r.heldSession ? 'yes' : null,
+        /** Whether the money has already moved, which decides which way the buttons point. */
+        rentTaken: r.heldSession || Number(r.heldCents) > 0 ? 'yes' : null,
       },
     }))
 }

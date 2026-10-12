@@ -3,9 +3,19 @@ import 'server-only'
 import { and, eq, isNull, sql } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
-import { bookings, providerPackRedemptions } from '@/lib/db/schema'
+import {
+  bookings,
+  providerPackRedemptions,
+  providerServices,
+  providers,
+  services,
+} from '@/lib/db/schema'
 
+import { paysRent } from '@/lib/revenue-model'
+
+import { chargeRentalFee } from './charge'
 import { releaseRentalForBooking, type RentalReleaseResult } from './release'
+import { feeForService } from './schedule'
 
 // Who decides whether a provider gets the rent back.
 //
@@ -28,39 +38,59 @@ import { releaseRentalForBooking, type RentalReleaseResult } from './release'
 // declined, the hardest to explain, and it would show the provider two transactions for one
 // session. Holding costs nothing and moves no money until the decision is made.
 
-/** What a provider has riding on a booking that did not happen. */
-export type HeldRental =
-  /** Money on the card, in cents. A decision to refund gives this back. */
-  | { kind: 'card'; cents: number }
-  /** A session off a pack. A decision to refund puts it back on the pack.
+/** What is riding on a booking that did not happen. */
+export type RentOwed =
+  /** Money already taken. A decision to let it go gives this back. */
+  | { kind: 'charged'; cents: number }
+  /** Not taken yet, and will not be: the sweep never touches a cancelled or missed session.
+   *
+   *  THE COMMON CASE SINCE 12 OCTOBER, and the one this type was rewritten for. Rent is now
+   *  swept twelve hours after a session ends, so a booking cancelled before then has had
+   *  nothing charged — and the old "is money held?" test answered no and quietly let the whole
+   *  thing through: no reason asked, no queue item, no sweep. The session simply vanished and
+   *  Melanite lost the rent without anybody seeing it. */
+  | { kind: 'due'; cents: number }
+  /** A session off a pack. Giving it back puts it on the pack.
    *
    *  Only Karly's grandfathered sessions, granted at cutover because her clients had already
-   *  bought them under the old model. Rare, finite, and gone once they are used — but a pack
-   *  session is worth real money to her, so it gets the same review as a card charge rather
-   *  than being swept up as "nothing was charged". */
+   *  bought them under the old model. Rare, finite, and gone once used — but worth real money
+   *  to her, so it gets the same review as a card charge. */
   | { kind: 'pack' }
 
 /**
- * Whether this booking is holding anything a decision could give back.
+ * What a decision about this booking is actually about.
  *
- * Null covers every appointment that predates the rental model, Melanite's own, the eight
- * external bookings still running to 20 October, and anything paid by a client. Those reach
- * `cancelled` through four other paths that know nothing about rent, and there is nothing for
- * Keoni to decide about them — putting them in her queue would be asking her to adjudicate
- * money that was never taken.
+ * Null covers every appointment that predates the rental model, Melanite's own, the external
+ * bookings still running to 20 October, and anything paid by a client. Those reach `cancelled`
+ * through four other paths that know nothing about rent, and there is nothing to decide — asking
+ * Keoni to adjudicate money that was never owed is how a queue stops being read.
+ *
+ * Also null once the thing has been settled: refunded, waived, or reviewed. That is what takes
+ * an item off the queue without a flag saying it is off.
  */
-export async function heldRentalFor(bookingId: string): Promise<HeldRental | null> {
+export async function rentOwedFor(bookingId: string): Promise<RentOwed | null> {
   const [row] = await db
-    .select({ paymentSource: bookings.paymentSource })
+    .select({
+      paymentSource: bookings.paymentSource,
+      status: bookings.status,
+      serviceName: services.name,
+      waivedAt: bookings.rentWaivedAt,
+      revenueModel: providers.revenueModel,
+    })
     .from(bookings)
+    .innerJoin(providerServices, eq(bookings.providerServiceId, providerServices.id))
+    .innerJoin(services, eq(providerServices.serviceId, services.id))
+    .innerJoin(providers, eq(bookings.providerId, providers.id))
     .where(eq(bookings.id, bookingId))
     .limit(1)
 
   if (!row || row.paymentSource !== 'rental') return null
+  if (!paysRent(row.revenueModel)) return null
+  if (row.waivedAt) return null
 
   // The pack first, for the reason `releaseRentalForBooking` checks it first: a pack-covered
   // booking has no ledger row at all, so looking for money and finding none would report
-  // "nothing held" for a session the provider definitely paid for.
+  // "nothing owed" for a session the provider definitely paid for.
   const [pack] = await db
     .select({ id: providerPackRedemptions.id })
     .from(providerPackRedemptions)
@@ -75,8 +105,7 @@ export async function heldRentalFor(bookingId: string): Promise<HeldRental | nul
   if (pack) return { kind: 'pack' }
 
   // The purchase net of any refund. Net, not the purchase alone, because a fee already given
-  // back is nothing held — and this is what keeps a resolved item out of the queue without a
-  // flag saying so.
+  // back is nothing owed.
   const net = await db.execute<{ cents: number | null }>(sql`
     SELECT round(sum(gross_amount) * 100)::int AS cents
       FROM ledger_entries
@@ -85,12 +114,29 @@ export async function heldRentalFor(bookingId: string): Promise<HeldRental | nul
   `)
 
   const cents = net.rows?.[0]?.cents ?? null
-  return cents !== null && cents > 0 ? { kind: 'card', cents } : null
+  if (cents !== null && cents > 0) return { kind: 'charged', cents }
+  // Already charged and fully refunded — settled, nothing to decide.
+  if (cents !== null && cents <= 0) return null
+
+  // Nothing charged. Still owed, unless the fee cannot be priced at all.
+  const due = await feeForService(row.serviceName)
+  return due === null ? null : { kind: 'due', cents: due }
 }
 
-export type ReviewDecision = 'refund' | 'keep'
+/** What Keoni can decide. `collect` takes the fee that was never taken; `release` gives back one
+ *  that was, or returns a pack session; `waive` records that nothing will be pursued.
+ *
+ *  THE DIRECTION INVERTED on 12 October. While rent was taken at booking the only question was
+ *  whether to give it back. Now a cancelled session has had nothing taken, so the usual question
+ *  is whether to take it at all — which is strictly the safer way round, because Melanite never
+ *  has to claw money back from somebody who has already spent it. */
+export type ReviewDecision = 'collect' | 'release' | 'waive'
 
-export type ReviewResult = { refunded: RentalReleaseResult } | { kept: true } | { error: string }
+export type ReviewResult =
+  | { collected: number }
+  | { released: RentalReleaseResult }
+  | { waived: true }
+  | { error: string }
 
 /**
  * Settles the held fee, one way or the other.
@@ -128,22 +174,50 @@ export async function reviewRentalFee(
     return { error: 'Only a cancelled or missed appointment has a fee to decide about.' }
   }
 
-  const held = await heldRentalFor(bookingId)
-  if (!held) return { error: 'There is nothing held against this appointment.' }
+  const owed = await rentOwedFor(bookingId)
+  if (!owed) return { error: 'There is nothing to decide about this appointment.' }
 
-  if (decision === 'keep') {
+  if (decision === 'waive') {
+    await db
+      .update(bookings)
+      .set({ rentWaivedAt: new Date(), rentWaivedBy: adminId })
+      .where(eq(bookings.id, bookingId))
     await stamp(bookingId, adminId)
-    return { kept: true }
+    return { waived: true }
   }
 
-  // The refund BEFORE the stamp. The other order would mark the decision made and then
-  // discover Stripe would not do it, leaving the item off the queue with the money still held
-  // and nobody aware — the one failure here that loses track of real money.
+  if (decision === 'collect') {
+    if (owed.kind !== 'due') {
+      return { error: 'That fee has already been taken — release it instead.' }
+    }
+
+    // The charge BEFORE the stamp, for the same reason the refund is: stamping first would mark
+    // the decision made and then discover the card would not pay, taking the item off the queue
+    // with the money still owed and nobody aware.
+    const charged = await chargeRentalFee(bookingId)
+    if ('error' in charged) return { error: charged.error }
+    if ('skipped' in charged) return { error: charged.skipped }
+
+    await stamp(bookingId, adminId)
+    return { collected: charged.charged.amountCents }
+  }
+
+  // release — give back a fee that was taken, or return a pack session. Nothing was taken when
+  // the fee is merely due, so releasing it is the same as waiving it.
+  if (owed.kind === 'due') {
+    await db
+      .update(bookings)
+      .set({ rentWaivedAt: new Date(), rentWaivedBy: adminId })
+      .where(eq(bookings.id, bookingId))
+    await stamp(bookingId, adminId)
+    return { waived: true }
+  }
+
   const released = await releaseRentalForBooking(bookingId)
   if ('error' in released) return { error: released.error }
 
   await stamp(bookingId, adminId)
-  return { refunded: released }
+  return { released }
 }
 
 async function stamp(bookingId: string, adminId: string): Promise<void> {

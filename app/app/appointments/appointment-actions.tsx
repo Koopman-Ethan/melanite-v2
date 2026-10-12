@@ -81,17 +81,35 @@ export function AppointmentActions({ appointment }: { appointment: Appointment }
   // provider paid. Every other branch here describes a client's money.
   const isRental = appointment.paymentSource === 'rental'
 
-  // Whether this appointment is holding rent somebody will have to decide about. A rental
-  // booking whose fee was never charged — Melanite's own, or one made before the schedule
-  // existed — has nothing held and so nothing to explain.
-  const holdsRent = isRental && (appointment.paidFromCredit || (appointment.rentalCents ?? 0) > 0)
+  // Whether a decision about rent hangs on this appointment.
+  //
+  // THIS USED TO ASK "was money taken?", which was the same question while the fee was charged
+  // at booking. Since 12 October it is taken twelve hours after the session, so a booking
+  // cancelled before then has had nothing charged — and that test answered no, hid the reason
+  // box, and let the cancellation through with no explanation, no queue item and no sweep. The
+  // session vanished and Melanite lost the rent silently. Ethan hit it within a minute of
+  // testing.
+  //
+  // `rentalCents === null` means nothing charged YET, which is the ordinary state and still
+  // owes a reason. Only an explicit zero — charged and fully refunded — is settled.
+  const holdsRent =
+    isRental && (appointment.paidFromCredit || appointment.rentalCents !== 0)
   const rentLabel = appointment.paidFromCredit
     ? 'pack session'
-    : `$${((appointment.rentalCents ?? 0) / 100).toFixed(2)} rental fee`
+    : appointment.rentalCents === null
+      ? 'rental fee'
+      : `$${(appointment.rentalCents / 100).toFixed(2)} rental fee`
 
   // The gate Keoni asked for: no path out of an appointment that holds rent without saying what
   // happened. Deliberately the same for a cancellation and a no-show — she withdrew the
   // automatic no-show refund precisely because the two were being treated differently.
+  // Whether the money has actually moved yet, which decides the wording. "Held, not refunded"
+  // is true of a fee already taken and a lie about one that never was.
+  const rentTaken = appointment.paidFromCredit || (appointment.rentalCents ?? 0) > 0
+  const rentSentence = rentTaken
+    ? `Your ${rentLabel} is held, not refunded — Melanite decides whether it stands.`
+    : `Your ${rentLabel} has not been taken. Melanite decides whether it is owed.`
+
   const reasonOk = !holdsRent || reason.trim().length >= MIN_REASON
 
   const reasonBox = holdsRent ? (
@@ -105,7 +123,7 @@ export function AppointmentActions({ appointment }: { appointment: Appointment }
         className="w-full rounded-field border border-line-control bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-faint focus:border-gold"
       />
       <span className="block text-xs text-ink-faint">
-        Melanite reads this to decide whether your {rentLabel} stands. Your side of it is the
+        Melanite reads this to decide whether your {rentLabel} is owed. Your side of it is the
         only side there is, so say enough to be going on with.
       </span>
     </label>
@@ -121,7 +139,7 @@ export function AppointmentActions({ appointment }: { appointment: Appointment }
         <div className="space-y-2 rounded-field border border-line bg-overlay p-3">
           <p className="text-xs text-ink-secondary">
             {holdsRent
-              ? `Mark this as a no-show. Your ${rentLabel} is held, not refunded — Melanite decides whether it stands, and you will hear once it has been looked at.`
+              ? `Mark this as a no-show. ${rentSentence} You will hear once it has been looked at.`
               : `Mark ${appointment.clientName} as a no-show. Charging the fee uses the card they left on file — if there is none, the status is still recorded and nothing is charged.`}
           </p>
           {reasonBox}
@@ -157,7 +175,7 @@ export function AppointmentActions({ appointment }: { appointment: Appointment }
               : returnsBalance
                 ? 'Cancel this appointment and put the money back on the client’s prepaid balance? Anything they have already paid on a card is refunded in Stripe, not here.'
                 : holdsRent
-                  ? `Cancel this appointment? The slot reopens straight away. Your ${rentLabel} is held, not refunded — Melanite decides whether it stands.`
+                  ? `Cancel this appointment? The slot reopens straight away. ${rentSentence}`
                   : isRental
                     ? 'Cancel this appointment? The slot reopens.'
                     : 'Cancel this appointment? The client’s payment link will be cancelled if it is still unpaid.'}

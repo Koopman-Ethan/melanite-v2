@@ -690,8 +690,10 @@ export function rentalDecisionEmail(input: {
   firstName: string
   serviceName: string
   when: string
-  /** The amount refunded, 'session' for a pack session returned, or null when the fee stands. */
+  /** The amount refunded, 'session' for a pack session returned, or null when nothing came back. */
   refunded: string | null
+  /** The amount taken, when Keoni decided the session was owed for after all. Null otherwise. */
+  charged: string | null
   /** What the provider said happened, quoted back so the decision has its context attached. */
   reason: string | null
   url: string
@@ -701,14 +703,18 @@ export function rentalDecisionEmail(input: {
 
   const outcome = input.refunded
     ? (back ?? `${input.refunded} has been refunded to your card.`)
-    : 'The rental fee for that session stands.'
+    : input.charged
+      ? `${input.charged} has been charged to your card for that session.`
+      : 'Nothing has been charged for that session.'
 
   const said = input.reason ? [`You told us: “${input.reason}”`, ''] : []
 
   return {
     subject: input.refunded
       ? `${session ? 'Session returned' : `${input.refunded} refunded`} — ${input.serviceName}`
-      : `Rental fee stands — ${input.serviceName}`,
+      : input.charged
+        ? `${input.charged} charged — ${input.serviceName}`
+        : `Nothing charged — ${input.serviceName}`,
     text: [
       `Hi ${input.firstName},`,
       '',
@@ -725,7 +731,7 @@ export function rentalDecisionEmail(input: {
       input.url,
     ].join('\n'),
     html: wrap(
-      input.refunded ? 'Rental fee returned' : 'Rental fee stands',
+      input.refunded ? 'Rental fee returned' : input.charged ? 'Rental fee charged' : 'Nothing charged',
       p(`Hi ${input.firstName},`) +
         p(
           `Melanite has reviewed the session that did not go ahead: <strong>${esc(input.serviceName)}</strong>.<br>${esc(input.when)}`,
