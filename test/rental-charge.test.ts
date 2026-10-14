@@ -156,7 +156,7 @@ describe('refusals, all of them before Stripe is called', () => {
     // because nobody finds it until the month's takings are short.
     const out = await chargeRentalFee(unpriced.bookingId)
     expect(out).toHaveProperty('error')
-    if ('error' in out) expect(out.error).toMatch(/no published rental fee/i)
+    if ('error' in out) expect(out.error).toMatch(/no rental fee set/i)
   })
 
   it('refuses when the provider has no card on file', async () => {

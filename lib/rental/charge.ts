@@ -7,7 +7,7 @@ import { paysRentSql } from '@/lib/db/revenue-model'
 import { bookings, ledgerEntries, providerServices, providers, services } from '@/lib/db/schema'
 import { toMoney } from '@/lib/money'
 import { notifyProviderCharged } from '@/lib/notify-melanite'
-import { feeForService } from '@/lib/rental/schedule'
+import { feeForProviderService } from '@/lib/rental/schedule'
 import { isHouse, paysRent } from '@/lib/revenue-model'
 import { StripeApiError, stripePost, stripeWritesEnabled } from '@/lib/stripe/client'
 
@@ -59,18 +59,23 @@ export type RentalChargeResult =
 
 /** What this booking costs the provider, before any decision about whether to take it.
  *
- *  Null when the service has no published fee — see `UNPRICED` in `lib/rental-fees.ts`. Null is
- *  "cannot be booked", never "free". */
+ *  Keoni's figure if she has set one, otherwise the derived fee for this provider's basis. Null
+ *  is "cannot be charged", never "free" — see `feeForProviderService`. */
 export async function rentalFeeForBooking(bookingId: string): Promise<number | null> {
   const [row] = await db
-    .select({ serviceName: services.name })
+    .select({
+      providerId: bookings.providerId,
+      serviceName: services.name,
+      feeOverrideCents: bookings.feeOverrideCents,
+    })
     .from(bookings)
     .innerJoin(providerServices, eq(bookings.providerServiceId, providerServices.id))
     .innerJoin(services, eq(providerServices.serviceId, services.id))
     .where(eq(bookings.id, bookingId))
     .limit(1)
 
-  return row ? await feeForService(row.serviceName) : null
+  if (!row) return null
+  return row.feeOverrideCents ?? (await feeForProviderService(row.providerId, row.serviceName))
 }
 
 /**
@@ -92,6 +97,8 @@ export async function chargeRentalFee(bookingId: string): Promise<RentalChargeRe
       providerId: bookings.providerId,
       status: bookings.status,
       startTime: bookings.startTime,
+      /** Keoni's figure, when she has set one. See the amount decision below. */
+      feeOverrideCents: bookings.feeOverrideCents,
       serviceId: providerServices.serviceId,
       serviceName: services.name,
     })
@@ -157,12 +164,22 @@ export async function chargeRentalFee(bookingId: string): Promise<RentalChargeRe
     return { skipped: 'This provider is on the 50/50 split and owes no rental fee.' }
   }
 
-  const amountCents = await feeForService(booking.serviceName)
+  // WHAT TO CHARGE, in the one place that charges it.
+  //
+  // Keoni's figure wins when she has set one. For a provider billed half their own price she
+  // confirms every session against a receipt before the card is touched — the derived number is
+  // only what Melanite believes the session was worth, since the price list it comes from is the
+  // provider's own to edit. An override is her saying what it actually was.
+  //
+  // Falls back to the derived fee, which is the published tier price for everybody else.
+  const amountCents = booking.feeOverrideCents ?? (await feeForProviderService(booking.providerId, booking.serviceName))
+
   if (amountCents === null) {
-    // The loud gap. A service with no published fee must not become a free session; it is a
-    // question for Keoni, and until she answers it this booking cannot be billed.
+    // The loud gap. A service with no fee must not become a free session; it is a question for
+    // Keoni, and until she answers it this booking cannot be billed. The two ways to get here
+    // read differently: no published tier price, or a provider who has not priced it themselves.
     return {
-      error: `${booking.serviceName} has no published rental fee yet, so it cannot be booked.`,
+      error: `${booking.serviceName} has no rental fee set yet, so it cannot be charged.`,
     }
   }
 

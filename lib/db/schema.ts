@@ -100,6 +100,9 @@ export const providerRevenueModel = pgEnum('provider_revenue_model', [
   'rental',
 ])
 
+/** How a provider's rental fee is derived. See `providers.rentBasis`. */
+export const providerRentBasis = pgEnum('provider_rent_basis', ['tier', 'half_own_price'])
+
 export const medicalDirectorType = pgEnum('medical_director_type', ['melanite', 'own'])
 
 /** The booking gate. `melanite` path mirrors the Stripe subscription; `own` path is set
@@ -399,6 +402,33 @@ export const providers = pgTable('providers', {
    *  avoid. Grandfathering is therefore a deliberate act, done once by script, and NOT offered
    *  anywhere in the invite form: a dropdown is a thing somebody picks from by accident. */
   revenueModel: providerRevenueModel().notNull().default('rental'),
+
+/** How this provider's rental fee is worked out.
+ *
+ *  `tier` — the published schedule. A service belongs to a tier and the tier has a price Keoni
+ *  sets on `/app/admin/pricing`. Everybody is on this.
+ *
+ *  `half_own_price` — half of what the PROVIDER charges for that service, read from their own
+ *  price list. Leyla, Brittany and Karly only, and the last trace of the 50/50 arrangement they
+ *  were grandfathered into: they used to keep half of what their client paid Melanite, and now
+ *  they bill the client directly and pay Melanite the other half as rent. The same split,
+ *  arrived at from the opposite direction.
+ *
+ *  SEPARATE FROM `revenueModel` on purpose. That column answers where a client's money GOES,
+ *  and since 14 October the answer is the same for everybody — nowhere near Melanite. This one
+ *  answers how much the provider owes, which is a different question and the only one still
+ *  varying. Folding them together is what produced the branching that `lib/revenue-model.ts`
+ *  exists to pay down.
+ *
+ *  THE DEFAULT IS `tier`, and for the same reason the `revenueModel` default matters: a
+ *  provider invited next March must not quietly inherit a bespoke arrangement with Keoni. The
+ *  three are set by script, once, and nobody joins them.
+ *
+ *  It also carries a consequence beyond the amount: a `half_own_price` provider is NEVER swept
+ *  automatically. Their price list is theirs to edit, so the fee is theirs to influence, and
+ *  Keoni confirms every session against a receipt before the card is charged. See
+ *  `lib/rental/settle.ts` and the `rent_to_confirm` queue. */
+  rentBasis: providerRentBasis().notNull().default('tier'),
 
   // Stripe Connect (money out, to the provider).
   stripeAccountId: text(),
@@ -780,6 +810,27 @@ export const bookings = pgTable('bookings', {
    *  tellable from "nobody has looked", or the queue never empties and stops being read. */
   rentWaivedAt: timestamp({ withTimezone: true }),
   rentWaivedBy: uuid().references(() => providers.id, { onDelete: 'set null' }),
+
+  /** What Keoni decided this session's rent actually is, in cents.
+   *
+   *  Null means nobody has intervened and the derived figure stands — the published tier fee, or
+   *  half the provider's own price. Set, it wins, and `chargeRentalFee` takes it.
+   *
+   *  THE COLUMN EXISTS BECAUSE THE FEE CAN BE INFLUENCED BY THE PERSON PAYING IT. A provider
+   *  billed half their own price sets that price themselves, so the derived number is only what
+   *  Melanite believes the session was worth. Keoni confirms each one against the receipt the
+   *  provider sends her, and this is where her figure goes.
+   *
+   *  CENTS, as an integer, for the reason `rental_fee_entries` uses them: every consumer wants
+   *  cents, and a numeric(10,2) round trip is where the penny disagreements this codebase has
+   *  already fixed twice came from.
+   *
+   *  NOT `bookings.price`. That column is the CLIENT's, forced to zero on a rental booking by
+   *  `bookings_rental_has_no_price`, and a figure there would be read as revenue by every report
+   *  that sums it. */
+  feeOverrideCents: integer(),
+  feeSetBy: uuid().references(() => providers.id, { onDelete: 'set null' }),
+  feeSetAt: timestamp({ withTimezone: true }),
 }, (t) => [
   index().on(t.providerId, t.startTime),
   index().on(t.startTime, t.endTime),

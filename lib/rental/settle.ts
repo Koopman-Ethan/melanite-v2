@@ -103,6 +103,17 @@ export async function settleDueRent(options: { limit?: number } = {}): Promise<S
       JOIN providers p ON p.id = b.provider_id
      WHERE b.payment_source = 'rental'
        AND ${paysRentSql(sql`p.revenue_model`)}
+       -- NEVER a provider whose fee is half their own price.
+       --
+       -- They set that price themselves, so the derived figure is only what Melanite believes
+       -- the session was worth. Keoni confirms each one against a receipt the provider sends
+       -- her, and charging the default before she has looked would take the wrong amount from a
+       -- card on a number the payer chose. They go to the rent_to_confirm queue instead.
+       --
+       -- Expressed HERE rather than at the four call sites, because there are four: the evening
+       -- digest, the cron route, the admin button and the opportunistic page-load trigger. A
+       -- guard at each is three chances to miss one.
+       AND p.rent_basis = 'tier'
        -- Not a no-show and not cancelled. Those did not happen, so the sweep must never touch
        -- them: whether the provider owes anything is Keoni's call, and she makes it in the
        -- queue. A sweep that billed them would be answering her question for her, always the
@@ -141,6 +152,17 @@ export async function settleDueRent(options: { limit?: number } = {}): Promise<S
       JOIN providers p ON p.id = b.provider_id
      WHERE b.payment_source = 'rental'
        AND ${paysRentSql(sql`p.revenue_model`)}
+       -- NEVER a provider whose fee is half their own price.
+       --
+       -- They set that price themselves, so the derived figure is only what Melanite believes
+       -- the session was worth. Keoni confirms each one against a receipt the provider sends
+       -- her, and charging the default before she has looked would take the wrong amount from a
+       -- card on a number the payer chose. They go to the rent_to_confirm queue instead.
+       --
+       -- Expressed HERE rather than at the four call sites, because there are four: the evening
+       -- digest, the cron route, the admin button and the opportunistic page-load trigger. A
+       -- guard at each is three chances to miss one.
+       AND p.rent_basis = 'tier'
        AND b.status IN ('upcoming', 'completed')
        AND b.end_time < now() - ${sql.raw(`interval '${CLOSEOUT_GRACE_HOURS} hours'`)}
        AND b.rent_waived_at IS NULL

@@ -4,7 +4,14 @@ import { and, desc, eq, sql } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
 import { paysRentSql } from '@/lib/db/revenue-model'
-import { rentalFeeEntries, rentalFeeSchedules } from '@/lib/db/schema'
+import { getProviderSharePct } from '@/lib/db/queries/admin-tools'
+import {
+  providerServices,
+  providers,
+  rentalFeeEntries,
+  rentalFeeSchedules,
+  services,
+} from '@/lib/db/schema'
 import { RENTAL_TIERS, tierForService, type RentalTier } from '@/lib/rental-fees'
 
 // What Melanite charges to use the laser, as it currently stands.
@@ -131,6 +138,81 @@ export async function feeForService(serviceName: string): Promise<number | null>
 
   const schedule = await getLiveSchedule()
   return schedule.byTier.get(tier.key)?.singleCents ?? tier.singleCents
+}
+
+/**
+ * What one session of this service costs THIS provider, in cents.
+ *
+ * The function application code should call wherever a provider is known. `feeForService` above
+ * answers the published question; this one answers the only question that actually decides what
+ * a card is charged.
+ *
+ * TWO BASES, ONE QUESTION. Most providers pay the published fee for the service's tier. Leyla,
+ * Brittany and Karly pay half of what they themselves charge for it — the last trace of the
+ * 50/50 they were grandfathered into, arrived at from the other direction now that they bill
+ * their clients directly instead of through Melanite.
+ *
+ * NULL IS A REFUSAL, never a free session, and it means different things per basis:
+ *   - `tier`: the service has no published fee (see `UNPRICED` in `lib/rental-fees.ts`)
+ *   - `half_own_price`: the provider has not priced it on `/app/services`, so there is no half
+ *     to take. Letting that through as zero would hand them an unlimited free session every
+ *     time they left a price blank.
+ *
+ * The figure for a `half_own_price` provider is PROVISIONAL. Their price list is theirs to edit,
+ * so this is what Melanite believes the session is worth, not what it settles for: Keoni
+ * confirms every one of their sessions against a receipt before the card is touched. See the
+ * `rent_to_confirm` queue, and `bookings.feeOverrideCents` for what she sets instead.
+ */
+export async function feeForProviderService(
+  providerId: string,
+  serviceName: string,
+): Promise<number | null> {
+  const [provider] = await db
+    .select({ rentBasis: providers.rentBasis })
+    .from(providers)
+    .where(eq(providers.id, providerId))
+    .limit(1)
+
+  if (!provider) return null
+  if (provider.rentBasis === 'tier') return feeForService(serviceName)
+
+  return halfOwnPriceFor(providerId, serviceName)
+}
+
+/**
+ * Half of what this provider charges for this service, from their own price list.
+ *
+ * Read from `provider_services.price`, which the rental model stopped reading and this brings
+ * back as load-bearing. The share comes from `platform_settings.provider_share_pct` rather than
+ * a hardcoded half, so the one number governs this and the ledger alike — and so Keoni can move
+ * it without a deploy if the arrangement ever changes.
+ *
+ * Rounded in cents, like every other money calculation here, so a half of an odd price cannot
+ * land a fraction of a penny out.
+ */
+export async function halfOwnPriceFor(
+  providerId: string,
+  serviceName: string,
+): Promise<number | null> {
+  const [row] = await db
+    .select({ price: providerServices.price })
+    .from(providerServices)
+    .innerJoin(services, eq(providerServices.serviceId, services.id))
+    .where(
+      and(
+        eq(providerServices.providerId, providerId),
+        eq(services.name, serviceName),
+        eq(providerServices.isActive, true),
+      ),
+    )
+    .limit(1)
+
+  const price = Number(row?.price ?? 0)
+  if (!Number.isFinite(price) || price <= 0) return null
+
+  const sharePct = await getProviderSharePct()
+  const cents = Math.round(price * 100 * (1 - sharePct))
+  return cents > 0 ? cents : null
 }
 
 /** The version a provider has to have accepted. Null when nothing is published yet, which

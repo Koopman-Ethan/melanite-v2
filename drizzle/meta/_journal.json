@@ -295,6 +295,20 @@
       "when": 1791828548339,
       "tag": "0041_left_the_santerians",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1792002286351,
+      "tag": "0042_fixed_garia",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1792002364498,
+      "tag": "0043_overconfident_skaar",
+      "breakpoints": true
     }
   ]
 }
