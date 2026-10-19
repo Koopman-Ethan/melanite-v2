@@ -312,7 +312,24 @@ export async function rentToConfirm(): Promise<QueueItem[]> {
         sql`${bookings.status} IN ('upcoming', 'completed')`,
         // Keyed on TIME, not on anybody pressing Completed. The same reasoning the sweep uses:
         // bookings rot in `upcoming`, and billing cannot wait for a button nobody presses.
-        sql`${bookings.endTime} < now() - ${sql.raw(`interval '${CLOSEOUT_GRACE_HOURS} hours'`)}`,
+        // PAST THE GRACE PERIOD, OR ALREADY ACCOUNTED FOR BY THE PROVIDER.
+        //
+        // The twelve hours exist so a session that might yet become a cancellation does not
+        // reach Keoni — asking her to price something that may not have happened is how a
+        // queue fills with work that evaporates.
+        //
+        // A provider who has sent what they charged, or signed the room off, has settled that
+        // question themselves: both say the session happened and they billed for it. Making
+        // them wait out the rest of the window puts a ready item behind a timer that is no
+        // longer protecting anything, and the provider who just did the work sees nothing on
+        // Keoni's side and assumes it did not save.
+        sql`(
+          ${bookings.endTime} < now() - ${sql.raw(`interval '${CLOSEOUT_GRACE_HOURS} hours'`)}
+          OR ${bookings.receiptAmountCents} IS NOT NULL
+          OR EXISTS (
+            SELECT 1 FROM end_of_use_checklists c WHERE c.booking_id = bookings.id
+          )
+        )`,
         sql`${bookings.startTime} >= ${REVIEW_STARTED_AT.toISOString()}::timestamptz`,
         isNull(bookings.rentWaivedAt),
         sql`NOT EXISTS (

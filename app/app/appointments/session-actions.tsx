@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 
@@ -56,6 +56,13 @@ export function SessionActions({
   // only way back to an editable form from a submitted one.
   const [editing, setEditing] = useState(0)
 
+  /** The receipt panel is showing its SENT confirmation rather than the fields.
+   *
+   *  The parent cannot see inside `useActionState`, so the form says so — and without knowing
+   *  which of the two the panel is showing, "Change it" cannot both open the fields from a
+   *  confirmation and close them again on a second press. */
+  const [justSent, setJustSent] = useState(false)
+
   // Already done, both of them. Rendered as status rather than as a button, because there is
   // nothing left to press — but the receipt stays editable, since a wrong figure has to be
   // fixable right up until Keoni acts on it.
@@ -66,11 +73,32 @@ export function SessionActions({
     ? new Date(sentAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
     : null
 
-  const toggle = (panel: Panel) => setOpen((current) => (current === panel ? null : panel))
+  // Stable, so the effect in `ReceiptForm` that calls it does not re-fire on every render of
+  // this component. An inline arrow is a new function each time and lands in that dependency
+  // array; setting the same value is a React no-op so nothing looped, but it ran constantly.
+  const markSent = useCallback(() => setJustSent(true), [])
 
-  /** Always opens, never toggles. Somebody pressing "Change it" has said what they want, and
-   *  closing the panel is not it. */
+  const toggle = (panel: Panel) =>
+    setOpen((current) => {
+      setJustSent(false)
+      return current === panel ? null : panel
+    })
+
+  /** Opens the fields, or closes them if they are already up.
+   *
+   *  It toggles against the FIELDS, not against the panel. Pressing it while the panel shows
+   *  the sent confirmation opens the fields — closing there would take the confirmation away
+   *  and need a second press to get anywhere, which is what it used to do.
+   *
+   *  Re-opening forces a fresh mount, because the confirmation lives in `useActionState`
+   *  inside the form and a remount is the only way back to editable fields. */
   const amend = () => {
+    const showingFields = open === 'receipt' && !justSent
+    if (showingFields) {
+      setOpen(null)
+      return
+    }
+    setJustSent(false)
     setEditing((n) => n + 1)
     setOpen('receipt')
   }
@@ -154,6 +182,7 @@ export function SessionActions({
           />
           <ReceiptForm
             key={editing}
+            onSent={markSent}
             bookingId={bookingId}
             sentAmountCents={sentAmountCents}
             late={late}

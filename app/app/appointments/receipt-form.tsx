@@ -1,6 +1,6 @@
 'use client'
 
-import { useActionState, useRef, useState } from 'react'
+import { useActionState, useEffect, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Notice } from '@/components/ui/field'
@@ -31,6 +31,7 @@ export function ReceiptForm({
   late = false,
   open,
   onClose,
+  onSent,
 }: {
   bookingId: string
   /** What they last told Melanite, or null if they have not yet. */
@@ -42,6 +43,9 @@ export function ReceiptForm({
   /** Controlled by the card. See the note on `EndOfUseChecklist`. */
   open: boolean
   onClose: () => void
+  /** Fired once the figure is away, so the card knows this panel is showing its confirmation
+   *  rather than the fields. It decides what "Change it" does next. */
+  onSent?: () => void
 }) {
   const [state, action, pending] = useActionState<ReceiptState, FormData>(submitReceipt, {})
   const fileRef = useRef<HTMLInputElement>(null)
@@ -49,6 +53,14 @@ export function ReceiptForm({
   /** Refused in the browser, before anything is sent. Separate from `state.error`, which comes
    *  back from the server — this one never gets that far, which is the point of it. */
   const [fileError, setFileError] = useState<string | null>(null)
+
+
+  // Told AFTER the render, not during it. Calling the parent's setter while this component is
+  // rendering is "Cannot update a component while rendering a different component" — React
+  // refuses it outright, and the tempting place to put it is exactly where that happens.
+  useEffect(() => {
+    if (state.success) onSent?.()
+  }, [state.success, onSent])
 
   // SHRINK FIRST, THEN REFUSE. A photo of a receipt off a modern phone is several megabytes and
   // would blow the server action body limit — at which point Next rejects the request before any
