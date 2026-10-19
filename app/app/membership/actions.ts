@@ -160,6 +160,28 @@ export async function startSubscription(): Promise<StripeRedirect> {
     // the webhook, exactly as before. Only how the subscription is created has changed.
     return { success: 'Subscribed. The plan bills monthly to the card on your account.' }
   } catch (err) {
+    // A STORED CUSTOMER STRIPE NO LONGER KNOWS. The checkout path self-healed from this by
+    // clearing the id and retrying as a fresh customer, and that recovery does not transfer:
+    // the saved payment method belongs to the same dead customer, so a new one would have
+    // nothing to charge.
+    //
+    // Re-adding the card is the repair, and it fixes both halves at once. Clearing the stale
+    // id here means the card form starts clean rather than attaching to a customer that is
+    // not there.
+    if (isMissingCustomerError(err)) {
+      console.warn(
+        `[stripe] clearing unknown billing customer ${provider.stripeBillingCustomerId} for ${user.id}`,
+      )
+      await db
+        .update(providers)
+        .set({ stripeBillingCustomerId: null, billingPaymentMethodId: null })
+        .where(eq(providers.id, user.id))
+
+      return {
+        error: 'Your saved card could not be found at Stripe. Add it again on your account page.',
+      }
+    }
+
     return {
       error: friendlyStripeError(
         err,
