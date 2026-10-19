@@ -103,6 +103,26 @@ function AppointmentCard({
   // took its half at the point of sale. Nothing is owed on one of those.
   const paysRentForThis = appointment.paymentSource === 'rental'
 
+  // Which of the two peers this session gets. Both can be absent — a cancellation past its
+  // close-out window offers neither, and the row draws nothing rather than an empty rule.
+  const happened =
+    appointment.status !== 'cancelled' &&
+    appointment.status !== 'no_show' &&
+    appointment.endTime <= new Date()
+
+  const closeoutOffered = happened && closeoutWindowOpen(appointment)
+
+  // INDEPENDENT OF THE CLOSE-OUT, which is the whole point of them being peers. It was briefly
+  // suppressed while the close-out was still asking, on the theory that two prompts for the
+  // same number is worse than one — true when the figure was a field buried inside the
+  // checklist form, and false now that it is a labelled button beside it. Two buttons that say
+  // what they do are not a duplicate question.
+  //
+  // It also outlives the close-out, which is the reason this matters: that one goes on a
+  // cancellation, a no-show, and twelve hours after any session, and the figure is still owed
+  // after all three.
+  const receiptOffered = happened && keoniSetsFee && paysRentForThis
+
   // Has the rent been taken yet? Null means no ledger row, which since 12 October is the
   // ORDINARY state of a session for its first twelve hours rather than a fault.
   const unsettled = appointment.paymentSource === 'rental' && appointment.rentalCents === null
@@ -226,20 +246,34 @@ function AppointmentCard({
             hasEmail={Boolean(appointment.clientEmail)}
           />
         )}
-        {/* A RENTAL BOOKING, not merely a provider on `keoni_sets`.
-            Their pre-cutover appointments are still on the list and still carry a client and a
-            price: the client paid Melanite through a checkout link and Melanite already took
-            its half at the point of sale. There is no rent owed for one of those and no
-            receipt to send — asking for one invites a provider to pay twice for a session
-            settled months ago. `rentToConfirm` has always filtered on this; the card had not.*/}
-        <CloseoutPrompt appointment={appointment} asksForReceipt={keoniSetsFee && paysRentForThis} />
-        {keoniSetsFee && paysRentForThis && <ReceiptPrompt appointment={appointment} />}
+        {/* TWO PEER ACTIONS on a finished session: how you left the room, and what you
+            charged. Side by side rather than one inside the other, because they are different
+            jobs with different audiences — the close-out is a safety record about a shared
+            machine, the figure is billing. Nesting them is what briefly made signing the room
+            off impossible without an invoice.
+            Either can be absent. The close-out goes on a cancellation, a no-show, and twelve
+            hours after any session; the receipt only ever appears for a RENTAL booking of a
+            `keoni_sets` provider — their pre-cutover client appointments are still on this
+            list and were settled at the point of sale, so asking there would invite somebody
+            to pay twice. */}
+        {/* The divider belongs to the ROW, not to each action, or two peers side by side draw
+            two rules. An empty row draws none, which is what a cancelled session should get. */}
+        {(closeoutOffered || receiptOffered) && (
+          <div className="mt-3 flex flex-wrap items-start gap-x-8 gap-y-3 border-t border-line pt-3">
+            {closeoutOffered && <CloseoutPrompt appointment={appointment} />}
+            {receiptOffered && <ReceiptPrompt appointment={appointment} />}
+          </div>
+        )}
       </div>
     </li>
   )
 }
 
-/** Sending what they charged when the close-out did not carry it.
+/** Sending what they charged.
+ *
+ *  WHETHER IT APPEARS IS DECIDED BY THE CARD, in `receiptOffered`, not here. It used to be
+ *  decided in both places, which is how every money bug in this codebase has started: two
+ *  readings of the same question that agree until one is edited.
  *
  *  Normally this is part of signing off — see `EndOfUseChecklist`. This covers the two cases
  *  that leaves, and both of them are real:
@@ -264,21 +298,8 @@ function ReceiptPrompt({ appointment }: { appointment: Appointment }) {
   if (appointment.status === 'cancelled' || appointment.status === 'no_show') return null
   if (appointment.endTime > new Date()) return null
 
-  // Hidden only while the CLOSE-OUT IS STILL ASKING — which means the window is open and they
-  // have not signed off yet. Two prompts for the same number, side by side, is worse than
-  // either alone.
-  //
-  // The moment close-out stops being the vehicle, this takes over: they signed off without
-  // filling it in, or the twelve hours ran out. Both are ordinary. Keying this on the window
-  // alone left a hole — a provider who closed out early without the figure had the checklist
-  // replaced by "Closed out — 25 of 25" and no way to send it afterwards.
-  const closeoutStillAsking =
-    appointment.closeout === null && closeoutWindowOpen(appointment)
-
-  if (appointment.receiptAmountCents === null && closeoutStillAsking) return null
-
   return (
-    <div className="mt-3 border-t border-line pt-3">
+    <div>
       <ReceiptForm
         bookingId={appointment.id}
         sentAmountCents={appointment.receiptAmountCents}
@@ -299,25 +320,14 @@ function ReceiptPrompt({ appointment }: { appointment: Appointment }) {
  *  Only on a session that has finished and is still inside its window. A prompt on an appointment
  *  three weeks out is noise, and one from last month cannot be answered truthfully any more.
  *  Cancelled and no-show bookings never touched the machine, so they get nothing. */
-function CloseoutPrompt({
-  appointment,
-  asksForReceipt,
-}: {
-  appointment: Appointment
-  asksForReceipt: boolean
-}) {
+function CloseoutPrompt({ appointment }: { appointment: Appointment }) {
   if (appointment.status === 'cancelled' || appointment.status === 'no_show') return null
   if (appointment.endTime > new Date()) return null
   if (!closeoutWindowOpen(appointment)) return null
 
   return (
-    <div className="mt-3 border-t border-line pt-3">
-      <EndOfUseChecklist
-        bookingId={appointment.id}
-        recorded={appointment.closeout}
-        asksForReceipt={asksForReceipt}
-        sentAmountCents={appointment.receiptAmountCents}
-      />
+    <div>
+      <EndOfUseChecklist bookingId={appointment.id} recorded={appointment.closeout} />
     </div>
   )
 }

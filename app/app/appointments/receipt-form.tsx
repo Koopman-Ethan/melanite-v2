@@ -39,33 +39,54 @@ export function ReceiptForm({
   late?: boolean
 }) {
   const [state, action, pending] = useActionState<ReceiptState, FormData>(submitReceipt, {})
-  const [open, setOpen] = useState(sentAmountCents === null)
+  // Collapsed, like the close-out beside it. These are two peer actions on a finished session
+  // — "tell Melanite how you left the room" and "tell Melanite what you charged" — and one
+  // nested inside the other said they were the same job, which is how the close-out ended up
+  // blocked on a billing figure in the first place.
+  const [open, setOpen] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const [fileName, setFileName] = useState<string | null>(null)
 
   const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`
 
-  // Already sent, and not being edited. Deliberately still editable: a provider who typed the
-  // wrong figure must be able to correct it before Keoni acts, and after she has acted the
-  // item has left her queue anyway.
   if (!open) {
+    // Already sent. Still editable on purpose: a provider who typed the wrong figure must be
+    // able to correct it before Keoni acts, and after she has acted the item has left her
+    // queue anyway.
+    if (sentAmountCents !== null) {
+      return (
+        <div className="flex flex-wrap items-center gap-2 text-xs text-ink-secondary">
+          <span>
+            You told Melanite{' '}
+            <strong className="text-ink">{usd(sentAmountCents)}</strong>
+            {sentAt
+              ? ` on ${sentAt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+              : ''}
+            . Keoni sets what you owe from it.
+          </span>
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            className="text-ink-faint underline-offset-4 hover:text-ink hover:underline"
+          >
+            Change it
+          </button>
+        </div>
+      )
+    }
+
+    // Nothing sent yet: the peer of "Close out the suite", and on its own once that one has
+    // gone — which it does on a cancellation, a no-show, and twelve hours after any session.
     return (
-      <div className="flex flex-wrap items-center gap-2 text-xs text-ink-secondary">
-        <span>
-          You told Melanite{' '}
-          <strong className="text-ink">{usd(sentAmountCents ?? 0)}</strong>
-          {sentAt
-            ? ` on ${sentAt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
-            : ''}
-          . Keoni sets what you owe from it.
-        </span>
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          className="text-ink-faint underline-offset-4 hover:text-ink hover:underline"
-        >
-          Change it
-        </button>
+      <div>
+        <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+          Send Keoni what you charged
+        </Button>
+        <p className="mt-1 text-[11px] text-ink-faint">
+          {late
+            ? 'The check-off has closed, but Keoni still needs this to settle the session.'
+            : 'Melanite sets no price for your sessions — Keoni works it out from this.'}
+        </p>
       </div>
     )
   }
