@@ -226,69 +226,104 @@ export function QueueRow({
         )}
 
         {item.kind === 'rent_to_confirm' && (
-          <>
-            {/* THE ONLY EDITABLE AMOUNT IN THIS QUEUE, and the only one that starts empty.
-                Every other item asks whether money should move; this one asks how much, and
-                Melanite has no opinion. These three send Keoni the receipt for what they
-                charged their client and she sets what is owed from it.
+          // Its own column rather than another run of controls in the row. The three facts
+          // here — what they billed, what to charge, what the card takes — were one sentence
+          // with the suggestion buried in the middle of it, and nobody reads a figure out of
+          // the fourth clause of a sentence.
+          <div className="w-full space-y-3">
+            <div className="flex flex-wrap items-end gap-2">
+              {/* THE ONLY EDITABLE AMOUNT IN THIS QUEUE, and the only one that starts empty.
+                  Every other item asks whether money should move; this one asks how much, and
+                  Melanite has no opinion of its own. It briefly arrived pre-filled with half
+                  their list price, which came out along with the derivation behind it — a
+                  prefilled number is one somebody accepts without reading. The suggestion
+                  below is offered rather than assumed, which is the difference. */}
+              <label className="text-xs">
+                <span className="block text-ink-faint">What they owe</span>
+                <div className="relative mt-1">
+                  <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-ink-faint">
+                    $
+                  </span>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.01}
+                    placeholder="0.00"
+                    value={figure}
+                    onChange={(e) => setFigure(e.target.value)}
+                    // `min-h-11` is what Button and Field use — a 44px target. Without it this
+                    // sat visibly shorter than the buttons beside it.
+                    className="w-32 min-h-11 rounded-field border border-line bg-surface py-2 pl-7 pr-3 text-sm text-ink tabular-nums"
+                  />
+                </div>
+              </label>
 
-                It briefly arrived pre-filled with half their list price. That came out on
-                19 October with the derivation behind it — a prefilled number is one somebody
-                accepts without reading, and the whole reason Keoni took this over is that the
-                derived figure was the payer's own number wearing Melanite's authority. */}
-            <label className="text-xs">
-              <span className="block text-ink-faint">What they owe</span>
-              <input
-                type="number"
-                min={0}
-                step={0.01}
-                placeholder="0.00"
-                value={figure}
-                onChange={(e) => setFigure(e.target.value)}
-                className="mt-1 w-28 rounded-field border border-line bg-surface px-2 py-1.5 text-xs text-ink tabular-nums"
-              />
-            </label>
+              <Button
+                size="sm"
+                disabled={pending || !figure || Number(figure) <= 0}
+                onClick={() => run(() => confirmSessionRent(item.id, Number(figure)))}
+              >
+                {/* NAMES WHAT THE CARD TAKES, not what is in the box. The box is what Melanite
+                    KEEPS — `chargeRentalFee` adds processing to it — so a button reading
+                    "Charge $50.00" beside a $51.80 statement line is a query every time.
 
-            <Button
-              size="sm"
-              disabled={pending || !figure || Number(figure) <= 0}
-              onClick={() => run(() => confirmSessionRent(item.id, Number(figure)))}
-            >
-              {/* NAMES WHAT THE CARD TAKES, not what is in the box. The box is what Melanite
-                  KEEPS — `chargeRentalFee` adds processing to it — so a button reading
-                  "Charge $75.00" beside a $77.55 statement line is a query every time.
+                    "Charge $0.00" on a disabled button read as an offer to charge nothing, so
+                    it only names a figure once there is one worth naming. */}
+                {pending
+                  ? 'Charging…'
+                  : cardTakes === null
+                    ? 'Charge'
+                    : `Charge ${usd(cardTakes / 100)}`}
+              </Button>
 
-                  "Charge $0.00" on a disabled button also read as an offer to charge nothing,
-                  so it only names a figure once there is one worth naming. */}
-              {pending
-                ? 'Charging…'
-                : cardTakes === null
-                  ? 'Charge'
-                  : `Charge ${usd(cardTakes / 100)}`}
-            </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={pending}
+                onClick={() => run(() => skipSessionRent(item.id))}
+              >
+                Don&rsquo;t charge it
+              </Button>
+            </div>
 
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={pending}
-              onClick={() => run(() => skipSessionRent(item.id))}
-            >
-              Don’t charge it
-            </Button>
+            {/* THE SUGGESTION, as a thing to press rather than a phrase to find. It was the
+                fourth clause of a sentence that also carried the receipt link and a retention
+                note, and read as commentary — which is the opposite of what it is. */}
+            {recommended !== null && item.meta.adjusted !== 'yes' && (
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setFigure(recommended)}
+                  className="rounded-field border border-gold/40 bg-gold/10 px-2.5 py-1 font-medium text-gold hover:border-gold/70"
+                >
+                  Use {usd(recommended)}
+                </button>
+                <span className="text-ink-faint">
+                  half of the {usd(item.meta.claimed ?? 0)} they billed their client
+                </span>
+              </div>
+            )}
 
-            {/* What they SAID, and the document only if she wants it. The number is the point:
-                three sessions a week, for ever, is a lot of opening photographs of other
-                people's receipts to answer a question a figure already answers. */}
-            <span className="self-center text-xs text-ink-faint">
+            {/* WHAT THE TWO NUMBERS MEAN, once there is a figure to explain. The box is the
+                net and the card takes more, which is invisible without saying it — and the
+                gap is the whole reason the schedule is grossed up at all. */}
+            {cardTakes !== null && Number(figure) > 0 && (
+              <p className="text-xs text-ink-faint">
+                Melanite keeps <strong className="text-ink-secondary">{usd(figure)}</strong> ·{' '}
+                {usd(cardTakes / 100)} comes off their card, the difference being card
+                processing.
+              </p>
+            )}
+
+            {/* The receipt, and what becomes of it. Last, because it is the thing she opens
+                only when the figure does not look right. */}
+            <p className="text-xs text-ink-faint">
               {item.meta.adjusted === 'yes' ? (
                 'You set a figure for this already — charging uses what is in the box.'
               ) : item.meta.claimed ? (
                 <>
-                  They charged their client{' '}
-                  <strong className="text-ink-secondary">{usd(item.meta.claimed)}</strong>.
                   {item.meta.receipt === 'yes' ? (
                     <>
-                      {' '}
                       <a
                         href={`/api/receipt/${item.id}`}
                         target="_blank"
@@ -300,7 +335,7 @@ export function QueueRow({
                       {' — deleted once you charge or waive this.'}
                     </>
                   ) : (
-                    ' No receipt attached.'
+                    'No receipt attached — they sent the figure on its own.'
                   )}
                 </>
               ) : item.meta.closedOut === 'yes' ? (
@@ -308,27 +343,8 @@ export function QueueRow({
               ) : (
                 'They have not closed out this session yet. The figure comes with that.'
               )}
-              {recommended !== null && (
-                <>
-                  {' '}
-                  <button
-                    type="button"
-                    onClick={() => setFigure(recommended)}
-                    className="underline underline-offset-4 hover:text-ink"
-                  >
-                    Use {usd(recommended)}
-                  </button>{' '}
-                  — half of it, the usual split.
-                </>
-              )}
-              {cardTakes !== null && Number(figure) > 0 && (
-                <span className="block">
-                  {usd(figure)} to Melanite · {usd(cardTakes / 100)} off their card with
-                  processing.
-                </span>
-              )}
-            </span>
-          </>
+            </p>
+          </div>
         )}
 
         {item.kind === 'cancelled_course_deposit' && (
