@@ -175,6 +175,16 @@ export async function rentOwedFor(bookingId: string): Promise<RentOwed | null> {
   //
   // Only the amount is derived differently: the published rental fee, or Melanite's half of
   // what the provider charges for that service.
+  //
+  // THIS ARM IS HISTORY NOW, and deliberately still here. Nobody is on `split` any more — the
+  // three it was written for moved to rent on 14 October and are billed half their own price
+  // through `rent_basis` instead. One INACTIVE provider still carries the old model, and their
+  // cancelled sessions can still reach this queue.
+  //
+  // The cutover plan said to delete it. Not doing that: the alternative is returning null for
+  // those rows, which reads as "nothing is owed" for a session that may well be owed for, and a
+  // silent money error is a bad trade for ten lines of dead-looking code. It costs nothing to
+  // keep and answers correctly if it is ever reached.
   if (sharesRevenue(row.revenueModel)) {
     const price = Number(row.bookedPrice ?? 0)
     if (!Number.isFinite(price) || price <= 0) return null

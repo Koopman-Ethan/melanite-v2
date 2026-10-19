@@ -4,11 +4,10 @@ import { requireProvider } from '@/lib/auth/dal'
 import { licenseMessage, licenseStatus } from '@/lib/license'
 import { hasAcceptedRentalTerms } from '@/lib/rental-terms'
 import { liveScheduleVersion } from '@/lib/rental/schedule'
-import { paysRent, sharesRevenue } from '@/lib/revenue-model'
+import { paysRent } from '@/lib/revenue-model'
 import { getAccount, getActiveSessions, getDocuments } from '@/lib/db/queries/account'
 
 import { NotificationsForm, PasswordForm, ProfileForm } from './forms'
-import { Payouts } from './payouts'
 import { RentalCard } from './rental-card'
 
 export const metadata: Metadata = { title: 'Account · Melanite' }
@@ -114,20 +113,13 @@ export default async function AccountPage() {
           50/50 provider is bound by today that she has not already agreed to, and a consent box
           with nothing substantive in it is how the next real one gets clicked through. What she
           has accepted already shows further down, on the account line. */}
-      {/* Getting paid, for the three still on the 50/50 split. Their clients pay Melanite and
-          Melanite forwards their share, so without a connected account they can work, be owed
-          money, and never receive any of it — which nothing else on this page can cost them.
+      {/* Payouts is GONE, for the second and last time. It was unmounted when the rental model
+          arrived, remounted on 12 October for the three still on the 50/50, and removed again
+          on 14 October when Keoni took Connect away from them too.
 
-          Remounted on 12 October. It was unmounted when the rental model arrived, correctly:
-          Melanite had stopped paying anybody. It still does not pay the five on rent. */}
-      {sharesRevenue(user.revenueModel) && (
-        <Section
-          title="Payouts"
-          description="Your clients pay Melanite and your share is forwarded to you. Melanite keeps its half of what you charge, and never charges you a rental fee."
-        >
-          <Payouts connected={account.stripeOnboardingComplete} />
-        </Section>
-      )}
+          Melanite now pays nobody. Every provider rents the laser and bills their own clients
+          directly, so there is no share to forward and no connected account to forward it to.
+          A section offering to set one up would be an invitation to a flow that ends nowhere. */}
 
       {paysRent(user.revenueModel) && (
       <Section
