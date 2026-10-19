@@ -290,10 +290,15 @@ export async function providersNeedingReacceptance(): Promise<number> {
     .from(sql`providers`)
     .where(
       and(
-        // Only a provider who pays rent is governed by the schedule. The 50/50 three never
-        // see a rental fee, so counting them here would tell Keoni three people are blocked on
-        // terms that do not apply to them.
+        // Only a provider who pays rent is governed by the schedule.
         paysRentSql(sql`revenue_model`),
+        // AND only one whose fee comes FROM the schedule. The three on `keoni_sets` pay rent
+        // but not this rent — Keoni sets each of their sessions from a receipt — so counting
+        // them would tell her three people are blocked on prices that do not apply to them.
+        // `hasAcceptedRentalTerms` exempts them for the same reason; this is the reporting half
+        // of the same rule, and the two have to agree or the page says somebody is blocked who
+        // is not.
+        sql`rent_basis <> 'keoni_sets'`,
         sql`status = 'active'`,
         sql`booking_enabled`,
         live === null

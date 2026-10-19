@@ -36,6 +36,17 @@ export interface RevenueTotals {
   monthRevenue: string
   lifetimeGross: string
   lifetimePayouts: string
+  /** What Stripe has taken in processing, lifetime and this month.
+   *
+   *  Melanite's revenue figures are GROSS of this — `melaniteCut` is what was charged, and
+   *  processing comes out of it afterwards. Since 19 October the fee schedule is grossed up to
+   *  cover it, so the money is collected from providers rather than absorbed; this is what says
+   *  whether the gross-up is actually covering it.
+   *
+   *  Null `stripe_fee_cents` means nothing was processed — cash, a Groupon voucher, a credited
+   *  session — which is not a fee of zero, and `sum` ignores it correctly. */
+  lifetimeProcessing: string
+  monthProcessing: string
 }
 
 export async function getRevenueTotals(): Promise<RevenueTotals> {
@@ -45,6 +56,8 @@ export async function getRevenueTotals(): Promise<RevenueTotals> {
       monthRevenue: sql<string>`coalesce(sum(${ledgerEntries.melaniteCut}) filter (where ${MONTH} = ${CURRENT_MONTH}), 0)`,
       lifetimeGross: sql<string>`coalesce(sum(${ledgerEntries.grossAmount} + ${ledgerEntries.tipAmount}), 0)`,
       lifetimePayouts: sql<string>`coalesce(sum(${ledgerEntries.providerPayout}), 0)`,
+      lifetimeProcessing: sql<string>`coalesce(sum(${ledgerEntries.stripeFeeCents}), 0) / 100.0`,
+      monthProcessing: sql<string>`coalesce(sum(${ledgerEntries.stripeFeeCents}) filter (where ${MONTH} = ${CURRENT_MONTH}), 0) / 100.0`,
     })
     .from(ledgerEntries)
 

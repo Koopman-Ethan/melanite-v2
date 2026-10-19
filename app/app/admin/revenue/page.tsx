@@ -80,11 +80,28 @@ export default async function AdminRevenuePage() {
         <p className="mt-1 text-sm text-ink-muted">Every revenue stream, from one ledger.</p>
       </header>
 
+      {/* GROSS, FEE, NET — the three figures that used to be one.
+          "Paid to providers" was here until 19 October and is gone with the thing it measured:
+          Melanite pays nobody now. What replaced it is what Stripe takes, which is the number
+          that actually moves. The fee schedule is grossed up to cover it, so this is how Keoni
+          tells whether the gross-up is working rather than assuming. */}
       <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Platform revenue" value={usd(totals.lifetimeRevenue)} hint="lifetime, net of refunds" />
+        <Stat
+          label="Charged"
+          value={usd(totals.lifetimeRevenue)}
+          hint="lifetime, net of refunds"
+        />
         <Stat label="This month" value={usd(totals.monthRevenue)} hint="America/Denver" />
-        <Stat label="Gross collected" value={usd(totals.lifetimeGross)} hint="before the provider split" />
-        <Stat label="Paid to providers" value={usd(totals.lifetimePayouts)} />
+        <Stat
+          label="Stripe took"
+          value={usd(totals.lifetimeProcessing)}
+          hint={`${usd(totals.monthProcessing)} this month`}
+        />
+        <Stat
+          label="Kept"
+          value={usd(Number(totals.lifetimeRevenue) - Number(totals.lifetimeProcessing))}
+          hint="charged, less processing"
+        />
       </section>
 
       {/* Placed above every other breakdown on purpose. Everything below is a record of money
@@ -287,7 +304,11 @@ export default async function AdminRevenuePage() {
                 <tr className="border-b border-line">
                   <th className="p-3 text-left font-medium">Provider</th>
                   <th className="p-3 text-right font-medium">Revenue</th>
-                  <th className="p-3 text-right font-medium">Payout</th>
+                  {/* Historical only. Nothing has been paid out since 14 October and nothing
+                      will be again — but the column stays, because these providers really were
+                      paid and hiding it would make the old rows look like Melanite kept
+                      everything. */}
+                  <th className="p-3 text-right font-medium">Paid out (past)</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-line">

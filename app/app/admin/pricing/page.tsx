@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import Link from 'next/link'
 
 import { requireAdmin } from '@/lib/auth/dal'
 import { getLiveSchedule, providersNeedingReacceptance } from '@/lib/rental/schedule'
@@ -27,8 +28,22 @@ export default async function PricingPage() {
       <header>
         <h1 className="text-2xl font-semibold">Laser pricing</h1>
         <p className="mt-1 text-sm text-ink-muted">
-          What a provider pays Melanite for one session. What they charge their own client is
-          theirs to decide — these figures never reach a client.
+          What Melanite <strong className="text-ink-secondary">keeps</strong> from one session.
+          Card processing is added on top, so the figure a provider is charged is a little
+          higher than the one here. What they charge their own client is theirs to decide —
+          these figures never reach a client.
+        </p>
+        {/* Said on the screen rather than only in a runbook, because the difference between the
+            schedule and a provider's statement is the first thing somebody queries and the
+            answer is not guessable from this page alone. The three on `keoni_sets` are not
+            priced here at all — Keoni sets each of their sessions from a receipt. */}
+        <p className="mt-2 text-xs text-ink-faint">
+          Leyla, Brittany and Karly are not on this schedule. They send a receipt for each
+          session and you set what they owe from{' '}
+          <Link href="/app/admin/queue" className="underline underline-offset-4 hover:text-ink">
+            the queue
+          </Link>
+          .
         </p>
       </header>
 

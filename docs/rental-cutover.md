@@ -1,152 +1,139 @@
 # Split → rental cutover
 
-The day Melanite stops taking clients' money and starts charging providers rent.
+**Wednesday 21 October 2026.** The day Melanite stops handling clients' money entirely and
+charges every provider rent instead.
 
 Separate from `cutover.md`, which is the Xano → v2 migration and already happened. Same house
 style: every step has a command and an expected output, because this is read by somebody who has
 other things on their mind.
 
 **The single most important thing on this page:** nobody can book until they have a card on file
-AND have accepted the terms. That is five people doing two minutes each, and if it is discovered
+AND have accepted the terms. That is nine people doing two minutes each, and if it is discovered
 on the morning rather than arranged beforehand, the calendar is shut until they do it.
+
+> **This page was rewritten on 19 October.** The arrangement changed four times between 7 and 19
+> October and the old runbook described none of the current one — it still said the fee was taken
+> "the moment a slot is reserved", which stopped being true on the 9th. If you are holding a
+> printout from last week, throw it away.
 
 ---
 
 ## What actually changes
 
 Providers bill their own clients, at their own prices, on their own systems. Melanite charges a
-rental fee per session to a card on file, taken the moment a slot is reserved.
+rental fee per session to a card on file, **taken about twelve hours after the session ends** —
+not at booking. Nothing of a client's ever passes through Melanite again.
 
-**Bookings made BEFORE cutover keep their old terms.** `chargeRentalFee` is only ever called from
-`createBooking`, so an appointment that already exists cannot acquire a rental fee. The eight
-external bookings running to 20 October still appear in Keoni's "to collect" list and are still
-settled at the old 50/50. That is automatic — no step below makes it true.
+Four things that arrived after the first draft of this page and change what you do on the day:
+
+- **Packages and prepaid are gone**, for everybody. The tables and the ledger rows stay, because
+  real clients paid real money; only the feature goes.
+- **Three providers are on `keoni_sets`** — Leyla, Brittany, Karly. Melanite works out **no fee**
+  for them. They send Keoni what they charged their client, with a receipt, and she sets what
+  they owe per appointment from `/app/admin/queue`.
+- **The fee schedule is what Melanite NETS.** Stripe's cut is priced on top, so a $60 tier
+  charges the card $62.11. Providers see the charged figure when they book.
+- **Terms are at v5**, and two of the v3 terms had quietly become false. Everybody re-accepts.
+
+**Bookings made BEFORE cutover keep their old terms.** Rent is only ever charged against a
+`payment_source = 'rental'` booking, and an appointment that already exists cannot acquire one.
 
 ---
 
 ## 0. Before the day
 
-### 0.1 The live Stripe webhook — ✅ done 7 October
+### 0.1 Tell the providers — the only step with human lead time
 
-Card setup is saved by `checkout.session.completed`, not by the redirect back. That event was
-subscribed on one of v1's **disabled** Xano destinations and not on v2's, so a provider would have
-completed Stripe's page and had nothing saved, silently.
+Three things block booking, all self-service, none of them fixable on Wednesday morning:
 
-Re-check any time — the restricted read key now carries `webhook_read`:
+| | Who | Where |
+|---|---|---|
+| A card on file | everybody; **the three have none today** | `/app/account` → Equipment rental |
+| Accept terms v5 | all nine | same screen, same visit |
+| Nothing else | — | — |
 
-```bash
-# lists live destinations and which events each one takes
-npx tsx --tsconfig scripts/tsconfig.json scripts/stripe-webhooks.ts
-```
+Worth saying in the same message: **the amount on their card includes card processing**, so it is
+a little above the published fee. That is a change in what they pay and they will see it on a
+statement; better from Keoni than discovered.
 
-Expect `ENABLED app.melanitesuite.com/api/webhooks/stripe`, `checkout.session.completed: YES`, and
-nothing missing. The three Xano destinations should stay DISABLED.
+The three on `keoni_sets` need one extra sentence: **they will not see a price when they book**,
+and they send Keoni the receipt afterwards.
 
-### 0.2 Rehearse on appdev
-
-`appdev` tracks `dev`, which does **not** have this work yet. Merge first, or there is nothing to
-rehearse:
+### 0.2 The live Stripe webhook — ✅ done 7 October
 
 ```bash
-git checkout dev && git merge Ethan/rental-fee-model && git push
+stripe webhook_endpoints list --live
 ```
 
-Then on appdev, as a provider with no card: add one, accept the terms, book, cancel, book again,
-mark a no-show. Appdev is test mode, so a real card save can be proven there — on production it
-cannot be, until the first real one.
+Confirm the live endpoint takes `payment_intent.succeeded`, `charge.refunded`,
+`checkout.session.completed`, and the invoice and subscription events.
+
+> `payout.*` and `account.updated` no longer matter — nothing is paid out. They are harmless if
+> still subscribed. See **What the $604.50 is not**, below.
 
 ### 0.3 Confirm the write key in Vercel is live
 
+Saving a card needs SetupIntents read, PaymentMethods read **and** Customers write. Charging
+needs PaymentIntents write. The redirect back from Stripe looks identical whether or not the card
+actually saved, so this is proved in step 7 and nowhere else.
+
+### 0.4 Settle what the old model left behind
+
+Two piles, and only the second is urgent.
+
+**Fifteen pending payment links, $1,510, none of them paid.** Thirteen have already expired, so
+they are unpayable today and closing them changes nothing. Keoni's account is that the girls
+mostly settle over Venmo, so most were paid months ago outside the app.
+
 ```bash
-npx tsx --tsconfig scripts/tsconfig.json scripts/stripe-account.ts
+MELANITE_ENV_FILE=.env.migration npm run close-stale-links
+MELANITE_ENV_FILE=.env.migration npm run close-stale-links -- --apply --i-know-this-is-production
 ```
 
-This prints the LOCAL keys, and locally the write key is a sandbox **on purpose** — it is why
-nothing run from a laptop can charge anybody, even with `.env.migration` loaded. The script says
-so rather than reporting it as a fault.
+It closes only the expired ones and names the live ones it is leaving alone. **It records no
+payment** — a figure that was assumed is worse than a gap that is visible. If Keoni wants a
+specific one recorded as collected, Tools → Record a payment does it against her own CSV.
 
-**The deployed key is the one that matters and cannot be checked from here.** In Vercel →
-production, `STRIPE_SECRET_KEY_WRITE` must be a **live** key. From cutover it starts _debiting_
-providers; until now it has only ever credited Melanite, so this is the first time a mistake here
-costs somebody else money.
+**Karly is owed nine sessions.** Her clients bought them under the old model, where Melanite
+already took its half at the point of sale. Charging her rent to deliver them charges twice.
 
-That it is live is not in doubt — live payment intents and payouts exist, which a test key cannot
-produce. **Its SCOPES are the open question**, because it is a _restricted_ key (`rk_live`) and the
-rental code calls five endpoints the old code never did:
+```bash
+MELANITE_ENV_FILE=.env.migration npm run cutover:grant-sessions
+MELANITE_ENV_FILE=.env.migration npm run cutover:grant-sessions -- --apply
+```
 
-| Call                                | Where                           | Needs                    |
-| ----------------------------------- | ------------------------------- | ------------------------ |
-| `GET /setup_intents/{id}`           | `lib/stripe/billing-card.ts:58` | SetupIntents **read**    |
-| `GET /payment_methods/{id}`         | `billing-card.ts:75`            | PaymentMethods **read**  |
-| `POST /customers/{id}`              | `billing-card.ts:80`            | Customers **write**      |
-| `POST /payment_methods/{id}/detach` | `billing-card.ts:122`           | PaymentMethods **write** |
-| `POST /refunds`                     | `lib/rental/charge.ts:391`      | Refunds **write**        |
+Expect `Karly Dettorre  lhr_small  9 sessions`. **The number is computed, never typed** — it was
+11 when first discussed and 9 now, because some got worked in between.
 
-`POST /payment_intents` is the sixth. The code has called it since v2 shipped, but **off-session,
-against a saved card, is new** — and off-session is the mode that matters now.
+### 0.5 Retire Nichole
 
-"Payments have been working" proves none of these. Each is a different permission, and a missing
-one answers 403 with the exact permission named in the message.
+She has left Melanite and is kept as the test account the Playwright suite signs in as.
 
-**Nothing needs to be checked by hand.** Steps 7 and 9 exercise all six, in an order that stops
-before anybody else is affected — adding the canary card hits the first three, booking hits
-payment intents, cancelling hits refunds, and replacing a card hits detach. If a scope is missing,
-that is where it surfaces, which is why step 7 says to stop rather than carry on.
+```bash
+MELANITE_ENV_FILE=.env.migration npm run retire-provider -- --email nichole.mim@gmail.com
+MELANITE_ENV_FILE=.env.migration npm run retire-provider -- --email nichole.mim@gmail.com -- --apply --i-know-this-is-production
+```
 
-A 403 no longer reads as a card problem. `isCardDecline` (`lib/rental/charge.ts`) separates a card
-refusing from Stripe refusing us, so a missing scope tells the provider Melanite could not take the
-fee and asks them to report it, instead of sending them to their bank about Melanite's API key.
+Inactive, booking off, room rental off. **Nothing is deleted** — appointments, ledger rows and
+end-of-use checklists all reference her id.
 
-### 0.4 Two decisions that are not technical
+> This shuts the booking gates for `E2E_PROVIDER_EMAIL`, and every nightly refresh from now on
+> imports an account that cannot book. `npm run dev:after-refresh` reopens them. If the suite
+> ever fails at `auth.setup.ts`, that is the first thing to check.
 
-- ~~**Does a cancellation refund the fee?**~~ **Answered 7 October, and built.** Neither a
-  cancellation nor a no-show refunds anything by itself. The provider says what happened, the fee
-  is held, and Keoni decides from `/app/admin/queue`. Her words: *"sometimes its the clients
-  fault, and not the providers."* See **The held-rent review** below — it changes what the
-  providers have to be told.
-- **Tell the providers.** They cannot book until they have added a card. Whether they hear that
-  before or after the deploy is a business call, but somebody has to make it.
+### 0.6 What the $604.50 is not
 
-### 0.5 Not blocking, but has a deadline
+Eleven ledger rows sit at `payout_status = 'pending'` — Leyla $445.00, Karly $159.50, oldest
+10 August. **It is not a debt and nobody should be paid it.**
 
-Twelve appointments from July–September have no payment recorded — **$1,200**, nine of them
-Nichole's. They may well have been paid outside the app and never entered. Keoni has the list
-(`unrecorded-payments.csv`). This does not block cutover, but **removing the client-payment code
-makes it uncollectable**, so settle it before step 6.
+Those were destination charges: `transfer_data.destination` moves the provider's share into their
+connected account as part of the charge itself. They were paid at the time. `payout_status` tracks
+a different event — Stripe paying that balance out to *their* bank — and Melanite is not
+subscribed to it. All eighteen `payout.paid` events ever received carry no `account` field, so
+every one is the platform's own payout and `handlePayout` returns at its first line.
 
----
-
-## 0.6 The held-rent review
-
-Added 7 October, after the runbook was first written. It changes three things on the day.
-
-**Every provider must accept the terms again.** `RENTAL_TERMS_VERSION` went to `2026-10-07.v3`,
-because v2 told them in as many words that marking a no-show got their money back. A provider
-still holding that belief would plan around it. Re-acceptance is already enforced — nobody can
-book until they have accepted the current version — so this costs one extra click on the same
-screen they are already visiting for their card. **It does not need a separate round of chasing,
-but it does mean step 8 is not optional for anybody.**
-
-**No money comes back on its own any more.** A cancellation or a no-show holds the fee and puts
-the session in Keoni's queue with the provider's own account of what happened. She refunds it or
-lets it stand, and the provider is emailed either way. Nothing else in the system can refund a
-rental fee.
-
-**She has to work the queue.** This is the part with no technical safeguard. Every cancellation
-and every no-show now waits on her, where before it settled itself, so the volume is ordinary
-rather than exceptional. Two things carry the prompt:
-
-- the desk email, which gains `needs your decision` in the subject and a link straight to the
-  queue instead of the calendar;
-- `/app/admin/queue`, which shows the oldest first and how many days each has waited.
-
-A provider whose fee is held has paid for a session they did not get and has been told they will
-hear. **If nobody works the queue, that is money sitting in Melanite's account with somebody
-waiting on it** — which is worse than the old automatic refund, not better. Worth saying to her
-plainly before the day rather than discovering it a fortnight in.
-
-> The eight pre-cutover external bookings are **not** affected. They hold no rent, so cancelling
-> one never asks for a reason and never reaches the queue.
+Confirm against the Stripe dashboard (Connect → those two accounts → payout history), then mark
+the rows paid. The ledger invariant test prints the figure on every run until it is cleared.
 
 ---
 
@@ -162,17 +149,22 @@ Named for the date. This is the rollback, and the only one that covers data.
 
 ## 2. Schema first
 
-All seven migrations are **additive or permissive** — new tables, a new enum value, columns that
-default to null, and CHECK constraints that only apply to `payment_source = 'rental'`, which the
-currently deployed code never writes. So they can go on before the new code, and the window where
-the two disagree is zero.
+Every migration is **additive or permissive** — new columns defaulting to null, and one enum
+value renamed in place. They can go on before the new code, and the window where the two disagree
+is zero.
 
 ```bash
 MELANITE_ENV_FILE=.env.migration npm run db:migrate
 MELANITE_ENV_FILE=.env.migration npm run db:verify
 ```
 
-Expect `0032` through `0038` applied — seven — then `Schema verified.`
+Expect `0032` through `0046` applied, then `Schema verified.`
+
+> **0044 renames an enum value** (`half_own_price` → `keoni_sets`) with
+> `ALTER TYPE ... RENAME VALUE`. It rewrites the label in place, so every row carrying it moves
+> with it and there is no window where some providers are on the old name. It is the one
+> migration that is not purely additive, and it is still safe before the deploy because no
+> deployed code reads that column yet.
 
 > `db:verify` compares production against the **working tree**. Run it from the rental branch or
 > it reports tables that do not exist yet and looks like a disaster.
@@ -181,16 +173,18 @@ Expect `0032` through `0038` applied — seven — then `Schema verified.`
 
 ## 3. The catalogue
 
-`etl:load` truncates `services`, and this is also where the IPL split lives. Both reasons it has
-to be a re-runnable script rather than a migration.
+`etl:load` truncates `services`, which is why this is a re-runnable script and not a migration.
 
 ```bash
 MELANITE_ENV_FILE=.env.migration npm run etl:catalogue
 ```
 
-Expect six services added — `IPL — Full Face`, `— Neck`, `— Chest`, `— Hands`,
-`ClearLift — Neck`, `— Hands` — and the generic `IPL` **retired, not deleted**: three past
-appointments reference it and the record of what a client was treated for has to survive.
+The generic `IPL` and the parenthesised size names are **retired, not deleted** — past
+appointments reference them and the record of what a client was treated for has to survive.
+
+> Those retired names are why some of Nichole's old sessions cannot be priced automatically: they
+> point at services the tier guide no longer knows. Keoni sets those by hand if they ever need
+> billing.
 
 ---
 
@@ -200,55 +194,40 @@ appointments reference it and the record of what a client was treated for has to
 MELANITE_ENV_FILE=.env.migration npm run etl:rental-fees
 ```
 
-Expect `Schedule v1 published with 19 tiers`. It **only ever seeds** — if a schedule already
-exists it does nothing, because from that point the database is the source of truth and the
-constants are only a fallback for a tier added in code later.
+Expect `Schedule v1 published with 19 tiers`. It **only ever seeds** — once a schedule exists the
+database is the source of truth and the constants are a fallback for a tier added in code later.
+
+**These figures are what Melanite NETS.** `platform_settings.stripe_fee_pct` (0.029) and
+`stripe_fee_fixed_cents` (30) are added on top at charge time. Leave them alone on the day; see
+**Setting the processing rate**, below.
 
 ---
 
-## 5. Honour what clients already paid for
+## 5. Move everybody onto rent
 
 ```bash
-MELANITE_ENV_FILE=.env.migration npm run cutover:grant-sessions            # dry run
-MELANITE_ENV_FILE=.env.migration npm run cutover:grant-sessions -- --apply
+MELANITE_ENV_FILE=.env.migration npm run cutover:revenue-models
+MELANITE_ENV_FILE=.env.migration npm run cutover:revenue-models -- --apply
 ```
 
-Expect Karly, around ten sessions of `lhr_small`. **The number is computed, never typed** — it was
-11 when this was first discussed and 10 a fortnight later, because one got worked in between.
+Expect every active non-house provider on `rental`, and Leyla, Brittany and Karly on
+`keoni_sets`. It warns loudly about anybody who can book and has no card.
 
-Her clients bought those sessions under the old model, where Melanite already took its half at the
-point of sale. Charging her rent to deliver them would be charging twice.
-
-It will also **refuse** any service with no published fee and **report** prepaid dollar balances
-rather than guessing what a dollar buys. Production had none at the last check; if one has
-appeared, it needs Keoni, not a default.
+**Run this AFTER the deploy, not before.** It is the one data step that changes how a provider is
+treated rather than adding something unread, and the currently deployed code does not understand
+`keoni_sets`.
 
 ---
 
-## 5.5 Set the review start date
+## 6. Set the review start date
 
 `REVIEW_STARTED_AT` in `lib/rental/review.ts` is the day a session that did not happen becomes
-Keoni's decision. **Set it to the cutover date and commit that before deploying.**
-
-Left at its dev value, her queue opens on **seventeen** old cancellations belonging to the three
-grandfathered providers — back to 10 August, $812.88 of Melanite's half — none of which anybody
-was asked about at the time and all of which were settled between her and the provider months
-ago. A queue that opens with a pile of unanswerable decisions is one she stops opening, and the
-whole design rests on her working it.
-
-```bash
-MELANITE_ENV_FILE=.env.migration npx tsx --tsconfig scripts/tsconfig.json scripts/sql.ts   "select p.first_name, count(*), min(b.start_time)::date
-     from bookings b join providers p on p.id = b.provider_id
-    where p.revenue_model = 'split' and b.status in ('cancelled','no_show')
-    group by 1 order by 2 desc"
-```
-
-Whatever that returns is what she inherits if the date is wrong. It is a compiled-in constant,
-the same known limitation as `END_OF_USE_STARTED_AT` — one date for every environment.
+Keoni's decision rather than history. Set it to the cutover date before deploying, or every
+cancelled appointment in the archive lands in her queue at once.
 
 ---
 
-## 6. Deploy
+## 7. Deploy
 
 Environment variables apply at **build** time, so a redeploy rebuilds the old commit. Push.
 
@@ -256,12 +235,17 @@ Environment variables apply at **build** time, so a redeploy rebuilds the old co
 git checkout main && git merge Ethan/rental-fee-model && git push
 ```
 
-No new environment variables are needed. That is worth saying plainly, because it is the step
+No new environment variables are needed, which is worth saying plainly because it is the step
 people expect to need them.
+
+> `BLOB_READ_WRITE_TOKEN` is already set — receipts use the same store as equipment photos,
+> under a `receipts/` prefix.
+
+Then run step 5.
 
 ---
 
-## 7. The canary
+## 8. The canary
 
 **Do this before telling anyone else to.** Add a card as yourself or Keoni, then:
 
@@ -273,84 +257,103 @@ MELANITE_ENV_FILE=.env.migration npx tsx --tsconfig scripts/tsconfig.json script
 
 A row with a last four and both versions set means the webhook works in production **and** that
 the restricted key carries SetupIntents read, PaymentMethods read and Customers write — saving a
-card is all three. Nothing else proves any of it: the redirect back looks identical whether or not
-the card saved.
+card is all three. Nothing else proves any of it.
 
 If that row is empty, **stop**. Nobody else should hand over a card until it is explained.
 
 ---
 
-## 8. The other four
+## 9. The other eight
 
-Each needs, on `/app/account`: a card, and the rental terms accepted. Watch the roster — the
-**Card** column shows `none on file — cannot book` until they have.
+Each needs, on `/app/account`: a card, and the terms accepted. Watch the roster — the **Card**
+column shows `none on file — cannot book` until they have.
 
 ```bash
 MELANITE_ENV_FILE=.env.migration npx tsx --tsconfig scripts/tsconfig.json scripts/sql.ts \
-  "select first_name, booking_enabled, billing_card_last4, rental_schedule_version
+  "select first_name, rent_basis, booking_enabled, billing_card_last4, rental_terms_version
      from providers where status='active' and revenue_model <> 'house' order by first_name"
 ```
 
+The three on `keoni_sets` will show a null `rental_schedule_version` for ever and that is
+correct — they are exempt from accepting a price list that governs nothing they pay.
+
 ---
 
-## 9. Smoke test, in this order
+## 10. Smoke test, in this order
 
-1. Sign in as a provider. Book something — the fee is on the button before it is pressed.
-2. `/app/charges` shows the charge against the right service.
-3. Cancel it. It now asks **what happened** and will not proceed without an answer. The fee is
-   **held, not refunded** — check the wording says so.
-4. `/app/admin/queue` — the session is there with what you typed. Press **Refund**. This is the
-   only step that proves Refunds write, and if it fails every earlier booking is already charged.
-   Check the provider gets the outcome email, then do another and press **The fee stands**:
-   nothing moves, the item leaves the queue, and they are still emailed.
-5. Mark a past session a no-show. It asks the same question and holds the fee the same way —
-   **this is the one that used to refund silently**, so it is the one most worth seeing.
-6. `/app/admin/calendar` — block an hour, confirm it greys out for a provider.
-7. `/app/admin/pricing` — publish a change, confirm the provider is asked to accept it.
-8. Replace the canary's card with itself. Last of the six scopes — PaymentMethods write, for the
-   detach. Least urgent of them: nobody is blocked by it, it just fails later and alone.
+1. **Sign in as an ordinary provider.** Book something — the fee is on the button before it is
+   pressed, and it is the **grossed-up** figure. Check it against `/app/admin/pricing`: the
+   schedule says $60, the button says $62.11.
+2. `/app/charges` shows the charge against the right service, at the charged amount.
+3. **Cancel it inside 24 hours.** It asks **what happened** and will not proceed without an
+   answer. The fee is **held, not refunded**.
+4. `/app/admin/queue` — the session is there with what you typed. Press **Charge**. Check the
+   provider gets the outcome email, then do another and press **Don't charge it**: nothing moves,
+   the item leaves the queue, and they are still emailed.
+5. **Mark a past session a no-show.** Same question, same hold.
+6. **Sign in as Leyla.** Book — there is **no price anywhere**, and the button says
+   "Book appointment". After the session, the card asks what she charged; send $150 with a photo.
+7. `/app/admin/queue` — the item says *"They charged their client $150.00"* with a **See the
+   receipt** link. Type a figure, charge it, and confirm the receipt link stops working
+   afterwards — it is deleted once the session is settled.
+8. `/app/admin/calendar` — block an hour, confirm it greys out for a provider.
+9. `/app/admin/pricing` — publish a change, confirm an ordinary provider is asked to accept it
+   and **Leyla is not**.
 
-If any of these reports _"Melanite could not take the rental fee"_ rather than a card problem, it
+If any of these reports *"Melanite could not take the rental fee"* rather than a card problem, it
 is a scope on the restricted key, not the provider. The exact permission is in the Vercel function
 log, logged by `[rental] charge FAILED`.
 
 ---
 
-## Do NOT, until 20 October
+## Setting the processing rate
 
-- **Change `provider_share_pct`.** It is 0.500 and the digest computes the "to collect" figure for
-  the eight external bookings from it. Changing it silently changes what Keoni invoices.
-- **Remove the client-payment code.** `/pay`, packages, prepaid and `/app/services` are unlinked
-  from the provider menu but still work. The last pre-cutover appointment is **20 October**.
-- **Cancel and rebook an existing appointment.** Cancelling frees the slot; rebooking creates a
-  _rental_ booking and charges rent — for a client who already paid by Groupon. Moving one of the
-  eight goes through Keoni.
+Not a day-one step. `stripe_fee_pct` defaults to Stripe's US standard, which is right for a
+domestic card and low for Amex or an international one — so Melanite under-recovers on those
+until it is raised, and over-recovers on ordinary cards once it is.
+
+The evening digest reconciles every recent charge against what Stripe **actually** took and
+reports the drift. After a week of real charges:
+
+```bash
+MELANITE_ENV_FILE=.env.migration npx tsx --tsconfig scripts/tsconfig.json scripts/sql.ts \
+  "select count(*), sum(stripe_fee_cents), round(sum(stripe_fee_cents) / (sum(gross_amount) * 100), 4) as effective
+     from ledger_entries
+    where source = 'rental_fee' and entry_type = 'purchase' and stripe_fee_cents is not null
+      and created_at > now() - interval '30 days'"
+```
+
+Set the rate from that number, not from a guess. Positive drift in the digest means money taken
+from providers that Stripe did not charge, which is the direction worth watching.
 
 ---
 
-## After the 20th — the removal
+## Still live on purpose
 
-A single revertible commit: `/pay`, `app/app/packages`, `app/app/prepaid`, `app/app/services`,
-`account/payouts.tsx`, `account/stripe-actions.ts`, the Connect columns, and the "Payout deposited"
-notification preference.
-
-**Nine e2e specs go red** — `package-link`, `package-redemption`, `payment-link-resend` and parts
-of `booking-journey` and the a11y suites. They test flows that will not exist. Expect the test
-count to fall, which is the one time that is correct.
-
-**Retire `Reserved — Melanite`**, the inactive service created on 5 October to block laser time
-before `blocked_time` existed. Blocked time is a real feature now.
+- **`/pay/[token]`.** Two payment links are still payable: janea's on 22 October ($60) and
+  whichever of Leyla's has not lapsed. Removing the route makes them 404. Close them with
+  `close-stale-links -- --include-live` once they are settled or converted, and the whole Connect
+  path can go in one commit after that.
+- **`/app/services`.** Unlinked from every menu, still reachable by URL. It fed the old
+  half-their-own-price derivation, which is gone; nothing reads it now.
+- **`provider_share_pct`.** Still 0.500 and still used by the digest's "to collect" figure for
+  pre-cutover external bookings. Changing it silently changes what Keoni invoices for those.
 
 ---
 
 ## Rollback
 
-**Before step 6**, free: the schema changes are additive and the deployed code ignores them.
+**Before step 7**, free: the schema changes are additive and the deployed code ignores them. The
+enum rename in 0044 is the one exception, and reverting it is a one-line
+`ALTER TYPE ... RENAME VALUE` back.
 
-**After step 6**, revert the merge and push. The schema can stay — old code does not read the new
-tables.
+**After step 7**, revert the merge and push. The schema can stay — old code does not read the new
+columns.
 
-**What does not roll back** is money. Any rental fee charged between deploy and rollback is a real
+**What does not roll back is money.** Any rental fee charged between deploy and rollback is a real
 charge on a provider's card. Refund it from `/app/charges` by cancelling the booking, or from
 Stripe directly, and note that the ledger keeps both rows: a refunded fee is "charged and given
 back", which is a different fact from "never charged".
+
+**Receipts do not roll back either.** A receipt uploaded and then deleted on settlement is gone
+from the blob store; the amount and the timestamp survive on the booking.

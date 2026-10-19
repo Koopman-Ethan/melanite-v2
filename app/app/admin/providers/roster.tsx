@@ -38,6 +38,7 @@ export interface RosterView {
    *  many boxes on this row are ticked. */
   paymentMethodId: string | null
   cardLast4: string | null
+  rentBasis: string
   /** What the provider filed about her own director, on the `own` path. Null when she has filed
    *  nothing, and on the Melanite plan where the director is Melanite's. */
   director: {
@@ -286,6 +287,18 @@ export function Roster({
                           ? `ending ${provider.cardLast4}`
                           : 'on file'
                     }
+                  />
+                )}
+
+                {/* Shown only for the exception. A row saying "published schedule" against
+                    every ordinary provider is noise; the three whose sessions need Keoni to do
+                    something are worth marking, because nothing else on this screen says that
+                    their appointments will not bill themselves. */}
+                {!roomOnly && provider.rentBasis === 'keoni_sets' && (
+                  <Signal
+                    ok
+                    label="Billing"
+                    detail="you set each session from their receipt"
                   />
                 )}
               </div>

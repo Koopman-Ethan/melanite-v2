@@ -34,6 +34,10 @@ export interface RosterRow {
   /** Whether Melanite can charge them. Null blocks booking regardless of the toggles. */
   paymentMethodId: string | null
   cardLast4: string | null
+  /** How their rent is worked out. `keoni_sets` means Melanite prices nothing for them and
+   *  every session waits on Keoni reading a receipt — which is the one thing about a provider
+   *  on this screen that changes how she has to work, so it is worth showing. */
+  rentBasis: string
   payoutsEnabled: boolean
   /** The own-director path only. Present once the provider has filed her director, which is
    *  what Melanite has to verify before opening the gate — a name and a licence number are the
@@ -84,6 +88,7 @@ export async function getRoster(): Promise<Roster> {
         // so "can we take the rental fee" is the question — and it is a real gate: a provider
         // with every box ticked and no card still cannot book.
         cardLast4: providers.billingCardLast4,
+        rentBasis: providers.rentBasis,
         paymentMethodId: providers.billingPaymentMethodId,
         directorName: medicalDirectorCredentials.name,
         directorCredentials: medicalDirectorCredentials.credentials,
