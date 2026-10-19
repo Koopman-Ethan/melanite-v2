@@ -1,5 +1,7 @@
 'use client'
 
+import { useRouter } from 'next/navigation'
+
 import { useState, useTransition } from 'react'
 
 import { Button } from '@/components/ui/button'
@@ -24,16 +26,29 @@ export function MembershipActions({
 }) {
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
+  // Above the early return below: hooks run in the same order on every render or React loses
+  // track of which state belongs to which call.
+  const router = useRouter()
 
   // The own-director path has nothing to click: changing it means a new signed supervision
   // agreement, which goes through Melanite.
   if (type === 'own') return null
 
+  // Two shapes now. Epicutis still hands off to a Stripe checkout; the director plan bills the
+  // card on file and finishes here, so there is nothing to redirect to — just a refresh, since
+  // the webhook writes the membership row and this page reads it.
   const go = (fn: () => Promise<StripeRedirect>) => {
     startTransition(async () => {
       const result = await fn()
-      if (result.url) window.location.href = result.url
-      else setError(result.error ?? 'Something went wrong.')
+      if (result.url) {
+        window.location.href = result.url
+        return
+      }
+      if (result.success) {
+        router.refresh()
+        return
+      }
+      setError(result.error ?? 'Something went wrong.')
     })
   }
 

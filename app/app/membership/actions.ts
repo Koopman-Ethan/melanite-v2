@@ -7,7 +7,6 @@ import { requireProvider } from '@/lib/auth/dal'
 import { db } from '@/lib/db'
 import { medicalDirectorCredentials, memberships, providers } from '@/lib/db/schema'
 import { notifyMedicalDirectorSubmitted } from '@/lib/notify-melanite'
-import { isOnboarding } from '@/lib/onboarding'
 import { friendlyStripeError, stripePost } from '@/lib/stripe/client'
 import {
   appOrigin,
@@ -19,20 +18,31 @@ import {
 import { DATE_ONLY, emailError, futureDateError, isValidPhone, nameError } from '@/lib/validation'
 
 export interface StripeRedirect {
+  /** Set when the provider still has to go somewhere — the billing portal, and the Epicutis
+   *  checkout. The director plan no longer returns one: it bills the card on file. */
   url?: string
+  /** Set when the thing happened here and there is nowhere to send them. */
+  success?: string
   error?: string
 }
 
-// Subscription actions. Both create a Stripe-hosted session and hand the provider off, so no
-// card details ever reach this app — that keeps it out of PCI scope entirely, and is what v1
-// does too.
+// Subscription actions.
+//
+// NO CARD DETAILS EVER REACH THIS APP, which keeps it out of PCI scope entirely, and that is
+// still true after the director plan stopped using a hosted checkout. It bills
+// `providers.billingPaymentMethodId` — a Stripe payment method id, saved by Stripe's own
+// element during onboarding. An id is not a card number; the only thing this code can do with
+// one is ask Stripe to charge it.
+//
+// Epicutis still hands off to Checkout. It is bought by people who may have no card on file
+// yet, whereas the director plan is part of onboarding and the card is already there.
 //
 // Neither of these grants access. Paying does not set medical_director_status; the
 // invoice.payment_succeeded webhook does. That split is deliberate: a checkout that completes
 // but whose payment later fails must not have already opened the booking gate.
 
 
-/** Opens a subscription checkout, recovering from a stale billing customer.
+/** Starts the medical director plan on the provider's card on file.
  *
  *  Reusing the stored customer is what keeps both subscriptions on one Stripe record so the
  *  billing portal can manage them together. But a stored id that Stripe no longer recognises
@@ -101,50 +111,61 @@ export async function startSubscription(): Promise<StripeRedirect> {
     .select({
       email: providers.email,
       stripeBillingCustomerId: providers.stripeBillingCustomerId,
+      billingPaymentMethodId: providers.billingPaymentMethodId,
     })
     .from(providers)
     .where(eq(providers.id, user.id))
     .limit(1)
 
-  const base = await appOrigin()
-
-  // A provider still in setup returns to the medical-director step, not to Membership. Their
-  // remaining steps are there, and Membership shows nothing they can act on yet.
-  const back = isOnboarding(user) ? '/onboarding/director' : '/app/membership'
+  // THE CARD ON FILE, created directly rather than through a checkout redirect.
+  //
+  // Checkout in subscription mode always collects a card, so a provider who had already given
+  // one ended up with two on record — and the monthly bill followed whichever they typed
+  // second. One card per provider is what makes "their card was declined" a sentence Keoni can
+  // act on rather than a question about which card.
+  //
+  // NEVER CONNECT. This is a provider paying Melanite; Connect pays providers out and has no
+  // part in it. It never did here, and saying so stops anybody adding `transfer_data` on the
+  // assumption that every Stripe call in this codebase wants it.
+  if (!provider?.stripeBillingCustomerId || !provider?.billingPaymentMethodId) {
+    return {
+      error: 'Add a card on your account page first — the plan bills to the card you keep there.',
+    }
+  }
 
   try {
-    const session = await stripePost<{ url?: string }>(
-      '/checkout/sessions',
+    await stripePost<{ id: string; status: string }>(
+      '/subscriptions',
       {
-        mode: 'subscription',
-        line_items: [{ price: priceId, quantity: 1 }],
-        success_url: `${base}${back}?subscribed=1`,
-        cancel_url: `${base}${back}`,
-        // The webhook has no other way to know whose subscription this is. Set on BOTH the
-        // session and the subscription, because checkout.session.completed and
-        // invoice.payment_succeeded read from different objects.
+        customer: provider.stripeBillingCustomerId,
+        items: [{ price: priceId }],
+        // The card this bills every month, now and at renewal.
+        default_payment_method: provider.billingPaymentMethodId,
+        // Nobody is at a checkout to answer a 3DS challenge. A card that insists on one fails
+        // the first invoice, which `handleInvoicePaymentFailed` already reports.
+        off_session: true,
         // `plan` is what the webhooks route on. Without it every subscription looks like the
-        // director plan, which is the default — correct for anything created before Epicutis
-        // existed, and wrong for anything created after.
+        // director plan, which is the default — right for anything created before Epicutis
+        // existed and wrong for anything created after.
         metadata: { provider_id: user.id, plan: 'medical_director' },
-        subscription_data: {
-          metadata: { provider_id: user.id, plan: 'medical_director' },
-        },
-        ...(provider?.stripeBillingCustomerId
-          ? { customer: provider.stripeBillingCustomerId }
-          : { customer_email: provider?.email }),
       },
       {
-        // Keyed on the provider, so a double-click or a retried request reuses the same
-        // session rather than starting a second subscription. Stripe replays the original
-        // response for 24 hours, which is far longer than anyone spends deciding.
+        // Keyed on the provider, so a double-click cannot start two subscriptions. Stripe
+        // replays the original response for 24 hours, far longer than anyone spends deciding.
         idempotencyKey: `md-subscribe:${user.id}`,
       },
     )
 
-    return session.url ? { url: session.url } : { error: 'Stripe did not return a checkout link.' }
+    // The membership row and the booking gate are written by `handleSubscriptionChanged` from
+    // the webhook, exactly as before. Only how the subscription is created has changed.
+    return { success: 'Subscribed. The plan bills monthly to the card on your account.' }
   } catch (err) {
-    return { error: friendlyStripeError(err, 'Could not start checkout. Try again shortly.') }
+    return {
+      error: friendlyStripeError(
+        err,
+        'Could not start the plan. Check the card on your account page and try again.',
+      ),
+    }
   }
 }
 

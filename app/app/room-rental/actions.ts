@@ -13,21 +13,25 @@ import {
   slotPrice,
   type SlotType,
 } from '@/lib/db/queries/room-rental'
-import { roomBookings } from '@/lib/db/schema'
+import { providers, roomBookings } from '@/lib/db/schema'
 import { ROOM_SLOT_LABELS } from '@/lib/email'
 import { notifyMelaniteRoomRental } from '@/lib/notify-melanite'
-import { appOrigin } from '@/lib/stripe/config'
 import { friendlyStripeError, stripePost, stripeWritesEnabled } from '@/lib/stripe/client'
+import { getProcessingRate } from '@/lib/db/queries/admin-tools'
+import { grossUpForProcessing, toCents } from '@/lib/money'
 
 export interface RentalState {
   error?: string
-  url?: string
   success?: string
 }
 
-/** How long a slot is held while the provider is in Stripe Checkout. Long enough to finish
- *  paying, short enough that an abandoned checkout does not take the room off the market for
- *  the rest of the day. Stripe Checkout sessions expire at 24h; this is the tighter bound. */
+/** How long a slot is held between reserving it and the charge landing.
+ *
+ *  It used to cover somebody standing in Stripe Checkout typing a card. The charge is taken
+ *  against the card on file now and resolves in a second or two, so the hold only has to
+ *  outlive a slow network and the release in the catch below. Left at thirty minutes anyway:
+ *  the cost of a hold that is too long is a room unavailable for a while, and the cost of one
+ *  too short is a provider charged for a slot somebody else has taken. */
 const HOLD_MINUTES = 30
 
 const SLOTS = new Set<SlotType>(['full', 'am', 'pm'])
@@ -82,7 +86,6 @@ export async function startRoomRental(input: {
 
   await releaseExpiredHolds()
 
-  const base = await appOrigin()
   const { startAt, endAt } = slotBounds(input.rentalDate, input.slotType, settings)
   const price = slotPrice(input.slotType, settings)
 
@@ -111,64 +114,96 @@ export async function startRoomRental(input: {
     throw err
   }
 
+  // THE CARD ON FILE, not a checkout redirect.
+  //
+  // Every provider carries one now — it is what pays the rental fee — so sending them to
+  // Stripe to type a card they have already given is a round trip for nothing. It also means
+  // one card per provider rather than whichever was nearest at the time, which is what Keoni
+  // actually wants to be chasing when something declines.
+  //
+  // NEVER CONNECT. This is money coming IN from a provider; Connect pays providers OUT and has
+  // no part in it. It never did here, and saying so stops anybody adding `transfer_data` on the
+  // assumption that every Stripe call in this codebase needs it.
+  const [payer] = await db
+    .select({
+      customerId: providers.stripeBillingCustomerId,
+      paymentMethodId: providers.billingPaymentMethodId,
+    })
+    .from(providers)
+    .where(eq(providers.id, user.id))
+    .limit(1)
+
+  if (!payer?.customerId || !payer?.paymentMethodId) {
+    await releaseHold(holdId)
+    return {
+      error: 'Add a card on your account page before booking the room.',
+    }
+  }
+
+  // Priced the same way laser time is: the figure Keoni set is what Melanite KEEPS, and
+  // processing goes on top. Charging $100 and banking $96.80 is the thing this whole
+  // arrangement exists to stop.
+  const processing = await getProcessingRate()
+  const { chargeCents } = grossUpForProcessing({
+    netCents: toCents(price),
+    pct: processing.pct,
+    fixedCents: processing.fixedCents,
+  })
+
   try {
-    const session = await stripePost<{ id: string; url?: string }>(
-      '/checkout/sessions',
+    await stripePost<{ id: string; status: string }>(
+      '/payment_intents',
       {
-        mode: 'payment',
-        success_url: `${base}/app/room-rental?paid=1`,
-        cancel_url: `${base}/app/room-rental?cancelled=1`,
-        client_reference_id: holdId,
-        line_items: [
-          {
-            quantity: 1,
-            price_data: {
-              currency: 'usd',
-              unit_amount: Math.round(Number(price) * 100),
-              product_data: { name: roomLineItemName(input.rentalDate, input.slotType) },
-            },
-          },
-        ],
-        // On the PaymentIntent, not just the session: the webhook routes on
-        // payment_intent.succeeded, and session metadata does not reach it.
-        payment_intent_data: {
-          metadata: {
-            type: 'room_rental',
-            provider_id: user.id,
-            rental_date: input.rentalDate,
-            slot_type: input.slotType,
-            room_booking_id: holdId,
-          },
+        amount: chargeCents,
+        currency: 'usd',
+        customer: payer.customerId,
+        payment_method: payer.paymentMethodId,
+        // Nobody is watching for a 3DS challenge — they pressed a button in the app, not a
+        // checkout. A card that insists on one declines, which is the right outcome.
+        off_session: true,
+        confirm: true,
+        description: roomLineItemName(input.rentalDate, input.slotType),
+        metadata: {
+          type: 'room_rental',
+          provider_id: user.id,
+          rental_date: input.rentalDate,
+          slot_type: input.slotType,
+          room_booking_id: holdId,
         },
-        metadata: { type: 'room_rental', room_booking_id: holdId },
       },
       {
-        // The hold id is the natural idempotency key: a double-submit reuses the same checkout
-        // rather than opening a second one against the same reserved slot.
+        // The hold id, as before: a double submit cannot take the room twice.
         idempotencyKey: `room-rental:${holdId}`,
       },
     )
-
-    await db
-      .update(roomBookings)
-      .set({ stripeCheckoutSessionId: session.id })
-      .where(eq(roomBookings.id, holdId))
-
-    if (!session.url) throw new Error('Stripe did not return a checkout URL.')
-
-    revalidatePath('/app/room-rental')
-    return { url: session.url }
   } catch (err) {
     // Releasing the hold matters: leaving it would block the room for HOLD_MINUTES over a
-    // checkout that never existed.
-    await db
-      .update(roomBookings)
-      .set({ status: 'cancelled', cancelledAt: new Date() })
-      .where(eq(roomBookings.id, holdId))
-
-    return { error: friendlyStripeError(err, 'Could not start the payment. Try again shortly.') }
+    // payment that never happened.
+    await releaseHold(holdId)
+    return {
+      error: friendlyStripeError(
+        err,
+        'That card was declined. Update it on your account page and try again.',
+      ),
+    }
   }
+
+  // The booking is confirmed and its ledger row written by `roomRentalPaid`, from the webhook,
+  // exactly as before — this only changed how the money is taken. The handler is guarded by
+  // `alreadyRecorded`, so the charge arriving twice cannot bank it twice.
+  revalidatePath('/app/room-rental')
+  return { success: `Room booked. ${usdLabel(chargeCents)} charged to your card.` }
 }
+
+/** Frees a slot whose payment did not happen. */
+async function releaseHold(holdId: string): Promise<void> {
+  await db
+    .update(roomBookings)
+    .set({ status: 'cancelled', cancelledAt: new Date() })
+    .where(eq(roomBookings.id, holdId))
+}
+
+const usdLabel = (cents: number) => `$${(cents / 100).toFixed(2)}`
 
 /** Cancel a rental.
  *

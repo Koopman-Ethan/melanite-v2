@@ -148,14 +148,24 @@ export function RentalPanel({
     pm: `${amEnd}–${pmEnd}`,
   }
 
+  // ASKS ONCE, because the money moves on the click now.
+  //
+  // This used to hand off to Stripe Checkout, where the provider saw the amount and pressed
+  // Pay — the confirmation was free, it just lived on somebody else's page. Charging the card
+  // on file removes that page, and with it the only moment anybody was told what a stray click
+  // costs. A $100 room is a refund rather than a shrug.
   function book() {
+    const label = slot === 'full' ? 'the full day' : slot === 'am' ? 'the morning' : 'the afternoon'
+    if (
+      !window.confirm(
+        `Book ${label} on ${selectedDate} and charge ${usd(price)} plus card processing to your card on file?`,
+      )
+    ) {
+      return
+    }
+
     start(async () => {
-      const result = await startRoomRental({ rentalDate: selectedDate, slotType: slot })
-      if (result.url) {
-        window.location.href = result.url
-        return
-      }
-      setState({ error: result.error })
+      setState(await startRoomRental({ rentalDate: selectedDate, slotType: slot }))
     })
   }
 

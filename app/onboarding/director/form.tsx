@@ -116,15 +116,18 @@ export function DirectorForm({
                 onClick={() =>
                   start(async () => {
                     const result = await startSubscription()
-                    if (result.url) {
-                      window.location.href = result.url
+                    // The director plan bills the card on file, so there is no Stripe page to
+                    // send them to any more — refreshing is what picks up the membership the
+                    // webhook writes.
+                    if (result.success) {
+                      router.refresh()
                       return
                     }
                     setError(result.error ?? 'Could not start the subscription.')
                   })
                 }
               >
-                {pending ? 'Opening Stripe…' : 'Subscribe — $150 / month'}
+                {pending ? 'Starting…' : 'Subscribe — $150 / month'}
               </Button>
               <Button block variant="outline" disabled={pending} onClick={() => router.refresh()}>
                 I&rsquo;ve paid — check again
