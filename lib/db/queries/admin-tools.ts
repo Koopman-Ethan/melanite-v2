@@ -260,6 +260,30 @@ export async function getProviderSharePct(): Promise<number> {
   return Number(row?.pct ?? 0.5)
 }
 
+/** What Stripe is expected to take, so a provider charge can be grossed up to cover it.
+ *
+ *  Two numbers rather than one because Stripe charges both a percentage and a flat amount, and
+ *  the flat part is what makes a small session disproportionately expensive to collect — 30c on
+ *  a $35 chin is nearly a percent on its own.
+ *
+ *  Falls back to Stripe's US standard rather than to zero. Zero would silently reinstate the
+ *  thing this exists to stop: Keoni absorbing the fee, with nothing to show that it happened. */
+export async function getProcessingRate(): Promise<{ pct: number; fixedCents: number }> {
+  const [row] = await db
+    .select({
+      pct: platformSettings.stripeFeePct,
+      fixedCents: platformSettings.stripeFeeFixedCents,
+    })
+    .from(platformSettings)
+    .where(eq(platformSettings.id, 1))
+    .limit(1)
+
+  return {
+    pct: Number(row?.pct ?? 0.029),
+    fixedCents: row?.fixedCents ?? 30,
+  }
+}
+
 /** Bookings that already have money recorded — used to warn before double-entering. */
 export async function bookingHasPayment(bookingId: string): Promise<boolean> {
   const [row] = await db

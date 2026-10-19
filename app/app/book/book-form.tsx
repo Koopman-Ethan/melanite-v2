@@ -382,8 +382,9 @@ export function BookForm({
                   </strong>{' '}
                   — taken from{' '}
                   {cardLast4 ? `the card ending ${cardLast4}` : 'your payment method on file'} about
-                  twelve hours after it ends, for the equipment and the room. Nothing is charged
-                  now. What you charge your client is between you and them.
+                  twelve hours after it ends, for the equipment and the room. That figure includes
+                  card processing, so it is what will appear on your statement. Nothing is charged
+                  now, and what you charge your client is between you and them.
                   <br />
                 </>
               )}

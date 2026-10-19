@@ -316,6 +316,23 @@ export const platformSettings = pgTable('platform_settings', {
    *  fee is not a service, and the two policies should be able to diverge without one silently
    *  changing the other. Melanite splits fees evenly. */
   feeProviderSharePct: numeric({ precision: 4, scale: 3 }).notNull().default('0.500'),
+
+  /** What Stripe takes, priced into every provider charge so Keoni does not absorb it.
+   *
+   *  From 19 October the published fee schedule is what Melanite NETS: a $60 tier means $60
+   *  reaching Melanite, and the card is charged whatever it takes to leave that. The
+   *  arithmetic is `grossUpForProcessing` in `lib/money.ts` — and it is not `net * 1.029`,
+   *  which under-recovers because the percentage applies to the larger amount once the
+   *  surcharge is on it.
+   *
+   *  CONFIGURABLE BECAUSE ONE RATE CANNOT BE RIGHT. Stripe's US standard is 2.9% + 30c on a
+   *  domestic card, more on Amex, more on an international one, more again with currency
+   *  conversion. These two columns are a prediction; `ledger_entries.stripe_fee_cents` records
+   *  what Stripe actually took, and the gap between them is what tells Keoni whether to move
+   *  the rate. Setting it to cover the worst card over-recovers on the best, which is a
+   *  pricing decision rather than a bug. */
+  stripeFeePct: numeric({ precision: 4, scale: 3 }).notNull().default('0.029'),
+  stripeFeeFixedCents: integer().notNull().default(30),
   /** Stamped onto the client's consent record, so a later wording change does not rewrite what
    *  someone actually agreed to. */
   cardPolicyVersion: text().notNull().default('2026-07-27.v1'),
@@ -1715,6 +1732,20 @@ export const ledgerEntries = pgTable('ledger_entries', {
    *  receives carries the normal split. The row records what happened. */
   providerPayout: money().notNull().default('0.00'),
   melaniteCut: money().notNull().default('0.00'),
+
+  /** What Stripe took out of this transaction, in cents. Null when nothing was processed —
+   *  cash, a Groupon voucher, a credited session — which is NOT the same as zero.
+   *
+   *  `melaniteCut` stays the GROSS Melanite is owed, because the provider-paid constraint
+   *  requires `melanite_cut = gross_amount` and because what was charged is a different fact
+   *  from what it cost to collect. Net is `melanite_cut - stripe_fee_cents`, and the revenue
+   *  page shows all three.
+   *
+   *  ESTIMATED AT CHARGE TIME, then corrected from the balance transaction when Stripe tells
+   *  us what it really took. The two differ on Amex and international cards, which is exactly
+   *  the information `platform_settings.stripe_fee_pct` needs in order to be set from figures
+   *  rather than from a guess. */
+  stripeFeeCents: integer(),
 
   paymentMethod: paymentMethod().notNull().default('stripe'),
   /** Their identifier — Cherry contract id, Groupon voucher code, cheque number. Nothing

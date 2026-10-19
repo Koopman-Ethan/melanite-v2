@@ -5,7 +5,8 @@ import { and, eq, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { paysRentSql } from '@/lib/db/revenue-model'
 import { bookings, ledgerEntries, providerServices, providers, services } from '@/lib/db/schema'
-import { toMoney } from '@/lib/money'
+import { grossUpForProcessing, toMoney } from '@/lib/money'
+import { getProcessingRate } from '@/lib/db/queries/admin-tools'
 import { notifyProviderCharged } from '@/lib/notify-melanite'
 import { feeForProviderService } from '@/lib/rental/schedule'
 import { isHouse, paysRent } from '@/lib/revenue-model'
@@ -164,17 +165,18 @@ export async function chargeRentalFee(bookingId: string): Promise<RentalChargeRe
     return { skipped: 'This provider is on the 50/50 split and owes no rental fee.' }
   }
 
-  // WHAT TO CHARGE, in the one place that charges it.
+  // WHAT MELANITE IS OWED, in the one place that charges it.
   //
-  // Keoni's figure wins when she has set one. For a provider billed half their own price she
-  // confirms every session against a receipt before the card is touched — the derived number is
-  // only what Melanite believes the session was worth, since the price list it comes from is the
-  // provider's own to edit. An override is her saying what it actually was.
+  // Keoni's figure wins when she has set one. For the three on `keoni_sets` it is the ONLY
+  // source — Melanite derives nothing for them, and `feeForProviderService` returns null by
+  // design rather than as a gap.
   //
   // Falls back to the derived fee, which is the published tier price for everybody else.
-  const amountCents = booking.feeOverrideCents ?? (await feeForProviderService(booking.providerId, booking.serviceName))
+  //
+  // THIS IS THE NET, NOT THE CHARGE. See the gross-up below.
+  const netCents = booking.feeOverrideCents ?? (await feeForProviderService(booking.providerId, booking.serviceName))
 
-  if (amountCents === null) {
+  if (netCents === null) {
     // The loud gap. A service with no fee must not become a free session; it is a question for
     // Keoni, and until she answers it this booking cannot be billed. The two ways to get here
     // read differently: no published tier price, or a provider who has not priced it themselves.
@@ -189,10 +191,28 @@ export async function chargeRentalFee(bookingId: string): Promise<RentalChargeRe
     }
   }
 
+  // WHAT THE CARD IS CHARGED, which is more than what Melanite is owed.
+  //
+  // Keoni was absorbing Stripe's cut on every rental fee — 2.9% + 30c of a $60 session is
+  // $2.10, on roughly every session every provider books. From 19 October the schedule is what
+  // Melanite NETS and processing is priced on top. See `grossUpForProcessing`, and note it is
+  // not `net * 1.029`: the percentage applies to the larger amount once the surcharge is on it,
+  // so the obvious version under-recovers for ever.
+  //
+  // The rate is a PREDICTION from `platform_settings`. What Stripe actually takes comes back on
+  // the balance transaction and is recorded on the ledger row, so the gap between the two is
+  // visible rather than assumed — which is the only way the rate gets set from real figures.
+  const processing = await getProcessingRate()
+  const { chargeCents, estimatedFeeCents } = grossUpForProcessing({
+    netCents,
+    pct: processing.pct,
+    fixedCents: processing.fixedCents,
+  })
+
   let intentId: string
   try {
     const intent = await stripePost<{ id: string; status: string }>('/payment_intents', {
-      amount: amountCents,
+      amount: chargeCents,
       currency: 'usd',
       customer: provider.customerId,
       payment_method: provider.paymentMethodId,
@@ -270,6 +290,7 @@ export async function chargeRentalFee(bookingId: string): Promise<RentalChargeRe
     throw err
   }
 
+
   const [entry] = await db
     .insert(ledgerEntries)
     .values({
@@ -280,13 +301,24 @@ export async function chargeRentalFee(bookingId: string): Promise<RentalChargeRe
       subjectId: booking.id,
       providerId: booking.providerId,
       serviceId: booking.serviceId,
-      grossAmount: toMoney(amountCents),
+      grossAmount: toMoney(chargeCents),
       tipAmount: '0.00',
       // Provider-paid, so there is no split. The check constraint on `ledgerEntries` enforces
       // this pairing; writing anything else here fails the insert rather than quietly recording a
       // payout to somebody who is owed nothing.
       providerPayout: '0.00',
-      melaniteCut: toMoney(amountCents),
+      melaniteCut: toMoney(chargeCents),
+      // What it cost to collect — the PREDICTION at this point, corrected later.
+      //
+      // Stripe has no balance transaction for a charge at the instant it is confirmed; the fee
+      // appears a moment afterwards. Reading it back here was tried and silently returns null,
+      // which is worse than an estimate because it looks like "no processing fee". So the
+      // estimate is stored and `reconcileProcessingFees` replaces it with the real figure once
+      // Stripe has one — see `lib/rental/processing.ts`.
+      //
+      // `melaniteCut` stays the gross, because the constraint above requires it and because
+      // "charged" and "kept" are different facts.
+      stripeFeeCents: estimatedFeeCents,
       paymentMethod: 'stripe',
       stripePaymentIntentId: intentId,
       // Nothing is owed onward, so it is settled the moment it is recorded — the same reasoning
@@ -315,10 +347,12 @@ export async function chargeRentalFee(bookingId: string): Promise<RentalChargeRe
     providerId: booking.providerId,
     serviceName: booking.serviceName,
     when: booking.startTime,
-    amountCents,
+    // What actually left their card, not what Melanite kept. A receipt that named the net
+    // would not match their statement.
+    amountCents: chargeCents,
   })
 
-  return { charged: { amountCents, ledgerEntryId: entry.id } }
+  return { charged: { amountCents: chargeCents, ledgerEntryId: entry.id } }
 }
 
 /**

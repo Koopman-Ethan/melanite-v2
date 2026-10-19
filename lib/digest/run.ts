@@ -8,6 +8,7 @@ import { labelsFor, missingKeys } from '@/lib/end-of-use'
 import { getDigestDay, toCollectCents } from '@/lib/db/queries/daily-digest'
 import { rentToConfirm } from '@/lib/db/queries/review-queue'
 import { settleDueRent } from '@/lib/rental/settle'
+import { reconcileProcessingFees } from '@/lib/rental/processing'
 import { getLaserHours } from '@/lib/db/queries/availability'
 import {
   MELANITE_NOTIFY_EMAIL,
@@ -52,6 +53,12 @@ export interface DigestRunResult {
   settledCount: number
   settledCents: number
   settleFailed: number
+  /** Processing fees checked against Stripe, and how far the prediction was off. Positive drift
+   *  means Melanite over-recovered — money taken from providers that Stripe did not charge,
+   *  which is the direction worth watching. */
+  feesChecked: number
+  feesCorrected: number
+  feeDriftCents: number
   delivered: boolean
   /** Set when nothing was sent because this day had already gone out. */
   skipped?: 'already-sent'
@@ -106,6 +113,9 @@ export async function runEveningDigest(
         unbilled: 0,
         awaitingFigure: 0,
         awaitingOldestDays: 0,
+        feesChecked: 0,
+        feesCorrected: 0,
+        feeDriftCents: 0,
         settledCount: 0,
         settledCents: 0,
         settleFailed: 0,
@@ -127,6 +137,11 @@ export async function runEveningDigest(
   // OUTSIDE the already-sent guard above on purpose: `force` makes the admin rehearsal button
   // re-send without consuming the day's key, and rent still wants collecting either way.
   const settled = await settleDueRent()
+
+  // Replace the predicted processing fee with what Stripe really took, for anything charged
+  // recently. Rides here for the same reason the sweep does — no spare cron slot on the Vercel
+  // plan — and never throws, so a reporting correction cannot stop the email.
+  const processing = await reconcileProcessingFees()
 
   const data = await getDigestDay(denverDay)
 
@@ -216,6 +231,9 @@ export async function runEveningDigest(
     settledCount: settled.charged,
     settledCents: settled.chargedCents,
     settleFailed: settled.failed,
+    feesChecked: processing.checked,
+    feesCorrected: processing.corrected,
+    feeDriftCents: processing.driftCents,
     delivered: result.delivered,
     ...(result.detail ? { reason: result.detail } : {}),
   }

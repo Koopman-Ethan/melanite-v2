@@ -14,6 +14,8 @@ import {
 import { packBalancesFor } from '@/lib/rental/packs'
 import { tierForService } from '@/lib/rental-fees'
 import { getLiveSchedule } from '@/lib/rental/schedule'
+import { getProcessingRate } from '@/lib/db/queries/admin-tools'
+import { grossUpForProcessing } from '@/lib/money'
 import { paysRent } from '@/lib/revenue-model'
 import { hasAcceptedRentalTerms } from '@/lib/rental-terms'
 
@@ -107,13 +109,28 @@ export default async function BookPage({
   const feeFromSchedule = (serviceName: string): number | null => {
     const tier = tierForService(serviceName)
     if (!tier) return null
-    return schedule.byTier.get(tier.key)?.singleCents ?? tier.singleCents
+    const net = schedule.byTier.get(tier.key)?.singleCents ?? tier.singleCents
+
+    // QUOTED WITH PROCESSING ON IT, because that is what the card is charged. The schedule is
+    // what Melanite nets; a provider comparing the number here against their statement must
+    // find the same figure, and "$60" against a $62.11 line is a support message every time.
+    //
+    // The same function the charge uses, from the same settings, so the two cannot drift —
+    // which is the shape of every money bug in this codebase so far.
+    return grossUpForProcessing({
+      netCents: net,
+      pct: processing.pct,
+      fixedCents: processing.fixedCents,
+    }).chargeCents
   }
 
 
   // Melanite treating Melanite's own client pays no rent, so the whole fee panel is irrelevant
   // for the house account rather than showing it a charge of nothing.
   const payingRent = !provider || paysRent(provider.revenueModel)
+
+  // One read for the whole dropdown. See `feeFromSchedule`.
+  const processing = await getProcessingRate()
 
   /** This provider is never quoted a fee, because Melanite does not work one out for them.
    *

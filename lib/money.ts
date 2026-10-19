@@ -139,3 +139,74 @@ function assertShare(pct: number): void {
     throw new Error(`Share must be between 0 and 1, got ${pct}`)
   }
 }
+
+/** What Stripe takes, and what it leaves. */
+export interface Processing {
+  /** What the card is actually charged, in cents. */
+  chargeCents: number
+  /** What Stripe is expected to take out of it. An ESTIMATE — the real figure comes back on the
+   *  balance transaction and is recorded then. */
+  estimatedFeeCents: number
+  /** What Melanite expects to be left with. The figure the fee schedule is written in. */
+  netCents: number
+}
+
+/**
+ * Grosses a fee up so Melanite nets what it meant to charge.
+ *
+ * WHY THIS IS NOT `net * 1.029 + 30`. The obvious version under-recovers, every time, because
+ * Stripe's percentage applies to the LARGER amount once the surcharge is added. Charging
+ * $60 + 2.9% + 30¢ = $62.04 means Stripe takes 2.9% of $62.04, not of $60 — so Melanite nets
+ * $59.94 and is still short. The fixed point is:
+ *
+ *     charge = (net + fixed) / (1 - pct)
+ *
+ * At 2.9% + 30¢, netting $60 means charging $62.12: Stripe takes $1.80 + $0.30 = $2.10, which
+ * leaves exactly $60. The difference from the naive version is small per session and is money
+ * Keoni was losing on every single one.
+ *
+ * ROUNDED UP, not to nearest. A half-cent rounded down is a half-cent Melanite eats, on every
+ * transaction, for ever — and the provider cannot tell the difference between $62.12 and
+ * $62.13. When the rounding has to fall on somebody it falls on the party who chose the price.
+ *
+ * THE RATE IS AN ESTIMATE AND THIS IS THE HONEST PART. Stripe charges 2.9% + 30¢ on a standard
+ * domestic card, more on Amex, more again on an international one, more still with currency
+ * conversion. One configured rate cannot be right for every card. So this predicts, the charge
+ * records what Stripe ACTUALLY took from the balance transaction, and the difference between
+ * the two is visible on the revenue page — which is what lets Keoni set the rate from real
+ * figures rather than from a guess. Setting it to cover the worst card over-recovers slightly
+ * on the best one; that is a pricing decision and hers to make.
+ */
+export function grossUpForProcessing(input: {
+  netCents: number
+  /** Stripe's percentage as a fraction — 0.029 for 2.9%. */
+  pct: number
+  /** Stripe's per-transaction charge, in cents. 30 for 30¢. */
+  fixedCents: number
+}): Processing {
+  assertWhole(input.netCents, 'net amount')
+  assertWhole(input.fixedCents, 'fixed fee')
+
+  if (!Number.isFinite(input.pct) || input.pct < 0 || input.pct >= 1) {
+    throw new RangeError(`processing rate must be a fraction below 1, got ${input.pct}`)
+  }
+
+  // Zero stays zero. A pack-covered session charges nothing, and adding 30¢ of processing to
+  // nothing would turn a free session into a card transaction.
+  if (input.netCents === 0) {
+    return { chargeCents: 0, estimatedFeeCents: 0, netCents: 0 }
+  }
+
+  const chargeCents = Math.ceil((input.netCents + input.fixedCents) / (1 - input.pct))
+
+  // Derived from the charge rather than assumed, so the three numbers always reconcile exactly
+  // even after the rounding above. `net` here is what Melanite expects to keep, which is a
+  // cent or so MORE than it asked for — never less, which is the point of rounding up.
+  const estimatedFeeCents = Math.round(chargeCents * input.pct) + input.fixedCents
+
+  return {
+    chargeCents,
+    estimatedFeeCents,
+    netCents: chargeCents - estimatedFeeCents,
+  }
+}
