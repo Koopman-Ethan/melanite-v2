@@ -142,15 +142,23 @@ export function EndOfUseChecklist({
   bookingId: string
   /** The row, if this session was already closed out. Null means nobody has. */
   recorded: { itemsDone: number; itemCount: number; deviceIssue: boolean } | null
-  /** This provider's fee is set by Keoni from a receipt, so signing off asks for one.
+  /** This provider's fee is set by Keoni from a receipt, so the close-out asks for one.
    *
-   *  CAPTURED HERE RATHER THAN IN A SEPARATE FORM. It was a second prompt on the appointment
-   *  card and that was wrong in a way the queue made obvious: a session could be closed out,
-   *  plainly delivered, and still sit in Keoni's queue saying "waiting on their receipt". The
-   *  provider had finished with the appointment and had no reason to come back to it.
+   *  ASKED HERE, NEVER REQUIRED HERE, and the difference matters more than it looks.
    *
-   *  Closing out IS the moment they are certifying what happened in that room. What they
-   *  charged belongs in the same act. */
+   *  Closing out is the moment they certify how they left a shared medical device: the laser
+   *  on its homescreen, the handpieces clean, the room safe for whoever is in next. What they
+   *  charged their client is a billing figure and has nothing to do with any of that.
+   *
+   *  It was briefly a condition of signing off, which got the dependency backwards. A provider
+   *  who did not have the receipt to hand could not file the safety record at all — and the
+   *  close-out window is twelve hours, so waiting on an invoice could lose the suite record for
+   *  that session permanently. A clinical record must never be held hostage to a number about
+   *  money.
+   *
+   *  So it is prompted here, because this is the natural moment and the one time they are
+   *  certainly looking at the appointment, and the figure can also be sent on its own from the
+   *  card. Neither blocks the other. */
   asksForReceipt?: boolean
   /** What they have already told Melanite, if they are amending. */
   sentAmountCents?: number | null
@@ -172,10 +180,6 @@ export function EndOfUseChecklist({
   const receiptRef = useRef<HTMLInputElement>(null)
   const [photoName, setPhotoName] = useState<string | null>(null)
   const photoRef = useRef<HTMLInputElement>(null)
-
-  // Signing off without it would put the session straight into Keoni's queue with nothing to
-  // act on, which is the state this whole change exists to remove.
-  const receiptMissing = Boolean(asksForReceipt) && !(Number(charged) > 0)
 
   const done = new Set(ticked)
   const outstanding = missingRequired(ticked)
@@ -439,11 +443,13 @@ export function EndOfUseChecklist({
       {asksForReceipt && (
         <div className="rounded-card border border-gold/40 bg-gold/5 p-3 space-y-3">
           <p className="text-[11px] font-medium text-ink-secondary">
-            What did you charge your client for this?
+            What did you charge your client for this?{' '}
+            <span className="font-normal text-ink-faint">Optional here</span>
           </p>
           <p className="text-[11px] text-ink-muted">
             Melanite does not set a price for your sessions — Keoni works out what you owe from
-            this.
+            this. You can sign off without it and send the figure from this appointment later;
+            it is only asked here because you are already looking at the session.
           </p>
 
           <div className="flex flex-wrap items-end gap-3">
@@ -506,21 +512,15 @@ export function EndOfUseChecklist({
         <Button
           type="submit"
           size="sm"
-          disabled={pending || issue === '' || !ready || photoMissing || receiptMissing}
+          disabled={pending || issue === '' || !ready || photoMissing}
         >
-          {/* NAMES WHAT IS MISSING, including the figure. Ticking all twenty and leaving the
-              amount blank left a disabled button saying "Sign off — 20 of 25" with no clue
-              why — the same greyed-out-with-no-reason problem the cancel button avoids by
-              hiding itself. The outstanding box above only lists checklist items. */}
           {pending
             ? 'Saving…'
             : !ready
               ? `${requiredDone} of ${REQUIRED_ITEM_COUNT} required`
-              : receiptMissing
-                ? 'Add what you charged'
-                : ticked.length >= END_OF_USE_ITEM_COUNT
-                  ? 'Sign off — all 25'
-                  : `Sign off — ${ticked.length} of ${END_OF_USE_ITEM_COUNT}`}
+              : ticked.length >= END_OF_USE_ITEM_COUNT
+                ? 'Sign off — all 25'
+                : `Sign off — ${ticked.length} of ${END_OF_USE_ITEM_COUNT}`}
         </Button>
         <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>
           Not now

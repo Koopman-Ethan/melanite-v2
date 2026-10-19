@@ -247,12 +247,12 @@ function AppointmentCard({
  *    AMENDING. They typed the wrong figure and need to fix it before Keoni acts. After she has
  *    acted the item has left her queue anyway.
  *
- *    LATE. The close-out window is twelve hours and it can simply pass — a provider who
- *    finishes at 6pm and does not open the app until the next afternoon cannot sign off any
- *    more. Without this they could never send the figure at all, and Keoni's queue would hold
- *    a session saying "not closed out yet" with no way for anybody but her to resolve it. The
- *    close-out is gone for good at that point; what they charged is not, and it is the half
- *    she actually needs.
+ *    LATE OR SEPARATELY. The close-out asks for the figure but never requires it — it certifies
+ *    how a shared medical device was left, and a billing number is no part of that. So a
+ *    provider can sign the room off now and deal with the money when they have the invoice.
+ *    The window is also only twelve hours and can simply pass: somebody who finishes at 6pm
+ *    and does not open the app until the next afternoon cannot sign off at all any more.
+ *    Either way the figure is still owed, and this is where it goes.
  *
  *  Hidden while the close-out window is still open and nothing has been sent, so it is never
  *  TWO prompts asking the same question of somebody who has not answered it once.
@@ -264,8 +264,18 @@ function ReceiptPrompt({ appointment }: { appointment: Appointment }) {
   if (appointment.status === 'cancelled' || appointment.status === 'no_show') return null
   if (appointment.endTime > new Date()) return null
 
-  // The close-out is still asking for it, so do not ask twice.
-  if (appointment.receiptAmountCents === null && closeoutWindowOpen(appointment)) return null
+  // Hidden only while the CLOSE-OUT IS STILL ASKING — which means the window is open and they
+  // have not signed off yet. Two prompts for the same number, side by side, is worse than
+  // either alone.
+  //
+  // The moment close-out stops being the vehicle, this takes over: they signed off without
+  // filling it in, or the twelve hours ran out. Both are ordinary. Keying this on the window
+  // alone left a hole — a provider who closed out early without the figure had the checklist
+  // replaced by "Closed out — 25 of 25" and no way to send it afterwards.
+  const closeoutStillAsking =
+    appointment.closeout === null && closeoutWindowOpen(appointment)
+
+  if (appointment.receiptAmountCents === null && closeoutStillAsking) return null
 
   return (
     <div className="mt-3 border-t border-line pt-3">

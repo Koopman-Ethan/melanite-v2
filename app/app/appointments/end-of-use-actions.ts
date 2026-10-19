@@ -101,14 +101,11 @@ export async function recordEndOfUseChecklist(
     }
   }
 
-  // WHAT THEY CHARGED, for a provider whose fee Keoni sets. Required, because Melanite works
-  // out no figure for them and a close-out without it drops the session into Keoni's queue with
-  // nothing to act on — the "waiting on their receipt" state that should not be reachable once
-  // somebody has certified the session happened.
-  //
-  // Checked server-side as well as disabling the button, for the same reason the twenty ticks
-  // are: the disabled button is a courtesy to whoever is standing in the room, and it is not
-  // what makes this true.
+  // WHAT THEY CHARGED, for a provider whose fee Keoni sets. Taken if it is offered, and NEVER
+  // required — the close-out certifies how a shared medical device was left, and a billing
+  // figure is not part of that. Blocking the safety record on an invoice the provider may not
+  // have yet would risk losing it altogether, because the close-out window is twelve hours and
+  // does not reopen. They can send the figure on its own from the appointment card.
   const [me] = await db
     .select({ rentBasis: providers.rentBasis })
     .from(providers)
@@ -117,10 +114,8 @@ export async function recordEndOfUseChecklist(
 
   const asksForReceipt = me?.rentBasis === 'keoni_sets'
   const chargedAmount = Number(formData.get('chargedAmount') ?? '')
-
-  if (asksForReceipt && !(Number.isFinite(chargedAmount) && chargedAmount > 0)) {
-    return { error: 'Say what you charged your client before signing off.' }
-  }
+  const sentWithCloseout =
+    asksForReceipt && Number.isFinite(chargedAmount) && chargedAmount > 0
 
   const items = sanitiseItems(formData.getAll('items').map(String))
 
@@ -148,10 +143,9 @@ export async function recordEndOfUseChecklist(
     stored = result.blob
   }
 
-  // The receipt itself is OPTIONAL where the amount is not. A provider on a bad signal in a
-  // treatment room must still be able to sign off — Keoni has the figure, and the queue item
-  // tells her whether a document came with it so she can ask.
-  if (asksForReceipt) {
+  // Only when they actually filled it in. An empty box is somebody signing off the room and
+  // dealing with the money later, which is allowed.
+  if (sentWithCloseout) {
     const receipt = formData.get('receipt')
     let receiptBlob: { storageKey: string; mimeType: string } | null = null
 
