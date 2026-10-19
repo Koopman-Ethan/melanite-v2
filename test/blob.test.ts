@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { MAX_UPLOAD_BYTES } from '@/lib/uploads'
 import {
   blobConfigured,
   deleteEquipmentPhoto,
@@ -241,5 +242,44 @@ describe('which photos an environment may destroy', () => {
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.reason).toBe('foreign')
     expect(del, 'a delete was attempted against another environment').not.toHaveBeenCalled()
+  })
+})
+
+describe('the size limit means what it says', () => {
+  // THE BUG THIS LOCKS DOWN. `putEquipmentPhoto` advertised 8MB while Next's server action body
+  // limit was the default 1MB — so anything between the two was rejected by the framework
+  // before a line of this file ran, and the provider got a runtime overlay reading "Body
+  // exceeded 1 MB limit" instead of the sentence below. A server-side limit larger than the
+  // transport allows is not a limit.
+  //
+  // The three numbers that have to stay in step: this one, `MAX_UPLOAD_BYTES` in
+  // `lib/uploads.ts` which the browser enforces, and `serverActions.bodySizeLimit` in
+  // `next.config.ts` which the framework enforces. This asserts the first two.
+
+  it('refuses a file larger than the browser would have sent', async () => {
+    const tooBig = {
+      type: 'image/jpeg',
+      size: MAX_UPLOAD_BYTES + 1,
+      arrayBuffer: async () => new ArrayBuffer(8),
+    }
+
+    const out = await putEquipmentPhoto('zz-check', tooBig)
+    expect(out.ok, 'a file over the browser limit must be refused here too').toBe(false)
+    if (!out.ok) expect(out.reason).toBe('size')
+  })
+
+  it('accepts one at the limit, so the two numbers have not drifted apart', async () => {
+    // If the server limit were ever lowered below `MAX_UPLOAD_BYTES`, the browser would wave
+    // files through that the server then refuses — the same mismatch in the other direction.
+    put.mockResolvedValueOnce({ pathname: 'equipment/dev/zz-check.jpg' })
+
+    const out = await putEquipmentPhoto('zz-check', {
+      type: 'image/jpeg',
+      size: MAX_UPLOAD_BYTES,
+      arrayBuffer: async () => new ArrayBuffer(8),
+    })
+
+    expect(out.ok, 'a file exactly at the browser limit must be accepted').toBe(true)
+    expect(put, 'and it must actually have been written').toHaveBeenCalled()
   })
 })

@@ -40,8 +40,14 @@ import { del, get, put } from '@vercel/blob'
 const ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp'])
 
 /** After client-side downscaling a photo lands around 200–400KB. This is the backstop for a
- *  client that skipped it, not the expected size — v1 allowed 10MB and that was for PDFs. */
-const MAX_BYTES = 8 * 1024 * 1024
+ *  client that skipped it, not the expected size — v1 allowed 10MB and that was for PDFs.
+ *
+ *  MATCHED TO `MAX_UPLOAD_BYTES`, which is matched in turn to the server action body limit in
+ *  `next.config.ts`. It was 8MB, which was a promise this code could not keep: Next rejects a
+ *  request over the action limit before any of this runs, so anything between the two numbers
+ *  failed as "Body exceeded 1 MB limit" rather than as the civil refusal written below. A
+ *  server-side limit larger than the transport allows is not a limit, it is a lie. */
+const MAX_BYTES = 3 * 1024 * 1024
 
 const EXTENSIONS: Record<string, string> = {
   'image/jpeg': 'jpg',

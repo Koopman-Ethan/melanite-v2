@@ -1,6 +1,21 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  experimental: {
+    // Server actions carry the uploads: an equipment photograph and a client receipt.
+    //
+    // The default is 1MB, and exceeding it is not a nice failure — Next rejects the request
+    // before any of our code runs, so every check in `lib/blob.ts` is skipped and the provider
+    // gets a runtime overlay reading "Body exceeded 1 MB limit". A photo was fine because it is
+    // downscaled in the browser first; a scanned receipt PDF cannot be, and found this.
+    //
+    // 4MB rather than something generous, because this applies to EVERY server action in the
+    // app and a body limit is the cheap half of not being a free file host. `MAX_UPLOAD_BYTES`
+    // in `lib/uploads.ts` sits under it, so a file that passes the browser check cannot be the
+    // thing that bursts this.
+    serverActions: { bodySizeLimit: '4mb' },
+  },
+
   // A verification build can be sent somewhere other than `.next`.
   //
   // `next build` and `next dev` share that directory, so running a build while the dev server

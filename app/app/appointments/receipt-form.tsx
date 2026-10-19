@@ -5,6 +5,8 @@ import { useActionState, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Notice } from '@/components/ui/field'
 
+import { downscaleImage, isTooBig, putBackInInput, TOO_BIG_MESSAGE } from '@/lib/uploads'
+
 import { submitReceipt } from './receipt-actions'
 import type { ReceiptState } from '@/lib/rental/receipts'
 
@@ -44,6 +46,35 @@ export function ReceiptForm({
   const [state, action, pending] = useActionState<ReceiptState, FormData>(submitReceipt, {})
   const fileRef = useRef<HTMLInputElement>(null)
   const [fileName, setFileName] = useState<string | null>(null)
+  /** Refused in the browser, before anything is sent. Separate from `state.error`, which comes
+   *  back from the server — this one never gets that far, which is the point of it. */
+  const [fileError, setFileError] = useState<string | null>(null)
+
+  // SHRINK FIRST, THEN REFUSE. A photo of a receipt off a modern phone is several megabytes and
+  // would blow the server action body limit — at which point Next rejects the request before any
+  // of our code runs and the provider sees "Body exceeded 1 MB limit", which is not a sentence
+  // anybody can act on. Redrawing it smaller fixes almost every case.
+  //
+  // A PDF cannot be redrawn, so the size check is what catches the rest. Doing it here means the
+  // file never leaves the browser rather than being uploaded and then rejected.
+  async function onPickReceipt(e: React.ChangeEvent<HTMLInputElement>) {
+    const picked = e.target.files?.[0]
+    if (!picked) return
+
+    setFileError(null)
+    setFileName(picked.name)
+
+    const smaller = await downscaleImage(picked)
+
+    if (isTooBig(smaller)) {
+      setFileError(TOO_BIG_MESSAGE)
+      setFileName(null)
+      if (fileRef.current) fileRef.current.value = ''
+      return
+    }
+
+    putBackInInput(fileRef.current, smaller)
+  }
 
   if (!open) return null
 
@@ -87,7 +118,7 @@ export function ReceiptForm({
             type="file"
             name="receipt"
             accept="image/jpeg,image/png,image/webp,application/pdf"
-            onChange={(e) => setFileName(e.target.files?.[0]?.name ?? null)}
+            onChange={onPickReceipt}
             className="hidden"
           />
           <Button
@@ -114,6 +145,7 @@ export function ReceiptForm({
       </div>
 
       {fileName && <p className="text-xs text-ink-faint">Attached: {fileName}</p>}
+      {fileError && <Notice>{fileError}</Notice>}
 
       {/* The redaction prompt, next to the control it is about rather than in a policy page
           nobody opens. Phrased as a thing to do, not a warning: "cover the name" is an action,
