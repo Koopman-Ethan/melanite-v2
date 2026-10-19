@@ -82,11 +82,10 @@ export function ReceiptForm({
         <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
           Send Keoni what you charged
         </Button>
-        <p className="mt-1 text-[11px] text-ink-faint">
-          {late
-            ? 'The check-off has closed, but Keoni still needs this to settle the session.'
-            : 'Melanite sets no price for your sessions — Keoni works it out from this.'}
-        </p>
+        {/* One line, matching the close-out beside it. What is different about the late case —
+            that the check-off has shut and this has not — is said inside the form, where it is
+            read by somebody who has already decided to act on it. */}
+        <p className="mt-1.5 text-[11px] text-ink-faint">Submit your client receipt</p>
       </div>
     )
   }

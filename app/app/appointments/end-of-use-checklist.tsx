@@ -207,15 +207,13 @@ export function EndOfUseChecklist({
 
   if (!open) {
     return (
-      <div className="mt-3">
+      <div>
         <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
           Close out the suite
         </Button>
-        {/* Said here rather than inside, because somebody who reads this as an end-of-day form
-            will file one a day and wonder why they are being chased. */}
-        <p className="mt-1 text-[11px] text-ink-faint">
-          Between clients too, not just at the end of the day.
-        </p>
+        {/* "After appointment", not "end of day". Somebody who reads this as a daily form files
+            one a day and then wonders why they are being chased for the other four. */}
+        <p className="mt-1.5 text-[11px] text-ink-faint">After appointment checklist</p>
       </div>
     )
   }
