@@ -2,7 +2,7 @@ import 'server-only'
 
 import { and, asc, eq, isNull, sql } from 'drizzle-orm'
 
-import { getProviderSharePct } from '@/lib/db/queries/admin-tools'
+import { getProcessingRate, getProviderSharePct } from '@/lib/db/queries/admin-tools'
 import { CLOSEOUT_GRACE_HOURS } from '@/lib/end-of-use'
 import { sharesRevenueSql } from '@/lib/db/revenue-model'
 import { tierForService } from '@/lib/rental-fees'
@@ -328,6 +328,13 @@ export async function rentToConfirm(): Promise<QueueItem[]> {
     )
     .orderBy(asc(bookings.endTime))
 
+  // For the RECOMMENDATION only, never for a charge. Melanite still works out no fee for these
+  // three — what it can do, once they have said what they billed, is arithmetic Keoni would
+  // otherwise do in her head on every session: half of it, which is the old 50/50 arrived at
+  // from the other side. She overrides it freely; it is a starting point, not an answer.
+  const sharePct = await getProviderSharePct()
+  const processing = await getProcessingRate()
+
   return rows.map((r) => {
     // NO DERIVED FALLBACK. Null until Keoni has read the receipt and typed a number, and the
     // row says so rather than showing a plausible figure nobody stands behind. An amount of
@@ -357,6 +364,18 @@ export async function rentToConfirm(): Promise<QueueItem[]> {
       meta: {
         adjusted: cents === null ? null : 'yes',
         closedOut: r.closedOut ? 'yes' : null,
+        /** Half of what they say they billed, in dollars. THE NET, which is what belongs in
+         *  Keoni's box — `chargeRentalFee` treats her figure as the amount Melanite keeps and
+         *  adds processing itself. Recommending the grossed-up number would have the fee
+         *  charged twice. Null until they have sent a figure to halve. */
+        recommended:
+          r.claimedCents === null
+            ? null
+            : (Math.round(r.claimedCents * (1 - sharePct)) / 100).toFixed(2),
+        /** The rate, so the row can show what the card will actually take as she types rather
+         *  than only for the recommendation. Same source the charge uses. */
+        feePct: String(processing.pct),
+        feeFixedCents: String(processing.fixedCents),
         /** What they said, as a display string. The figure Keoni reads and acts on in the
          *  ordinary case — the document is for when it does not look right. */
         claimed: r.claimedCents === null ? null : (r.claimedCents / 100).toFixed(2),

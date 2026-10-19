@@ -73,6 +73,18 @@ export function QueueRow({
 
   const record = useOutcomeLog()
 
+  // WHAT THE CARD ACTUALLY TAKES, recomputed as she types rather than only for the
+  // recommendation. The box holds what Melanite keeps; `chargeRentalFee` adds processing with
+  // the same arithmetic and the same settings, so the two cannot drift.
+  const feePct = Number(item.meta.feePct ?? '0.029')
+  const feeFixed = Number(item.meta.feeFixedCents ?? '30')
+  const netCents = Math.round(Number(figure || 0) * 100)
+  const cardTakes =
+    netCents > 0 ? Math.ceil((netCents + feeFixed) / (1 - feePct)) : null
+
+  /** Half of what they said they billed. A starting point for Keoni, never a charge. */
+  const recommended = item.meta.recommended ?? null
+
   const run = (fn: () => Promise<QueueState>) =>
     start(async () => {
       const result = await fn()
@@ -242,9 +254,17 @@ export function QueueRow({
               disabled={pending || !figure || Number(figure) <= 0}
               onClick={() => run(() => confirmSessionRent(item.id, Number(figure)))}
             >
-              {/* "Charge $0.00" on a disabled button reads as an offer to charge nothing.
-                  Only names a figure once there is one worth naming. */}
-              {pending ? 'Charging…' : Number(figure) > 0 ? `Charge ${usd(figure)}` : 'Charge'}
+              {/* NAMES WHAT THE CARD TAKES, not what is in the box. The box is what Melanite
+                  KEEPS — `chargeRentalFee` adds processing to it — so a button reading
+                  "Charge $75.00" beside a $77.55 statement line is a query every time.
+
+                  "Charge $0.00" on a disabled button also read as an offer to charge nothing,
+                  so it only names a figure once there is one worth naming. */}
+              {pending
+                ? 'Charging…'
+                : cardTakes === null
+                  ? 'Charge'
+                  : `Charge ${usd(cardTakes / 100)}`}
             </Button>
 
             <Button
@@ -287,6 +307,25 @@ export function QueueRow({
                 'Closed out, but no figure came with it — ask them what they charged.'
               ) : (
                 'They have not closed out this session yet. The figure comes with that.'
+              )}
+              {recommended !== null && (
+                <>
+                  {' '}
+                  <button
+                    type="button"
+                    onClick={() => setFigure(recommended)}
+                    className="underline underline-offset-4 hover:text-ink"
+                  >
+                    Use {usd(recommended)}
+                  </button>{' '}
+                  — half of it, the usual split.
+                </>
+              )}
+              {cardTakes !== null && Number(figure) > 0 && (
+                <span className="block">
+                  {usd(figure)} to Melanite · {usd(cardTakes / 100)} off their card with
+                  processing.
+                </span>
               )}
             </span>
           </>

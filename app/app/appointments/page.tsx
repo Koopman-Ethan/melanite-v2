@@ -260,14 +260,14 @@ function AppointmentCard({
             two rules. An empty row draws none, which is what a cancelled session should get. */}
         {(closeoutOffered || receiptOffered) && (
           <div className="mt-3 border-t border-line pt-3">
-            {/* A GRID, not a flex row with a gap. Two actions whose labels and hints are
-                different lengths drift out of alignment under `flex`, and the second column
-                lands wherever the first one happens to end — which is what made this look
-                unplanned. Equal columns put both buttons on the same left edge and both hints
-                on the same baseline, whichever text they carry.
-
-                Stacks below `sm:`, where two columns would be two cramped ones. */}
-            <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
+            {/* STACKED ON A PHONE, side by side and close together on anything wider.
+                Two related actions on the same session should read as a pair; equal grid
+                columns pushed them to opposite ends of a wide card and made them look like
+                two unrelated things that happened to share a row.
+                `items-start` keeps the buttons on one baseline while the hints sit under
+                each — which is what the grid was there for, and a flex row does it just as
+                well now the subtitles are short. */}
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
               {closeoutOffered && <CloseoutPrompt appointment={appointment} />}
               {receiptOffered && <ReceiptPrompt appointment={appointment} />}
             </div>
