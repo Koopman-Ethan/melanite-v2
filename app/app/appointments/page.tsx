@@ -213,25 +213,29 @@ function AppointmentCard({
           />
         )}
         <CloseoutPrompt appointment={appointment} asksForReceipt={keoniSetsFee} />
-        {/* The standalone receipt form is only for AMENDING now. Sending it is part of closing
-            out — see `EndOfUseChecklist`. It used to be the primary prompt and that was wrong
-            in a way Keoni's queue made obvious: a session could be closed out, plainly
-            delivered, and still say "waiting on their receipt", because the provider had
-            finished with the appointment and had no reason to come back to it. */}
-        {keoniSetsFee && appointment.receiptAmountCents !== null && (
-          <ReceiptPrompt appointment={appointment} />
-        )}
+        {keoniSetsFee && <ReceiptPrompt appointment={appointment} />}
       </div>
     </li>
   )
 }
 
-/** CORRECTING what they said they charged, after the fact.
+/** Sending what they charged when the close-out did not carry it.
  *
- *  The sending happens at close-out. This is the amendment path: a provider who typed the wrong
- *  figure must be able to fix it before Keoni acts, and after she has acted the item has left
- *  her queue anyway. Rendered only once something has been sent, so it is never the first time
- *  somebody is asked.
+ *  Normally this is part of signing off — see `EndOfUseChecklist`. This covers the two cases
+ *  that leaves, and both of them are real:
+ *
+ *    AMENDING. They typed the wrong figure and need to fix it before Keoni acts. After she has
+ *    acted the item has left her queue anyway.
+ *
+ *    LATE. The close-out window is twelve hours and it can simply pass — a provider who
+ *    finishes at 6pm and does not open the app until the next afternoon cannot sign off any
+ *    more. Without this they could never send the figure at all, and Keoni's queue would hold
+ *    a session saying "not closed out yet" with no way for anybody but her to resolve it. The
+ *    close-out is gone for good at that point; what they charged is not, and it is the half
+ *    she actually needs.
+ *
+ *  Hidden while the close-out window is still open and nothing has been sent, so it is never
+ *  TWO prompts asking the same question of somebody who has not answered it once.
  *
  *  Nothing on a cancellation or a no-show: those never produced a treatment, so there is no
  *  receipt. They reach Keoni through `heldRent`, where the question is whether anything is owed
@@ -240,12 +244,16 @@ function ReceiptPrompt({ appointment }: { appointment: Appointment }) {
   if (appointment.status === 'cancelled' || appointment.status === 'no_show') return null
   if (appointment.endTime > new Date()) return null
 
+  // The close-out is still asking for it, so do not ask twice.
+  if (appointment.receiptAmountCents === null && closeoutWindowOpen(appointment)) return null
+
   return (
     <div className="mt-3 border-t border-line pt-3">
       <ReceiptForm
         bookingId={appointment.id}
         sentAmountCents={appointment.receiptAmountCents}
         sentAt={appointment.receiptUploadedAt}
+        late={!closeoutWindowOpen(appointment)}
       />
     </div>
   )

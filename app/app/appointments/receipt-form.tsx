@@ -27,11 +27,16 @@ export function ReceiptForm({
   bookingId,
   sentAmountCents,
   sentAt,
+  late = false,
 }: {
   bookingId: string
   /** What they last told Melanite, or null if they have not yet. */
   sentAmountCents: number | null
   sentAt: Date | null
+  /** The close-out window has passed without this being sent. Changes only the wording: the
+   *  provider needs to know why they are being asked here rather than on the checklist, and
+   *  that the checklist itself is gone for good. */
+  late?: boolean
 }) {
   const [state, action, pending] = useActionState<ReceiptState, FormData>(submitReceipt, {})
   const [open, setOpen] = useState(sentAmountCents === null)
@@ -73,6 +78,13 @@ export function ReceiptForm({
         <strong className="text-ink">What did you charge your client?</strong> Melanite does not
         set a price for your sessions — Keoni works out what you owe from this.
       </p>
+
+      {late && sentAmountCents === null && (
+        <p className="text-xs text-ink-faint">
+          The twelve hours for signing this session off have passed, so the check-off is closed.
+          This part is not — Keoni still needs the figure before she can settle it.
+        </p>
+      )}
 
       <div className="flex flex-wrap items-end gap-3">
         <label className="text-xs">
