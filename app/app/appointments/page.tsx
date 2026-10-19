@@ -85,16 +85,23 @@ function AppointmentCard({
 }: {
   appointment: Appointment
   origin: string
-  /** This provider's fee is set by Keoni from a receipt, so the card asks them for one. */
-  keoniSetsFee: boolean
   /** From `platform_settings`. Cancelling with more notice than this asks for no reason, and
    *  nothing is owed — Keoni's rule of 12 October. */
   lateCancellationHours: number
   /** What this session WILL cost, for one that has not been swept yet. Null when the service
    *  has no published fee. */
   dueCents: number | null
+  /** Their fee is set by Keoni from a receipt. Changes what a missing figure MEANS. */
+  keoniSetsFee: boolean
 }) {
   const discounted = appointment.discountType !== 'none' && Number(appointment.discountValue) > 0
+
+  // Does THIS session owe rent? Not the same question as whether the provider pays rent.
+  //
+  // The three on `keoni_sets` still have pre-cutover appointments on this list, carrying a
+  // client and a price, where the client paid Melanite through a checkout link and Melanite
+  // took its half at the point of sale. Nothing is owed on one of those.
+  const paysRentForThis = appointment.paymentSource === 'rental'
 
   // Has the rent been taken yet? Null means no ledger row, which since 12 October is the
   // ORDINARY state of a session for its first twelve hours rather than a fault.
@@ -167,7 +174,14 @@ function AppointmentCard({
                   {dueCents === null ? '—' : usd(dueCents / 100)}
                 </div>
                 <div className="text-xs text-ink-faint">
-                  {dueCents === null ? 'no fee set' : 'rent due'}
+                  {/* "no fee set" is a GAP — a service Melanite prices and has not. For the
+                      three it is the permanent, correct state, and reading it as a gap would
+                      have them chasing a price nobody is going to publish. */}
+                  {keoniSetsFee
+                    ? 'Keoni sets this'
+                    : dueCents === null
+                      ? 'no fee set'
+                      : 'rent due'}
                 </div>
               </>
             ) : (
@@ -212,8 +226,14 @@ function AppointmentCard({
             hasEmail={Boolean(appointment.clientEmail)}
           />
         )}
-        <CloseoutPrompt appointment={appointment} asksForReceipt={keoniSetsFee} />
-        {keoniSetsFee && <ReceiptPrompt appointment={appointment} />}
+        {/* A RENTAL BOOKING, not merely a provider on `keoni_sets`.
+            Their pre-cutover appointments are still on the list and still carry a client and a
+            price: the client paid Melanite through a checkout link and Melanite already took
+            its half at the point of sale. There is no rent owed for one of those and no
+            receipt to send — asking for one invites a provider to pay twice for a session
+            settled months ago. `rentToConfirm` has always filtered on this; the card had not.*/}
+        <CloseoutPrompt appointment={appointment} asksForReceipt={keoniSetsFee && paysRentForThis} />
+        {keoniSetsFee && paysRentForThis && <ReceiptPrompt appointment={appointment} />}
       </div>
     </li>
   )

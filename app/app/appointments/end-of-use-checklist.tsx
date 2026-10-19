@@ -508,13 +508,19 @@ export function EndOfUseChecklist({
           size="sm"
           disabled={pending || issue === '' || !ready || photoMissing || receiptMissing}
         >
+          {/* NAMES WHAT IS MISSING, including the figure. Ticking all twenty and leaving the
+              amount blank left a disabled button saying "Sign off — 20 of 25" with no clue
+              why — the same greyed-out-with-no-reason problem the cancel button avoids by
+              hiding itself. The outstanding box above only lists checklist items. */}
           {pending
             ? 'Saving…'
-            : ready
-              ? ticked.length >= END_OF_USE_ITEM_COUNT
-                ? 'Sign off — all 25'
-                : `Sign off — ${ticked.length} of ${END_OF_USE_ITEM_COUNT}`
-              : `${requiredDone} of ${REQUIRED_ITEM_COUNT} required`}
+            : !ready
+              ? `${requiredDone} of ${REQUIRED_ITEM_COUNT} required`
+              : receiptMissing
+                ? 'Add what you charged'
+                : ticked.length >= END_OF_USE_ITEM_COUNT
+                  ? 'Sign off — all 25'
+                  : `Sign off — ${ticked.length} of ${END_OF_USE_ITEM_COUNT}`}
         </Button>
         <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>
           Not now
