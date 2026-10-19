@@ -9,12 +9,14 @@ import { cn } from '@/lib/cn'
 import type { QueueItem } from '@/lib/db/queries/review-queue'
 
 import {
+  confirmSessionRent,
   declineRoomRefund,
   collectOwedRent,
   refundEnrollment,
   waiveOwedRent,
   refundRoomRental,
   retryFee,
+  skipSessionRent,
   transferEnrollment,
   waiveFee,
   type QueueState,
@@ -30,6 +32,10 @@ const KIND_LABELS: Record<QueueItem['kind'], string> = {
   // Not "Rent held". Since rent is taken after the session, most of these have had nothing
   // taken — the item is a decision to make, not money sitting somewhere.
   held_rent: 'Rent decision',
+  // What she is doing is confirming an amount, not reviewing a problem. "Awaiting" rather than
+  // "Needs" because the session already happened and the provider is waiting on her, not the
+  // other way round.
+  rent_to_confirm: 'Awaiting your figure',
 }
 
 const KIND_STYLES: Record<QueueItem['kind'], string> = {
@@ -40,6 +46,9 @@ const KIND_STYLES: Record<QueueItem['kind'], string> = {
   // waiting to hear, which is the system working. Painting it red beside genuine failures
   // would make the whole queue read as a list of problems and get skimmed.
   held_rent: 'border-gold/40 bg-gold/10 text-gold',
+  // Same gold, same reason, and deliberately not a third colour: both are decisions waiting on
+  // Keoni rather than failures, and they differ only in what she is deciding.
+  rent_to_confirm: 'border-gold/40 bg-gold/10 text-gold',
 }
 
 const daysAgo = (days: number) =>
@@ -58,6 +67,10 @@ export function QueueRow({
 }) {
   const [state, setState] = useState<QueueState>({})
   const [partial, setPartial] = useState('')
+  // Pre-filled with what Melanite worked out, so confirming an accurate figure is one click and
+  // only a disagreement costs typing. Initialised once from the item on purpose: a revalidation
+  // must not wipe a number she is halfway through correcting.
+  const [figure, setFigure] = useState(item.amount)
   const [showPartial, setShowPartial] = useState(false)
   const [target, setTarget] = useState(transferTargets[0]?.id ?? '')
   const [pending, start] = useTransition()
@@ -206,6 +219,58 @@ export function QueueRow({
               {item.meta.rentTaken === 'yes'
                 ? 'Already taken — refunding is the only way back.'
                 : 'Nothing taken yet. Either way the provider is emailed the outcome.'}
+            </span>
+          </>
+        )}
+
+        {item.kind === 'rent_to_confirm' && (
+          <>
+            {/* The amount is EDITABLE here and read-only everywhere else in this queue, because
+                this is the one item where the figure itself is the question. Half of a price the
+                provider sets is what Melanite believes the session was worth; the receipt they
+                send Keoni is what it actually was. */}
+            <label className="text-xs">
+              <span className="block text-ink-faint">What they charged ÷ 2</span>
+              <input
+                type="number"
+                min={0}
+                step={0.01}
+                value={figure}
+                onChange={(e) => setFigure(e.target.value)}
+                className="mt-1 w-28 rounded-field border border-line bg-surface px-2 py-1.5 text-xs text-ink tabular-nums"
+              />
+            </label>
+
+            <Button
+              size="sm"
+              disabled={pending || !figure || Number(figure) <= 0}
+              onClick={() =>
+                run(() =>
+                  // Null when it is untouched, so accepting the derived figure records no
+                  // override — the difference between "she agreed" and "she set it" stays
+                  // legible on the booking afterwards.
+                  confirmSessionRent(item.id, figure === item.amount ? null : Number(figure)),
+                )
+              }
+            >
+              {pending ? 'Charging…' : `Charge ${usd(figure || 0)}`}
+            </Button>
+
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={pending}
+              onClick={() => run(() => skipSessionRent(item.id))}
+            >
+              Don’t charge it
+            </Button>
+
+            <span className="self-center text-xs text-ink-faint">
+              {item.meta.adjusted === 'yes'
+                ? 'You have set this figure already — charging uses what is in the box.'
+                : item.meta.unpriced === 'yes'
+                  ? 'No price on file for this service, so there is nothing to halve. Type half of what the receipt says.'
+                  : `They list it at ${usd(item.meta.ownPrice ?? 0)}. Change the figure if the receipt says otherwise.`}
             </span>
           </>
         )}

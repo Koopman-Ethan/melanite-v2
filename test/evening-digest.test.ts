@@ -129,6 +129,9 @@ describe('what the email says', () => {
       toCollectTotal: '100.00',
       toCollectCount: 1,
       rentTotal: '0.00',
+      // No backlog by default, so every assertion written before 14 October keeps describing
+      // the day it was written about. The tests that are about the backlog opt into one.
+      awaitingFigure: { count: 0, oldestDays: 0 },
       url: 'https://app.melanitesuite.com/app/admin/revenue',
       ...over,
     })
@@ -276,6 +279,62 @@ describe('what the email says', () => {
         rows: [{ ...row, closeout: null }],
       })
       expect(out.subject).toBe('1 to collect ($100.00) · Tuesday, September 1')
+    })
+  })
+
+  describe('sessions waiting on Keoni to price them', () => {
+    // Leyla, Brittany and Karly pay half of what they charged their own client, so nothing can
+    // be taken until Keoni has the receipt. The pile only clears when she sits down with it,
+    // which makes this the one block in the email that can describe money going uncollected for
+    // weeks rather than describing one evening.
+
+    it('says how many are waiting and how old the oldest is', () => {
+      const out = build({ awaitingFigure: { count: 4, oldestDays: 6 } })
+      expect(out.text).toContain('4 SESSIONS AWAITING YOUR FIGURE, OLDEST 6 DAYS')
+      expect(out.html).toContain('4 sessions awaiting your figure, oldest 6 days')
+    })
+
+    it('says nothing at all when the pile is empty', () => {
+      const out = build()
+      expect(out.text).not.toMatch(/awaiting your figure/i)
+      expect(out.html).not.toMatch(/awaiting your figure/i)
+    })
+
+    it('reads naturally for one that arrived today', () => {
+      const out = build({ awaitingFigure: { count: 1, oldestDays: 0 } })
+      expect(out.text).toContain('1 SESSION AWAITING YOUR FIGURE, ALL FROM TODAY')
+    })
+
+    it('stays out of the subject while she is keeping up', () => {
+      // Two days behind on three sessions a week is not falling behind, and a subject line that
+      // says so every single night is one that stops carrying the day's figures.
+      const out = build({ awaitingFigure: { count: 2, oldestDays: 2 } })
+      expect(out.subject).toBe('1 to collect ($100.00) · Tuesday, September 1')
+    })
+
+    it('takes the subject over once the oldest is three days old', () => {
+      const out = build({ awaitingFigure: { count: 5, oldestDays: 9 } })
+      expect(out.subject).toBe('5 awaiting your figure, oldest 9 days · Tuesday, September 1')
+    })
+
+    it('still lets an unbilled session outrank it', () => {
+      // An unbilled session means something is broken; a backlog means something needs doing.
+      // Broken wins, which is the existing rule and must survive the new line.
+      const out = build({
+        rows: [{ ...row, unbilled: true, toCollect: null }],
+        toCollectCount: 0,
+        awaitingFigure: { count: 5, oldestDays: 9 },
+      })
+      expect(out.subject).toBe('1 session not billed · Tuesday, September 1')
+    })
+
+    it('reports the pile on a day when nobody worked', () => {
+      // THE CASE THAT MATTERS MOST. The backlog outlives the day, so a quiet evening is exactly
+      // when it would go unmentioned — and a quiet evening is exactly when she has time for it.
+      const out = build({ rows: [], toCollectCount: 0, awaitingFigure: { count: 3, oldestDays: 5 } })
+      expect(out.text).toContain('3 SESSIONS AWAITING YOUR FIGURE, OLDEST 5 DAYS')
+      expect(out.subject).toBe('3 awaiting your figure, oldest 5 days · Tuesday, September 1')
+      expect(out.text).toContain('No appointments today')
     })
   })
 })

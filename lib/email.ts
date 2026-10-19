@@ -863,6 +863,10 @@ export function bookingPaymentSummary(input: {
   /** Cancelled or missed, so the sweep deliberately never touches it and the fee waits for a
    *  human. Not a billing failure. */
   rentAwaitingDecision?: boolean
+  /** A provider billed half their own price, whose every session waits on Keoni confirming the
+   *  amount against the receipt they send her. Also not a billing failure — the one difference
+   *  from `rentAwaitingDecision` is that this session actually happened. */
+  rentAwaitingFigure?: boolean
 }): string {
   const amount = `$${Number(input.price).toFixed(2)}`
 
@@ -884,6 +888,12 @@ export function bookingPaymentSummary(input: {
         if (input.rentWaived) return 'Laser rental — rent waived, nothing owed'
         if (input.rentAwaitingDecision) return 'Laser rental — rent not taken, waiting on you'
         if (!input.rentPastDue) return 'Laser rental — rent not due yet'
+        // A FOURTH ordinary state, added 14 October. Leyla, Brittany and Karly are billed half
+        // of what they charged their client, so nothing can be taken until Keoni has the
+        // receipt — every single one of their sessions passes through here. Without this line
+        // the digest would shout NO FEE RECORDED at three providers' entire workload, nightly,
+        // for the rest of time.
+        if (input.rentAwaitingFigure) return 'Laser rental — waiting on your figure'
         return 'Laser rental — NO FEE RECORDED'
       }
       if (input.rentCents === 0) return 'Laser rental, refunded — nothing kept'
@@ -995,9 +1005,17 @@ export function eveningDigestEmail(input: {
   toCollectCount: number
   /** Rent taken across the day. */
   rentTotal: string
+  /** The WHOLE backlog of sessions waiting on Keoni to confirm an amount — not just this day's.
+   *
+   *  Deliberately a running total rather than a count of today's rows. Nothing clears these but
+   *  Keoni sitting down with the receipts, so a pile that is growing is the thing worth saying;
+   *  "one today" every night for a fortnight would describe fourteen uncollected sessions as a
+   *  quiet evening. */
+  awaitingFigure: { count: number; oldestDays: number }
   url: string
 }): Omit<EmailMessage, 'to'> {
   const { dayLabel, rows, cancelled, toCollectTotal, toCollectCount, rentTotal, url } = input
+  const waiting = input.awaitingFigure
   const owed = rows.filter((r) => r.toCollect !== null)
   const unbilled = rows.filter((r) => r.unbilled)
   const appts = `${rows.length} ${rows.length === 1 ? 'appointment' : 'appointments'}`
@@ -1007,14 +1025,23 @@ export function eveningDigestEmail(input: {
   //
   // An unbilled session outranks everything else: it is the only line that means something is
   // broken rather than something needs doing.
+  // A backlog reaches the SUBJECT once it is three days old, and not before. There will nearly
+  // always be a session or two waiting — the three providers work about three a week between
+  // them — and putting that in the subject every night would displace the day's figures
+  // permanently to say nothing. Three days means it only shows up when she is falling behind,
+  // which is the only version of this line worth reading.
+  const staleFigures = waiting.count > 0 && waiting.oldestDays >= 3
+
   const subject =
-    rows.length === 0
+    rows.length === 0 && !staleFigures
       ? `No appointments · ${dayLabel}`
       : unbilled.length > 0
         ? `${unbilled.length} session${unbilled.length === 1 ? '' : 's'} not billed · ${dayLabel}`
-        : toCollectCount > 0
-          ? `${toCollectCount} to collect (${usd(toCollectTotal)}) · ${dayLabel}`
-          : `${appts} · ${usd(rentTotal)} rent · ${dayLabel}`
+        : staleFigures
+          ? `${waiting.count} awaiting your figure, oldest ${waiting.oldestDays} days · ${dayLabel}`
+          : toCollectCount > 0
+            ? `${toCollectCount} to collect (${usd(toCollectTotal)}) · ${dayLabel}`
+            : `${appts} · ${usd(rentTotal)} rent · ${dayLabel}`
 
   const cancelledLine =
     cancelled > 0
@@ -1023,6 +1050,27 @@ export function eveningDigestEmail(input: {
 
   // ---- plain text -------------------------------------------------------
   const textLines: string[] = [dayLabel, '']
+
+  // Before the day itself, because it is the only block here that can describe money going
+  // uncollected for weeks. Printed whether or not anybody worked today: the pile does not
+  // care, and an empty day is exactly when it would otherwise go unmentioned.
+  const waitingLine =
+    waiting.count === 0
+      ? ''
+      : `${waiting.count} ${waiting.count === 1 ? 'session' : 'sessions'} awaiting your figure` +
+        (waiting.oldestDays > 0
+          ? `, oldest ${waiting.oldestDays} ${waiting.oldestDays === 1 ? 'day' : 'days'}`
+          : ', all from today')
+
+  if (waitingLine) {
+    textLines.push(
+      waitingLine.toUpperCase(),
+      '',
+      '  Half of what they charged their client. Confirm each against the receipt',
+      '  they sent you in the review queue — nothing is charged until you do.',
+      '',
+    )
+  }
 
   if (rows.length === 0) {
     textLines.push('No appointments today. Nothing to chase.', '')
@@ -1099,8 +1147,20 @@ export function eveningDigestEmail(input: {
        }
      </div>`
 
+  const waitingBlock = waitingLine
+    ? p(
+        `<strong style="color:${staleFigures ? '#C2554D' : '#B8965A'}">${esc(waitingLine)}</strong>`,
+      ) +
+      p(
+        '<span style="font-size:13px;color:#666">Half of what they charged their client.' +
+          ' Confirm each against the receipt they sent you in the review queue —' +
+          ' nothing is charged until you do.</span>',
+      )
+    : ''
+
   const body =
-    rows.length === 0
+    waitingBlock +
+    (rows.length === 0
       ? p('No appointments today. Nothing to chase.')
       : (unbilled.length > 0
           ? p('<strong style="color:#C2554D">Not billed — the laser was used and no rent was taken</strong>') +
@@ -1130,7 +1190,7 @@ export function eveningDigestEmail(input: {
             )
           : '') +
         p(`<strong>The day</strong> — ${appts}, ${usd(rentTotal)} rent taken`) +
-        rows.map(row).join('')
+        rows.map(row).join(''))
 
   const footer = cancelledLine
     ? p(`<span style="font-size:13px;color:#666">${cancelledLine}</span>`)

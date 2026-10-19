@@ -34,6 +34,14 @@ export default async function AdminQueuePage() {
         </p>
       </header>
 
+      {/* THE LOG WRAPS THE TERNARY, not the list inside it.
+          It used to sit around the `<ul>`, one branch down, which held for every case but the
+          one that matters most: resolving the LAST item empties the queue, swaps in the empty
+          state, and unmounts the log along with it. Keoni charged $70 and the screen said
+          "Nothing waiting." — the exact disappearing confirmation this component was built to
+          stop, surviving in the one place it had not been looked for.
+          A queue this size is usually one item long, so the last item IS the common case. */}
+      <OutcomeLog>
       {queue.length === 0 ? (
         <div className="rounded-card border border-dashed border-line p-10 text-center">
           <p className="text-sm text-ink-muted">Nothing waiting.</p>
@@ -65,10 +73,6 @@ export default async function AdminQueuePage() {
 
           {/* Oldest first. Age is what matters in a queue — the thing waiting longest is the
               thing most likely to have been forgotten about. */}
-          {/* The log sits ABOVE the list and outlives it, which is the whole point: a row that
-              has been resolved is gone from the queue a moment later, and its confirmation
-              cannot live inside it. */}
-          <OutcomeLog>
           <ul className="space-y-3">
             {queue.map((item) => (
               <QueueRow
@@ -78,9 +82,9 @@ export default async function AdminQueuePage() {
               />
             ))}
           </ul>
-          </OutcomeLog>
         </>
       )}
+      </OutcomeLog>
 
       <p className="text-xs text-ink-faint">
         Every item here is derived from the state of the thing itself, not from a separate list

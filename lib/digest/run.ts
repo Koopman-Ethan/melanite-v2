@@ -6,6 +6,7 @@ import { db } from '@/lib/db'
 import { webhookEvents } from '@/lib/db/schema'
 import { labelsFor, missingKeys } from '@/lib/end-of-use'
 import { getDigestDay, toCollectCents } from '@/lib/db/queries/daily-digest'
+import { rentToConfirm } from '@/lib/db/queries/review-queue'
 import { settleDueRent } from '@/lib/rental/settle'
 import { getLaserHours } from '@/lib/db/queries/availability'
 import {
@@ -41,6 +42,10 @@ export interface DigestRunResult {
   rent: string
   /** Sessions that used the laser with no rent recorded — a bug, not a quiet day. */
   unbilled: number
+  /** The whole backlog waiting on Keoni to confirm an amount, and how old the oldest is. Not a
+   *  bug and not today's — see the digest email's `awaitingFigure`. */
+  awaitingFigure: number
+  awaitingOldestDays: number
   /** What this run collected, and what it could not. The sweep is reported by the digest so a
    *  stalled one shows up in Keoni's inbox the next morning rather than at month end — which,
    *  with four separate things able to drain the queue, is the only way anybody would notice. */
@@ -99,6 +104,8 @@ export async function runEveningDigest(
         toCollect: '0.00',
         rent: '0.00',
         unbilled: 0,
+        awaitingFigure: 0,
+        awaitingOldestDays: 0,
         settledCount: 0,
         settledCents: 0,
         settleFailed: 0,
@@ -122,6 +129,22 @@ export async function runEveningDigest(
   const settled = await settleDueRent()
 
   const data = await getDigestDay(denverDay)
+
+  // THE SAME FUNCTION THE REVIEW QUEUE USES, not a second query shaped like it. Which sessions
+  // are waiting on a figure is a six-clause predicate, and a digest that counted them its own
+  // way would eventually tell Keoni about a backlog she cannot find, or stay quiet about one
+  // sitting in the queue. `waitingDays` comes back as a placeholder from there — it is filled in
+  // by `getReviewQueue` — so the age is worked out here from `since`.
+  const awaiting = await rentToConfirm()
+  const oldestDays =
+    awaiting.length === 0
+      ? 0
+      : Math.max(
+          ...awaiting.map((a) =>
+            Math.floor((Date.now() - a.since.getTime()) / 86_400_000),
+          ),
+          0,
+        )
 
   let owedCents = 0
   let rentCents = 0
@@ -147,6 +170,7 @@ export async function runEveningDigest(
         rentWaived: a.rentWaived,
         rentPastDue: a.rentPastDue,
         rentAwaitingDecision: a.rentAwaitingDecision,
+        rentAwaitingFigure: a.rentAwaitingFigure,
       }),
       toCollect: cents > 0 ? toMoney(cents) : null,
       rent: a.rentalCents === null ? null : toMoney(a.rentalCents),
@@ -175,6 +199,7 @@ export async function runEveningDigest(
       toCollectTotal: toCollect,
       toCollectCount: rows.filter((r) => r.toCollect !== null).length,
       rentTotal: toMoney(rentCents),
+      awaitingFigure: { count: awaiting.length, oldestDays },
       url: `${origin}/app/admin/revenue`,
     }),
   })
@@ -186,6 +211,8 @@ export async function runEveningDigest(
     toCollect,
     rent: toMoney(rentCents),
     unbilled: rows.filter((r) => r.unbilled).length,
+    awaitingFigure: awaiting.length,
+    awaitingOldestDays: oldestDays,
     settledCount: settled.charged,
     settledCents: settled.chargedCents,
     settleFailed: settled.failed,

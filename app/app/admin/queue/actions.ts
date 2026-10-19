@@ -10,6 +10,7 @@ import { friendlyStripeError, stripePost, stripeWritesEnabled } from '@/lib/stri
 import { toCents } from '@/lib/money'
 import { planRefund } from '@/lib/refunds'
 import { chargeBookingFee } from '@/lib/stripe/fees'
+import { chargeRentalFee } from '@/lib/rental/charge'
 import { notifyRentDecision } from '@/lib/rental/notify-decision'
 import { reviewRentalFee } from '@/lib/rental/review'
 
@@ -312,5 +313,83 @@ export async function waiveOwedRent(bookingId: string): Promise<QueueState> {
   }
 
   await notifyRentDecision(bookingId, { waived: true })
+  return { success: 'Nothing charged for that session. The provider has been told.' }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Rent on a session that DID happen, for a provider billed half their own price.
+//
+// The only pair here that is not about something going wrong. Leyla, Brittany and Karly pay half
+// of what they charge their own client, read from a price list they maintain themselves — so the
+// figure Melanite derives is a number the payer chose. Keoni's answer on 14 October was that they
+// send her the receipt and she confirms the amount before the card is touched.
+//
+// That is why there is an amount field here and nowhere else in this queue: every other item
+// asks whether money should move, and this one asks how much.
+// ---------------------------------------------------------------------------------------------
+
+/** Confirms what a session was worth and charges it.
+ *
+ *  `amount` is null to accept the derived figure, or a dollar amount Keoni has taken off the
+ *  receipt the provider sent her.
+ *
+ *  THE FIGURE IS WRITTEN BEFORE THE CHARGE, not after, because `chargeRentalFee` reads it back
+ *  off the booking. Writing it afterwards would charge the derived amount and then record a
+ *  different one — the worst of both, where the card says one thing and the books another. */
+export async function confirmSessionRent(
+  bookingId: string,
+  amount: number | null,
+): Promise<QueueState> {
+  const admin = await requireAdmin()
+
+  if (amount !== null) {
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return { error: 'Enter what this session was worth, or charge the figure as it stands.' }
+    }
+    // A ceiling, not a judgement about what is reasonable. It is a typed figure going straight
+    // to a real card, and a slipped decimal point is the mistake worth refusing — $1,900 where
+    // $190 was meant.
+    if (amount > 5000) {
+      return { error: 'That is more than $5,000. Check the figure before charging it.' }
+    }
+
+    await db
+      .update(bookings)
+      .set({
+        feeOverrideCents: Math.round(amount * 100),
+        feeSetBy: admin.id,
+        feeSetAt: new Date(),
+      })
+      .where(eq(bookings.id, bookingId))
+  }
+
+  const out = await chargeRentalFee(bookingId)
+  revalidatePath('/app/admin/queue')
+  revalidatePath('/app/charges')
+
+  if ('error' in out) return { error: out.error }
+  if ('skipped' in out) return { error: out.skipped }
+
+  // No email from here: `chargeRentalFee` sends the receipt itself, from the one place where the
+  // money has definitely moved.
+  return { success: `$${(out.charged.amountCents / 100).toFixed(2)} charged. The provider has been told.` }
+}
+
+/** Decides a session is not chargeable after all.
+ *
+ *  Reuses `rentWaivedAt` rather than inventing a second way of saying no — the queue already
+ *  reads a waived booking as settled, and two columns meaning the same thing is how one of them
+ *  gets forgotten. */
+export async function skipSessionRent(bookingId: string): Promise<QueueState> {
+  const admin = await requireAdmin()
+
+  await db
+    .update(bookings)
+    .set({ rentWaivedAt: new Date(), rentWaivedBy: admin.id })
+    .where(eq(bookings.id, bookingId))
+
+  revalidatePath('/app/admin/queue')
+  await notifyRentDecision(bookingId, { waived: true })
+
   return { success: 'Nothing charged for that session. The provider has been told.' }
 }

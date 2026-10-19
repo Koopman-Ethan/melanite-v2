@@ -5,7 +5,7 @@ import { sql } from 'drizzle-orm'
 import { describeDatabase } from '../lib/env-guard'
 import { db } from './db'
 
-// Moving providers onto the rental model, and leaving the grandfathered three where they are.
+// Moving every provider onto the rental model, on one of two fee bases.
 //
 //   npx tsx --tsconfig scripts/tsconfig.json scripts/cutover-revenue-models.ts            (dry run)
 //   npx tsx --tsconfig scripts/tsconfig.json scripts/cutover-revenue-models.ts --apply
@@ -16,11 +16,15 @@ import { db } from './db'
 // anybody invited from now on lands in the right place without anybody deciding. This moves the
 // people who already existed.
 //
-// Everybody active and not `house` becomes `rental`, EXCEPT the three Keoni grandfathered onto
-// the 50/50 split on 9 October 2026: Leyla, Brittany and Karly. Her reasoning, verbatim: "I'm
-// going to lose those girls if I don't allow them the 50/50." They are already `split`, which is
-// the arrangement they keep, so for them this script does nothing at all — the change moves
-// everybody else around them.
+// Everybody active and not `house` becomes `rental`. The difference is the BASIS:
+//
+//   tier            the published schedule price for the service. Everybody.
+//   half_own_price  half of what the provider charges for it. Leyla, Brittany and Karly.
+//
+// The three were grandfathered onto the 50/50 on 9 October ("I'm going to lose those girls if I
+// don't allow them the 50/50"). On 14 October Keoni took Connect away from them too, so they
+// stopped being PAID half and started OWING half instead. Same arrangement, opposite direction,
+// and the only thing left that distinguishes them.
 //
 // WHY THE THREE ARE NAMED HERE AND NOT IN THE MIGRATION
 //
@@ -38,7 +42,11 @@ import { db } from './db'
 // silently move somebody onto rent who was promised a share, which is the one outcome worth
 // failing loudly over.
 
-/** The 50/50 three, by email. Keoni's list of 9 October 2026.
+/** The three billed half their own price, by email. Keoni's list of 9 October 2026.
+ *
+ *  They used to KEEP half of what their client paid Melanite. From 14 October they bill the
+ *  client directly and PAY Melanite the other half — the same split, from the opposite side. The
+ *  list is unchanged; what it means has inverted.
  *
  *  Email rather than id so this is readable by somebody checking it against her message, and so
  *  it survives a database restored from a different environment. */
@@ -53,6 +61,7 @@ interface Row extends Record<string, unknown> {
   email: string
   name: string
   revenue_model: string
+  rent_basis: string
   booking_enabled: boolean
   card_last4: string | null
 }
@@ -64,7 +73,7 @@ async function main() {
   console.log(`Mode: ${apply ? 'APPLY — models will be changed' : 'DRY RUN'}\n`)
 
   const { rows } = await db.execute<Row>(sql`
-    SELECT id, email, first_name || ' ' || last_name AS name, revenue_model,
+    SELECT id, email, first_name || ' ' || last_name AS name, revenue_model, rent_basis,
            booking_enabled, billing_card_last4 AS card_last4
       FROM providers
      WHERE status = 'active'
@@ -84,31 +93,38 @@ async function main() {
     return
   }
 
-  const keep: Row[] = []
-  const move: Row[] = []
-  const already: Row[] = []
+  const halfPrice: Row[] = []
+  const toRental: Row[] = []
+  const settled: Row[] = []
 
   for (const r of all) {
     if (r.revenue_model === 'house') continue
-    if ((GRANDFATHERED as readonly string[]).includes(r.email)) keep.push(r)
-    else if (r.revenue_model === 'rental') already.push(r)
-    else move.push(r)
+    const grandfathered = (GRANDFATHERED as readonly string[]).includes(r.email)
+    const wantBasis = grandfathered ? 'half_own_price' : 'tier'
+
+    if (r.revenue_model === 'rental' && r.rent_basis === wantBasis) settled.push(r)
+    else if (grandfathered) halfPrice.push(r)
+    else toRental.push(r)
   }
 
-  console.log('Staying on the 50/50 split, by arrangement:')
-  for (const r of keep) {
-    const wrong = r.revenue_model !== 'split' ? `  ** on '${r.revenue_model}', expected 'split'` : ''
-    console.log(`  keep     ${r.name.padEnd(22)} ${r.revenue_model}${wrong}`)
+  console.log('Rent billed as half their own price, by arrangement:')
+  if (halfPrice.length === 0 && settled.filter((r) => r.rent_basis === 'half_own_price').length === 0) {
+    console.log('  (nobody — check the list above against Keoni’s)')
+  }
+  for (const r of halfPrice) {
+    console.log(
+      `  half     ${r.name.padEnd(22)} ${r.revenue_model}/${r.rent_basis} → rental/half_own_price`,
+    )
   }
 
-  if (already.length > 0) {
-    console.log('\nAlready on rental:')
-    for (const r of already) console.log(`  ok       ${r.name}`)
+  if (settled.length > 0) {
+    console.log('\nAlready correct:')
+    for (const r of settled) console.log(`  ok       ${r.name.padEnd(22)} ${r.rent_basis}`)
   }
 
-  console.log('\nMoving to the rental model:')
-  if (move.length === 0) console.log('  (nobody)')
-  for (const r of move) {
+  console.log('\nRent billed at the published tier price:')
+  if (toRental.length === 0) console.log('  (nobody)')
+  for (const r of toRental) {
     // A provider who can book and has no card cannot book once they are on rent. Worth seeing
     // here rather than discovering it when they try.
     const note = r.booking_enabled
@@ -116,25 +132,43 @@ async function main() {
         ? `card ••${r.card_last4}`
         : '** CAN BOOK, NO CARD — will be blocked until they add one'
       : 'booking not enabled'
-    console.log(`  move     ${r.name.padEnd(22)} ${r.revenue_model} → rental   ${note}`)
+    console.log(`  tier     ${r.name.padEnd(22)} ${r.revenue_model} → rental   ${note}`)
   }
 
+  // The three need a card now too, and that is new for them — they were never charged anything
+  // before. Said loudly because it is the one thing that stops them working on the day.
+  const halfNoCard = [...halfPrice, ...settled.filter((r) => r.rent_basis === 'half_own_price')]
+    .filter((r) => r.booking_enabled && !r.card_last4)
+  if (halfNoCard.length > 0) {
+    console.log('\n** These owe rent now and have no card on file:')
+    for (const r of halfNoCard) console.log(`     ${r.name}`)
+  }
+
+  const changing = halfPrice.length + toRental.length
   if (!apply) {
-    console.log(`\n${move.length} provider(s) would move. Re-run with --apply.`)
+    console.log(`\n${changing} provider(s) would change. Re-run with --apply.`)
     return
   }
 
-  if (move.length > 0) {
+  if (halfPrice.length > 0) {
     await db.execute(sql`
-      UPDATE providers SET revenue_model = 'rental'
-       WHERE id = ANY(${sql.raw(`ARRAY['${move.map((r) => r.id).join("','")}']::uuid[]`)})
+      UPDATE providers SET revenue_model = 'rental', rent_basis = 'half_own_price'
+       WHERE id = ANY(${sql.raw(`ARRAY['${halfPrice.map((r) => r.id).join("','")}']::uuid[]`)})
+    `)
+  }
+  if (toRental.length > 0) {
+    await db.execute(sql`
+      UPDATE providers SET revenue_model = 'rental', rent_basis = 'tier'
+       WHERE id = ANY(${sql.raw(`ARRAY['${toRental.map((r) => r.id).join("','")}']::uuid[]`)})
     `)
   }
 
-  console.log(`\n${move.length} provider(s) moved to rental. ${keep.length} left on 50/50.`)
-  console.log('\nThe three on 50/50 keep their service price lists, their Connect payouts and')
-  console.log('the client-payment screens. Everybody else now pays rent per session.')
+  console.log(`\n${changing} provider(s) changed.`)
+  console.log('\nEverybody now pays Melanite rather than being paid by it. The three keep their')
+  console.log('own price list, because half of it is what they owe — but no client money, no')
+  console.log('Connect account and no payout ever reaches them through Melanite again.')
 }
+
 
 main().catch((err) => {
   console.error(`\n${err instanceof Error ? err.message : err}`)

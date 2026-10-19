@@ -509,6 +509,19 @@ describe('the rental payment line, once rent is taken after the session', () => 
     expect(line).not.toMatch(/NO FEE RECORDED/)
   })
 
+  it('does not report a session waiting on her figure as a failure', () => {
+    // The fourth ordinary state, and the one that would have done the most damage: Leyla,
+    // Brittany and Karly's every session has no ledger row until Keoni prices it, so without
+    // this the digest flags three providers' entire workload as not billed, nightly, forever.
+    const line = bookingPaymentSummary({
+      ...rental,
+      rentPastDue: true,
+      rentAwaitingFigure: true,
+    })
+    expect(line).toMatch(/waiting on your figure/i)
+    expect(line).not.toMatch(/NO FEE RECORDED/)
+  })
+
   it('still shouts about a session that is genuinely past due and unbilled', () => {
     // The alarm has to survive all of the above, or the fix has simply silenced it.
     const line = bookingPaymentSummary({
@@ -516,6 +529,7 @@ describe('the rental payment line, once rent is taken after the session', () => 
       rentPastDue: true,
       rentAwaitingDecision: false,
       rentWaived: false,
+      rentAwaitingFigure: false,
     })
     expect(line).toMatch(/NO FEE RECORDED/)
   })

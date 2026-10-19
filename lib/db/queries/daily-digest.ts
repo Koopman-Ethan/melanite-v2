@@ -72,6 +72,10 @@ export interface DigestAppointment {
   rentPastDue: boolean
   /** Cancelled or missed, so the sweep never touches it and the fee waits on a human. */
   rentAwaitingDecision: boolean
+  /** A session that happened, for a provider billed half their own price — so the amount waits
+   *  on Keoni reading the receipt. Not a billing failure, and the reason `unbilled` has to know
+   *  which basis the provider is on. */
+  rentAwaitingFigure: boolean
   /** How the suite was signed off after this session, or null if nobody did.
    *
    *  A left join rather than a correlated subquery: `end_of_use_checklists` is unique on
@@ -96,6 +100,7 @@ function asDigestAppointment(row: RawDigestAppointment): DigestAppointment {
     hasRentalRow,
     endTime,
     rentWaivedAt,
+    rentBasis,
     ...rest
   } = row
   return {
@@ -117,12 +122,24 @@ function asDigestAppointment(row: RawDigestAppointment): DigestAppointment {
       rentWaivedAt === null &&
       // A cancelled or missed session is never swept; whether anything is owed is Keoni's call
       // and it waits in the queue rather than being flagged as a billing failure here.
-      (row.status === 'upcoming' || row.status === 'completed'),
+      (row.status === 'upcoming' || row.status === 'completed') &&
+      // AND NOT one of the three billed half their own price. The sweep is closed to them by
+      // design — Keoni confirms each session against the receipt — so a missing ledger row is
+      // their ordinary state, not a bug. Every session they work would otherwise land in the
+      // subject line as NOT BILLED, which is the fastest way to teach somebody to ignore the
+      // only alarm Melanite has. They are counted instead, as a backlog, further down.
+      rentBasis !== 'half_own_price',
     // Derived here beside `unbilled` rather than at render, so one place decides what a missing
     // ledger row means and the email cannot reach a different answer from the alarm.
     rentWaived: rentWaivedAt !== null,
     rentPastDue: endTime.getTime() < Date.now() - CLOSEOUT_GRACE_HOURS * 60 * 60_000,
     rentAwaitingDecision: row.status === 'cancelled' || row.status === 'no_show',
+    rentAwaitingFigure:
+      rentBasis === 'half_own_price' &&
+      row.paymentSource === 'rental' &&
+      !hasRentalRow &&
+      rentWaivedAt === null &&
+      (row.status === 'upcoming' || row.status === 'completed'),
     // A rental booking has no client — see `lib/booking-labels.ts`.
     clientName: clientLabel(row.clientName),
     closeout:
@@ -146,6 +163,7 @@ type RawDigestAppointment = Omit<
   | 'rentWaived'
   | 'rentPastDue'
   | 'rentAwaitingDecision'
+  | 'rentAwaitingFigure'
 > & {
   rentalCents: number | null
   /** Whether any rental_fee row exists at all, refund included. */
@@ -154,6 +172,9 @@ type RawDigestAppointment = Omit<
    *  template has no use for either, and leaking them would widen the public shape for nothing. */
   endTime: Date
   rentWaivedAt: Date | null
+  /** Which basis the provider's rent is worked out on. An input to `unbilled` only, and
+   *  destructured away — the digest template asks `rentAwaitingFigure`, not the basis. */
+  rentBasis: string
   /** Null on a rental booking. Resolved by `asDigestAppointment`, so the digest template never
    *  has to decide what to print for a client Melanite deliberately does not know about. */
   clientName: string | null
@@ -230,6 +251,7 @@ export async function getDigestDay(day: string): Promise<DigestDay> {
         status: bookings.status,
         endTime: bookings.endTime,
         rentWaivedAt: bookings.rentWaivedAt,
+        rentBasis: providers.rentBasis,
         price: bookings.price,
         paymentSource: bookings.paymentSource,
         externalMethod: bookings.externalMethod,

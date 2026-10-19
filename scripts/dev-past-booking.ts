@@ -4,7 +4,7 @@ import { and, eq } from 'drizzle-orm'
 
 import { bookings, providerServices, providers, services } from '@/lib/db/schema'
 import { CLOSEOUT_GRACE_HOURS } from '@/lib/end-of-use'
-import { feeForService } from '@/lib/rental/schedule'
+import { feeForProviderService, feeForService } from '@/lib/rental/schedule'
 
 import { describeDatabase, requireEnv } from '../lib/env-guard'
 import { db } from './db'
@@ -70,6 +70,7 @@ async function main() {
       lastName: providers.lastName,
       cardLast4: providers.billingCardLast4,
       paymentMethodId: providers.billingPaymentMethodId,
+      rentBasis: providers.rentBasis,
     })
     .from(providers)
     .where(eq(providers.email, email))
@@ -187,17 +188,40 @@ async function main() {
   }
 
   const dueIn = hoursAgo - CLOSEOUT_GRACE_HOURS
+
+  // WHAT WILL ACTUALLY BE CHARGED, which since 14 October is not always the schedule fee. A
+  // provider on `half_own_price` pays half of their own price for the service, and is never
+  // swept at all — so printing the tier fee and "the sweep will take it" would describe a
+  // different booking from the one just made, to the person using this script to test exactly
+  // that difference.
+  const ownsTheFigure = provider.rentBasis === 'half_own_price'
+  const actual = ownsTheFigure
+    ? await feeForProviderService(provider.id, service.name)
+    : fee
+
   console.log(
-    `  unpaid   $${(fee / 100).toFixed(2)} owed, nothing charged yet (card ends ${provider.cardLast4})`,
+    actual === null
+      ? `  unpriced they have no price for ${service.name}, so there is nothing to halve - Keoni types the figure`
+      : `  unpaid   $${(actual / 100).toFixed(2)} owed, nothing charged yet (card ends ${provider.cardLast4})`,
   )
-  console.log(
-    dueIn >= 0
-      ? `  due      ${dueIn}h past the ${CLOSEOUT_GRACE_HOURS}h grace - the sweep will take it`
-      : `  not due  ${-dueIn}h of the ${CLOSEOUT_GRACE_HOURS}h grace left - the sweep must skip it`,
-  )
-  console.log('')
-  console.log('To take it now rather than waiting for the sweep:')
-  console.log('  /app/admin/revenue -> "Settle rent now"')
+
+  if (ownsTheFigure) {
+    console.log(
+      `  review   never swept - half of their own price, so it waits for Keoni to confirm it`,
+    )
+    console.log('')
+    console.log('To price it and charge it:')
+    console.log('  /app/admin/queue -> "Awaiting your figure"')
+  } else {
+    console.log(
+      dueIn >= 0
+        ? `  due      ${dueIn}h past the ${CLOSEOUT_GRACE_HOURS}h grace - the sweep will take it`
+        : `  not due  ${-dueIn}h of the ${CLOSEOUT_GRACE_HOURS}h grace left - the sweep must skip it`,
+    )
+    console.log('')
+    console.log('To take it now rather than waiting for the sweep:')
+    console.log('  /app/admin/revenue -> "Settle rent now"')
+  }
   console.log('')
   console.log('Or open Appointments as that provider: "Completed" and "No-show" are both')
   console.log('there, because the hour has passed. A no-show ASKS WHAT HAPPENED and is never')

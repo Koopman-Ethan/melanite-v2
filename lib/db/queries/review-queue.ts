@@ -4,6 +4,7 @@ import { and, asc, eq, isNotNull, isNull, sql } from 'drizzle-orm'
 
 import { clientLabel } from '@/lib/booking-labels'
 import { getProviderSharePct } from '@/lib/db/queries/admin-tools'
+import { CLOSEOUT_GRACE_HOURS } from '@/lib/end-of-use'
 import { sharesRevenueSql } from '@/lib/db/revenue-model'
 import { tierForService } from '@/lib/rental-fees'
 import { sharesRevenue } from '@/lib/revenue-model'
@@ -31,6 +32,10 @@ import {
 //      consent. The appointment status is already recorded; the money is not.
 //   3. A cancelled training course with deposits already taken. They may be refundable or
 //      transferable to another date, which is a conversation.
+//   5. A session that DID happen, for one of the three providers whose rent is half their own
+//      price. The only kind here that is not an exception: an ordinary session, queued because
+//      the figure comes from a price list the payer maintains and Keoni confirms it against the
+//      receipt before the card is touched. Added 14 October.
 //   4. Rent held on a laser session that did not happen — cancelled, or a no-show. The provider
 //      has said what happened and Keoni decides whether the fee stands. This one is the LARGEST
 //      by volume, because it is every cancellation and every no-show rather than an exception:
@@ -50,6 +55,7 @@ export type QueueKind =
   | 'failed_fee'
   | 'cancelled_course_deposit'
   | 'held_rent'
+  | 'rent_to_confirm'
 
 export interface QueueItem {
   kind: QueueKind
@@ -287,6 +293,109 @@ async function heldRent(): Promise<QueueItem[]> {
     }))
 }
 
+/** Sessions that HAPPENED, for a provider whose rent is half their own price.
+ *
+ *  The only kind here that is not an exception. Every other item in this queue is something that
+ *  went wrong — a failed card, a cancelled course, a session nobody turned up for. These are
+ *  ordinary sessions that went perfectly well, and they are here because of who worked them.
+ *
+ *  WHY THEY CANNOT BE SWEPT. Leyla, Brittany and Karly pay half of what they charge their own
+ *  client, read from a price list they maintain themselves. So the figure Melanite derives is a
+ *  number the payer chose — accurate only as long as the list matches what the client was
+ *  actually charged, which Melanite has no way to see. Keoni's answer on 14 October was that
+ *  they send her the receipt and she confirms the amount before the card is touched. The sweep
+ *  is closed to them in `lib/rental/settle.ts`; this is where they go instead.
+ *
+ *  Derived, like everything else in this file. An item leaves when it is charged (a ledger row
+ *  appears) or waived — no flag says "done", because a flag can disagree with the money.
+ *
+ *  The grace period is the same twelve hours a provider has to call a session off. Before that
+ *  it may still become a cancellation, and asking Keoni to price something that might not have
+ *  happened is how a queue fills with work that evaporates.
+ */
+export async function rentToConfirm(): Promise<QueueItem[]> {
+  const rows = await db
+    .select({
+      id: bookings.id,
+      startTime: bookings.startTime,
+      endTime: bookings.endTime,
+      serviceName: services.name,
+      firstName: providers.firstName,
+      lastName: providers.lastName,
+      providerId: bookings.providerId,
+      overrideCents: bookings.feeOverrideCents,
+      /** Their own price for it. Half is what Melanite believes it is owed. */
+      ownPrice: providerServices.price,
+    })
+    .from(bookings)
+    .innerJoin(providers, eq(bookings.providerId, providers.id))
+    .innerJoin(providerServices, eq(bookings.providerServiceId, providerServices.id))
+    .innerJoin(services, eq(providerServices.serviceId, services.id))
+    .where(
+      and(
+        eq(bookings.paymentSource, 'rental'),
+        eq(providers.rentBasis, 'half_own_price'),
+        // It happened. Cancelled and missed sessions are a different question and a different
+        // kind — see `heldRent`.
+        sql`${bookings.status} IN ('upcoming', 'completed')`,
+        // Keyed on TIME, not on anybody pressing Completed. The same reasoning the sweep uses:
+        // bookings rot in `upcoming`, and billing cannot wait for a button nobody presses.
+        sql`${bookings.endTime} < now() - ${sql.raw(`interval '${CLOSEOUT_GRACE_HOURS} hours'`)}`,
+        sql`${bookings.startTime} >= ${REVIEW_STARTED_AT.toISOString()}::timestamptz`,
+        isNull(bookings.rentWaivedAt),
+        sql`NOT EXISTS (
+          select 1 from ledger_entries le
+           where le.subject_type = 'booking' and le.subject_id = bookings.id
+             and le.source = 'rental_fee' and le.entry_type = 'purchase'
+        )`,
+        sql`NOT EXISTS (
+          select 1 from provider_pack_redemptions r
+           where r.booking_id = bookings.id and r.voided_at is null
+        )`,
+      ),
+    )
+    .orderBy(asc(bookings.endTime))
+
+  const sharePct = await getProviderSharePct()
+
+  return rows.map((r) => {
+    const ownPrice = Number(r.ownPrice ?? 0)
+    const derived = Math.round(ownPrice * 100 * (1 - sharePct))
+    const cents = r.overrideCents ?? derived
+
+    // NOT PRICED IS A DISTINCT STATE, and saying "they list it at $0.00" would read as a broken
+    // query rather than as a missing price. A provider on this basis can book a service they
+    // have never put a price against — `/app/services` does not require one — and then there is
+    // nothing to halve. The item still belongs here: the session happened and is owed for. Keoni
+    // simply has to take the whole figure off the receipt instead of correcting a starting point.
+    const unpriced = ownPrice <= 0
+
+    return {
+      kind: 'rent_to_confirm' as const,
+      id: r.id,
+      // The session, not the moment it became due. "Waiting since" should mean how long the
+      // provider has been waiting to know what they owe.
+      since: r.endTime,
+      waitingDays: 0,
+      amount: (cents / 100).toFixed(2),
+      who: `${r.firstName} ${r.lastName}`,
+      detail:
+        `${r.serviceName} on ${dateLabel(r.startTime.toISOString().slice(0, 10))}` +
+        (r.overrideCents !== null
+          ? ' — you have set a figure'
+          : unpriced
+            ? ' — they have never priced this service, so there is nothing to halve'
+            : ` — they list it at $${ownPrice.toFixed(2)}`),
+      meta: {
+        ownPrice: ownPrice.toFixed(2),
+        derivedAmount: (derived / 100).toFixed(2),
+        unpriced: unpriced ? 'yes' : null,
+        adjusted: r.overrideCents === null ? null : 'yes',
+      },
+    }
+  })
+}
+
 async function cancelledCourseDeposits(): Promise<QueueItem[]> {
   const rows = await db
     .select({
@@ -325,16 +434,17 @@ async function cancelledCourseDeposits(): Promise<QueueItem[]> {
 }
 
 export async function getReviewQueue(now: Date = new Date()): Promise<QueueItem[]> {
-  const [rooms, fees, deposits, rent] = await Promise.all([
+  const [rooms, fees, deposits, rent, confirm] = await Promise.all([
     roomRefunds(),
     failedFees(),
     cancelledCourseDeposits(),
     heldRent(),
+    rentToConfirm(),
   ])
 
   // Oldest first across all three. Age is what matters in a queue — the thing waiting longest
   // is the thing most likely to have been forgotten.
-  return [...rooms, ...fees, ...deposits, ...rent]
+  return [...rooms, ...fees, ...deposits, ...rent, ...confirm]
     .sort((a, b) => a.since.getTime() - b.since.getTime())
     .map((item) => ({
       ...item,
