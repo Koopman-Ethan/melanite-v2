@@ -19,10 +19,16 @@ export function RentalCard({
   card,
   termsAccepted,
   termsAckAt,
+  terms,
 }: {
   card: { brand: string | null; last4: string | null; expMonth: number | null; expYear: number | null } | null
   termsAccepted: boolean
   termsAckAt: Date | null
+  /** What they are being asked to agree to, already filtered to their rent basis.
+   *
+   *  PASSED IN rather than imported, because the filtering depends on the provider and this is
+   *  a client component. `rentalTermsFor` is called on the server in `page.tsx`. */
+  terms: { key: string; text: string }[]
 }) {
   const [pending, start] = useTransition()
   const [error, setError] = useState<string | null>(null)
@@ -69,8 +75,12 @@ export function RentalCard({
         </div>
       ) : (
         <div className="rounded-field border border-warning/40 bg-warning/10 p-3 text-xs text-ink-secondary">
+          {/* The timing here was still the OLD rule, and it contradicted the section
+              description directly above it. Rent has been taken after the session since
+              9 October; "charged at the moment you reserve a slot" is the arrangement that
+              was replaced. Same class of stale copy as the two terms v5 had to fix. */}
           <strong className="text-warning">No card on file.</strong> You can&rsquo;t book the
-          laser until there is one — the rental fee is charged at the moment you reserve a slot.
+          laser until there is one — Melanite charges it after each session.
         </div>
       )}
 
@@ -85,6 +95,25 @@ export function RentalCard({
         <div className="rounded-field border border-warning/40 bg-warning/10 p-3 text-xs text-ink-secondary">
           <strong className="text-warning">The rental terms have changed.</strong> Accept them to
           carry on booking.
+
+          {/* THE TERMS THEMSELVES, which this panel used to leave out entirely.
+              It offered a button labelled "Accept the rental terms" beside no terms — so the
+              only place a provider could read what they were agreeing to was the onboarding
+              step, which somebody who onboarded months ago will never see again. Clicking a
+              button about an unseen document is not consent, and it is the account page, not
+              onboarding, that every existing provider lands on when a version is bumped.
+
+              It matters most right now: v5 changes when the fee is taken and introduces a
+              second way of working it out, and for the three on half-their-own-price it is the
+              first rental agreement they have ever been asked for. */}
+          <ul className="mt-3 space-y-2 border-t border-warning/20 pt-3">
+            {terms.map((t) => (
+              <li key={t.key} className="leading-relaxed">
+                {t.text}
+              </li>
+            ))}
+          </ul>
+
           {/* Its own line, for the reason the booking form's copy of this explains. */}
           <div className="mt-3">
             <Button
@@ -97,7 +126,7 @@ export function RentalCard({
                 })
               }
             >
-              Accept the rental terms
+              I&rsquo;ve read and accept these terms
             </Button>
           </div>
         </div>

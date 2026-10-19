@@ -120,11 +120,11 @@ const NOTIFICATIONS: Array<{ name: keyof NotificationValues; label: string; hint
     label: 'Rental receipt',
     hint: 'When your card is charged for booking the laser',
   },
-  {
-    name: 'notifyPayoutDeposited',
-    label: 'Payout deposited',
-    hint: 'When Stripe sends money to your bank',
-  },
+  // 'Payout deposited' is gone with the thing it described. Melanite pays nobody now — every
+  // provider rents the laser and bills their own clients — so a toggle for "when Stripe sends
+  // money to your bank" offers to notify somebody about an event that can no longer happen.
+  // The COLUMN stays: it records a preference people really set, and dropping it would be a
+  // migration to erase something harmless.
   {
     name: 'notifyAppointmentReminders',
     label: 'Appointment reminders',

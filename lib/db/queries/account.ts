@@ -33,6 +33,9 @@ export interface AccountProfile {
   rentalTermsVersion: string | null
   rentalTermsAckAt: Date | null
   rentalScheduleVersion: number | null
+  /** Which basis their rent is worked out on, so the account page can show them the terms that
+   *  actually apply to them rather than all of them. */
+  rentBasis: (typeof providers.$inferSelect)['rentBasis']
   notifyBookingConfirmed: boolean
   notifyPayoutDeposited: boolean
   notifyAppointmentReminders: boolean
@@ -64,6 +67,7 @@ export async function getAccount(providerId: string): Promise<AccountProfile | n
       billingCardExpYear: providers.billingCardExpYear,
       rentalTermsVersion: providers.rentalTermsVersion,
       rentalTermsAckAt: providers.rentalTermsAckAt,
+      rentBasis: providers.rentBasis,
       rentalScheduleVersion: providers.rentalScheduleVersion,
       notifyBookingConfirmed: providers.notifyBookingConfirmed,
       notifyPayoutDeposited: providers.notifyPayoutDeposited,

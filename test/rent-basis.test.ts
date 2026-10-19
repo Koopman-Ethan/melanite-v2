@@ -206,3 +206,78 @@ describe('the sweep', () => {
     expect(id).not.toBe('')
   })
 })
+
+describe('what the booking page quotes is what the card is charged', () => {
+  // TWO PLACES WORK OUT THE SAME NUMBER, which is the shape of every money bug in this
+  // codebase so far. `app/app/book/page.tsx` prices the dropdown so a provider can see the fee
+  // before committing; `feeForProviderService` prices the actual charge twelve hours later.
+  // A provider who is quoted $60 and charged $75 has been lied to, and would not find out
+  // until the receipt.
+  //
+  // The booking page cannot call `feeForProviderService` per row — twenty services is twenty
+  // round trips to render one dropdown — so it recomputes from a price it already selected.
+  // That duplication is deliberate and this is the test that keeps the two honest.
+
+  it('agrees on every service a half-own-price provider has priced', async () => {
+    const [prov] = (await sql.query(
+      `SELECT id FROM providers WHERE rent_basis = 'half_own_price' LIMIT 1`,
+    )) as { id: string }[]
+    if (!prov) throw new Error('no half_own_price provider in dev — this test needs one')
+
+    const priced = (await sql.query(
+      `SELECT s.name, ps.price::numeric AS price
+         FROM provider_services ps
+         JOIN services s ON s.id = ps.service_id
+        WHERE ps.provider_id = $1 AND s.active AND ps.is_active AND ps.price > 0
+        ORDER BY s.name`,
+      [prov.id],
+    )) as { name: string; price: string }[]
+
+    expect(priced.length, 'the fixture provider has priced nothing — this would pass vacuously')
+      .toBeGreaterThan(0)
+
+    const share = await getProviderSharePct()
+
+    for (const row of priced) {
+      // The booking page's arithmetic, copied deliberately rather than imported: importing the
+      // page's helper would make this test pass by construction and prove nothing.
+      const quoted = Math.round(Number(row.price) * 100 * (1 - share))
+      const charged = await feeForProviderService(prov.id, row.name)
+
+      expect(charged, `${row.name}: quoted ${quoted}, charge refused`).not.toBeNull()
+      expect(charged, `${row.name}: page quotes ${quoted}, card takes ${charged}`).toBe(quoted)
+    }
+  })
+
+  it('quotes nothing rather than a tier fee for a service they have not priced', async () => {
+    // The failure the walkthrough actually caught. The page used to price every row off the
+    // published schedule whoever was looking, so one of the three was shown $60 for a session
+    // that would cost them half of their own price — a number they would plan around and never
+    // be charged. Refusing is correct: there is genuinely no half to take.
+    const [prov] = (await sql.query(
+      `SELECT id FROM providers WHERE rent_basis = 'half_own_price' LIMIT 1`,
+    )) as { id: string }[]
+
+    const [unpriced] = (await sql.query(
+      `SELECT s.name FROM services s
+        WHERE s.active
+          AND NOT EXISTS (
+            SELECT 1 FROM provider_services ps
+             WHERE ps.service_id = s.id AND ps.provider_id = $1 AND ps.price > 0
+          )
+        LIMIT 1`,
+      [prov.id],
+    )) as { name: string }[]
+
+    if (!unpriced) return // every service priced — nothing to assert, and not a failure
+
+    expect(
+      await feeForProviderService(prov.id, unpriced.name),
+      `${unpriced.name} has no price, so there is no half of it`,
+    ).toBeNull()
+
+    // And the tier fee, which is what they must NOT be quoted, is a real number — so the
+    // assertion above is distinguishing the two rather than finding nothing either way.
+    expect(await feeForService(unpriced.name)).not.toBeNull()
+  })
+})

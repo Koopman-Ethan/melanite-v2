@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 
 import { requireProvider } from '@/lib/auth/dal'
 import { licenseMessage, licenseStatus } from '@/lib/license'
-import { hasAcceptedRentalTerms } from '@/lib/rental-terms'
+import { hasAcceptedRentalTerms, rentalTermsFor } from '@/lib/rental-terms'
 import { liveScheduleVersion } from '@/lib/rental/schedule'
 import { paysRent } from '@/lib/revenue-model'
 import { getAccount, getActiveSessions, getDocuments } from '@/lib/db/queries/account'
@@ -139,6 +139,10 @@ export default async function AccountPage() {
           }
           termsAccepted={hasAcceptedRentalTerms(account, scheduleVersion)}
           termsAckAt={account.rentalTermsAckAt}
+          // Filtered to this provider's basis, exactly as the onboarding step does. Showing
+          // somebody a term about an arrangement they are not on is how the whole list stops
+          // being read.
+          terms={rentalTermsFor(account.rentBasis).map((x) => ({ key: x.key, text: x.text }))}
         />
       </Section>
       )}
