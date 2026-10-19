@@ -6,7 +6,8 @@ import { db } from '@/lib/db'
 import { ledgerEntries } from '@/lib/db/schema'
 import { stripeGet, stripeWritesEnabled } from '@/lib/stripe/client'
 
-// Replacing the predicted processing fee with what Stripe actually took.
+// Replacing the predicted processing fee with what Stripe actually took, on every charge a
+// provider pays: laser time, the room, and the membership plans.
 //
 // WHY THIS IS A SWEEP AND NOT PART OF THE CHARGE. The obvious version reads the fee off the
 // PaymentIntent as it is created, with `expand[]=latest_charge.balance_transaction`. That was
@@ -77,8 +78,17 @@ export async function reconcileProcessingFees(
     .from(ledgerEntries)
     .where(
       and(
-        eq(ledgerEntries.source, 'rental_fee'),
+        // EVERY provider charge, not only the rental fee. Room rentals are grossed up the same
+        // way and were being left on their estimate for ever — so the revenue page reported a
+        // processing cost that was right for laser time and a guess for everything else.
+        //
+        // Keyed on who PAID rather than on a list of sources, so a fourth thing Melanite ever
+        // charges a provider for is covered the day it is written rather than the day somebody
+        // remembers this file exists.
+        eq(ledgerEntries.payer, 'provider'),
         eq(ledgerEntries.entryType, 'purchase'),
+        // Subscription invoices carry no payment intent, so they cannot be looked up this way.
+        // Their estimate stands until there is a reason to chase the invoice object too.
         isNotNull(ledgerEntries.stripePaymentIntentId),
         gte(ledgerEntries.createdAt, since),
       ),
@@ -150,7 +160,7 @@ export async function processingSummary(days = 30): Promise<{
     .from(ledgerEntries)
     .where(
       and(
-        eq(ledgerEntries.source, 'rental_fee'),
+        eq(ledgerEntries.payer, 'provider'),
         eq(ledgerEntries.entryType, 'purchase'),
         isNotNull(ledgerEntries.stripeFeeCents),
         gte(ledgerEntries.createdAt, since),

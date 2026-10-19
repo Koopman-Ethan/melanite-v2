@@ -1,12 +1,13 @@
 import 'server-only'
 
-import { eq, sql } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 
 import { clientLabel } from '@/lib/booking-labels'
 import { db } from '@/lib/db'
 import {
   bookings,
   endOfUseChecklists,
+  ledgerEntries,
   medicalDirectorCredentials,
   providerServices,
   providers,
@@ -195,6 +196,25 @@ export async function notifyMelaniteRoomRental(
 
     if (!row) return
 
+    // WHAT THE CARD TOOK, which is not the room price. The charge is grossed up for
+    // processing, so `room_bookings.price` is what Melanite keeps — reporting that as "Paid"
+    // names a figure that appears on nobody's statement, and is the number Keoni would quote
+    // back to a provider asking why their card says something else.
+    //
+    // From the ledger, because that is where the charged amount actually lives. Written before
+    // this runs in `roomRentalPaid`; null on a cancellation, where nothing was charged now.
+    const [charge] = await db
+      .select({ gross: ledgerEntries.grossAmount })
+      .from(ledgerEntries)
+      .where(
+        and(
+          eq(ledgerEntries.subjectType, 'room_booking'),
+          eq(ledgerEntries.subjectId, roomBookingId),
+          eq(ledgerEntries.entryType, 'purchase'),
+        ),
+      )
+      .limit(1)
+
     await sendEmail({
       to: MELANITE_NOTIFY_EMAIL,
       ...deskRoomRentalEmail({
@@ -203,6 +223,7 @@ export async function notifyMelaniteRoomRental(
         slotLabel: ROOM_SLOT_LABELS[row.slotType],
         dateLabel: roomDateLabel(row.rentalDate),
         price: row.price,
+        charged: charge?.gross ?? null,
         awaitingRefundDecision: options.awaitingRefundDecision,
         url: `${await appOrigin()}/app/admin/calendar`,
       }),

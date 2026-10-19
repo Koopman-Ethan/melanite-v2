@@ -1253,14 +1253,26 @@ export function deskRoomRentalEmail(input: {
   providerName: string
   slotLabel: string
   dateLabel: string
+  /** What Melanite keeps — the room price Keoni set. */
   price: string
+  /** What came off the provider's card, which is higher: the charge is grossed up to cover
+   *  processing. Null when nothing was charged, as on a cancellation. */
+  charged?: string | null
   /** True when the provider cancelled inside 24 hours, so the refund is Keoni's decision and
    *  the rental is sitting in the admin queue waiting for it. */
   awaitingRefundDecision?: boolean
   url: string
 }): Omit<EmailMessage, 'to'> {
   const verb = input.event === 'booked' ? 'Room booked' : 'Room cancelled'
-  const amount = `$${Number(input.price).toFixed(2)}`
+  const kept = `$${Number(input.price).toFixed(2)}`
+
+  // BOTH FIGURES WHEN THEY DIFFER. "Paid: $100.00" named the amount Melanite keeps on an
+  // email about a card that was charged $103.30 — the one number a provider can see, and the
+  // one Keoni would have quoted back at them.
+  const amount =
+    input.charged && Number(input.charged) !== Number(input.price)
+      ? `$${Number(input.charged).toFixed(2)} charged · ${kept} to Melanite after processing`
+      : kept
   const note = input.awaitingRefundDecision
     ? 'Cancelled inside 24 hours, so the refund is yours to decide — it is waiting in the admin queue. The block is free either way.'
     : null

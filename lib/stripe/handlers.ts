@@ -4,6 +4,7 @@ import { and, eq, ne, sql } from 'drizzle-orm'
 
 import { clientLabel } from '@/lib/booking-labels'
 import { db } from '@/lib/db'
+import { getProcessingRate } from '@/lib/db/queries/admin-tools'
 import { isUniqueViolation } from '@/lib/db/errors'
 import { isHouse } from '@/lib/revenue-model'
 import {
@@ -89,6 +90,19 @@ async function alreadyRecorded(
     .limit(1)
 
   return Boolean(row)
+}
+
+/** What Stripe is likely to have taken from a charge of this size.
+ *
+ *  An ESTIMATE, from the configured rate, written at the moment the row is created. The real
+ *  figure arrives on the balance transaction a moment later and `reconcileProcessingFees`
+ *  replaces it — reading it here returns null, because a charge has no balance transaction at
+ *  the instant it is confirmed, and null on a revenue page reads as "this one cost nothing to
+ *  process".
+ */
+async function estimateProcessingFee(chargedCents: number): Promise<number> {
+  const { pct, fixedCents } = await getProcessingRate()
+  return Math.round(chargedCents * pct) + fixedCents
 }
 
 async function providerShare(): Promise<number> {
@@ -536,6 +550,14 @@ async function roomRentalPaid(pi: StripePaymentIntentObject): Promise<HandlerRes
     tipAmount: '0.00',
     providerPayout: '0.00',
     melaniteCut: gross,
+    // What it cost to collect. The room charge is grossed up for processing like the rental
+    // fee, and recording the gross-up without the fee it covers makes the whole exercise
+    // invisible: the revenue page shows $103.30 taken and nothing paid to Stripe, so there is
+    // no way to tell whether the rate is set anywhere near right.
+    //
+    // An estimate here, corrected from the balance transaction by `reconcileProcessingFees` —
+    // the charge has none at the instant it is confirmed. Same as the rental fee.
+    stripeFeeCents: await estimateProcessingFee(toCents(gross)),
     paymentMethod: 'stripe',
     stripePaymentIntentId: pi.id,
     payoutStatus: 'paid',
@@ -779,6 +801,10 @@ export async function handleInvoicePaid(invoice: StripeInvoiceObject): Promise<H
       tipAmount: '0.00',
       providerPayout: '0.00',
       melaniteCut: gross,
+      // Stripe takes its cut of a subscription invoice too. Recorded for the same reason as
+      // everywhere else a provider is charged — "what Melanite kept" is a different figure
+      // from "what Melanite charged", and only one of them is the business.
+      stripeFeeCents: await estimateProcessingFee(toCents(gross)),
       paymentMethod: 'stripe',
       stripeInvoiceId: invoice.id,
       payoutStatus: 'paid',
