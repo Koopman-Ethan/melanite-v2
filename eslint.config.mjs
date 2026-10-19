@@ -45,6 +45,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // `npm run build:check` — a verification build kept out of the dev server's way. Generated
+    // output, and linting it reports fourteen thousand problems in code nobody wrote.
+    ".next-check/**",
   ]),
 ]);
 
