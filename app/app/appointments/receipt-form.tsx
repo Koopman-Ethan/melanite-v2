@@ -26,69 +26,26 @@ import type { ReceiptState } from '@/lib/rental/receipts'
 export function ReceiptForm({
   bookingId,
   sentAmountCents,
-  sentAt,
   late = false,
+  open,
+  onClose,
 }: {
   bookingId: string
   /** What they last told Melanite, or null if they have not yet. */
   sentAmountCents: number | null
-  sentAt: Date | null
   /** The close-out window has passed without this being sent. Changes only the wording: the
    *  provider needs to know why they are being asked here rather than on the checklist, and
    *  that the checklist itself is gone for good. */
   late?: boolean
+  /** Controlled by the card. See the note on `EndOfUseChecklist`. */
+  open: boolean
+  onClose: () => void
 }) {
   const [state, action, pending] = useActionState<ReceiptState, FormData>(submitReceipt, {})
-  // Collapsed, like the close-out beside it. These are two peer actions on a finished session
-  // — "tell Melanite how you left the room" and "tell Melanite what you charged" — and one
-  // nested inside the other said they were the same job, which is how the close-out ended up
-  // blocked on a billing figure in the first place.
-  const [open, setOpen] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const [fileName, setFileName] = useState<string | null>(null)
 
-  const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`
-
-  if (!open) {
-    // Already sent. Still editable on purpose: a provider who typed the wrong figure must be
-    // able to correct it before Keoni acts, and after she has acted the item has left her
-    // queue anyway.
-    if (sentAmountCents !== null) {
-      return (
-        <div className="flex flex-wrap items-center gap-2 text-xs text-ink-secondary">
-          <span>
-            You told Melanite{' '}
-            <strong className="text-ink">{usd(sentAmountCents)}</strong>
-            {sentAt
-              ? ` on ${sentAt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
-              : ''}
-            . Keoni sets what you owe from it.
-          </span>
-          <button
-            type="button"
-            onClick={() => setOpen(true)}
-            className="text-ink-faint underline-offset-4 hover:text-ink hover:underline"
-          >
-            Change it
-          </button>
-        </div>
-      )
-    }
-
-    // Nothing sent yet: the peer of "Close out the suite", and on its own once that one has
-    // gone — which it does on a cancellation, a no-show, and twelve hours after any session.
-    return (
-      <div>
-        <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
-          Send Keoni what you charged
-        </Button>
-        {/* One line, matching the close-out beside it. What is different about the late case —
-            that the check-off has shut and this has not — is said inside the form, where it is
-            read by somebody who has already decided to act on it. */}
-        <p className="mt-1.5 text-[11px] text-ink-faint">Submit your client receipt</p>
-      </div>
-    )
-  }
+  if (!open) return null
 
   return (
     <form action={action} className="space-y-3">
@@ -117,7 +74,9 @@ export function ReceiptForm({
             required
             defaultValue={sentAmountCents === null ? '' : (sentAmountCents / 100).toFixed(2)}
             placeholder="0.00"
-            className="mt-1 w-28 rounded-field border border-line bg-surface px-2 py-1.5 text-xs text-ink tabular-nums"
+            // `min-h-11` is what `Button` and `Field` both use — a 44px touch target. Without
+            // it this sat visibly shorter than the two buttons next to it.
+            className="mt-1 w-28 min-h-11 rounded-field border border-line bg-surface px-3 py-2 text-sm text-ink tabular-nums"
           />
         </label>
 
@@ -144,6 +103,13 @@ export function ReceiptForm({
 
         <Button type="submit" size="sm" disabled={pending}>
           {pending ? 'Sending…' : 'Send to Keoni'}
+        </Button>
+
+        {/* The way out, matching the close-out panel beside it. Without one the only escape
+            from an opened form is the trigger that opened it, which is now above the panel
+            rather than beside it. */}
+        <Button type="button" size="sm" variant="ghost" onClick={onClose}>
+          Not now
         </Button>
       </div>
 

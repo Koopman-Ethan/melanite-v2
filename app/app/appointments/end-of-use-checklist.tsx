@@ -136,16 +136,25 @@ function Item({
 export function EndOfUseChecklist({
   bookingId,
   recorded,
+  open,
+  onClose,
 }: {
   bookingId: string
   /** The row, if this session was already closed out. Null means nobody has. */
   recorded: { itemsDone: number; itemCount: number; deviceIssue: boolean } | null
+  /** CONTROLLED BY THE CARD, not by this component.
+   *
+   *  The trigger lives in a row with the receipt button, and this panel opens underneath both
+   *  of them rather than inside one cell — a form unfolding in half a flex row shoulders the
+   *  other button out of the way while somebody is part-way through using it. Owning its own
+   *  `open` meant the trigger and the panel had to be in the same place. */
+  open: boolean
+  onClose: () => void
 }) {
   const [state, action, pending] = useActionState<ChecklistState, FormData>(
     recordEndOfUseChecklist,
     {},
   )
-  const [open, setOpen] = useState(false)
   const [ticked, setTicked] = useState<string[]>([])
   const [collapsed, setCollapsed] = useState<string[]>([])
   const [issue, setIssue] = useState<'none' | 'reported' | ''>('')
@@ -205,18 +214,7 @@ export function EndOfUseChecklist({
     return <p className="mt-3 text-xs text-success">{state.success}</p>
   }
 
-  if (!open) {
-    return (
-      <div>
-        <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
-          Close out the suite
-        </Button>
-        {/* "After appointment", not "end of day". Somebody who reads this as a daily form files
-            one a day and then wonders why they are being chased for the other four. */}
-        <p className="mt-1.5 text-[11px] text-ink-faint">After appointment checklist</p>
-      </div>
-    )
-  }
+  if (!open) return null
 
   return (
     <form action={action} className="mt-3 space-y-4 rounded-card border border-line bg-overlay p-4">
@@ -425,7 +423,7 @@ export function EndOfUseChecklist({
                 ? 'Sign off — all 25'
                 : `Sign off — ${ticked.length} of ${END_OF_USE_ITEM_COUNT}`}
         </Button>
-        <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>
+        <Button type="button" size="sm" variant="ghost" onClick={onClose}>
           Not now
         </Button>
       </div>

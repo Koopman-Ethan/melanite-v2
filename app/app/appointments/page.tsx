@@ -24,8 +24,7 @@ import { sharesRevenue } from '@/lib/revenue-model'
 import { getCheckoutSettings } from '@/lib/db/queries/checkout'
 import { getLiveSchedule } from '@/lib/rental/schedule'
 
-import { EndOfUseChecklist } from './end-of-use-checklist'
-import { ReceiptForm } from './receipt-form'
+import { SessionActions } from './session-actions'
 import { PaymentLink } from './payment-link'
 import { RentalBookedBanner } from './booked-banner'
 import { Filters } from './filters'
@@ -259,87 +258,22 @@ function AppointmentCard({
         {/* The divider belongs to the ROW, not to each action, or two peers side by side draw
             two rules. An empty row draws none, which is what a cancelled session should get. */}
         {(closeoutOffered || receiptOffered) && (
-          <div className="mt-3 border-t border-line pt-3">
-            {/* STACKED ON A PHONE, side by side and close together on anything wider.
-                Two related actions on the same session should read as a pair; equal grid
-                columns pushed them to opposite ends of a wide card and made them look like
-                two unrelated things that happened to share a row.
-                `items-start` keeps the buttons on one baseline while the hints sit under
-                each — which is what the grid was there for, and a flex row does it just as
-                well now the subtitles are short. */}
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
-              {closeoutOffered && <CloseoutPrompt appointment={appointment} />}
-              {receiptOffered && <ReceiptPrompt appointment={appointment} />}
-            </div>
-          </div>
+          <SessionActions
+            bookingId={appointment.id}
+            closeoutOffered={closeoutOffered}
+            recorded={appointment.closeout}
+            receiptOffered={receiptOffered}
+            sentAmountCents={appointment.receiptAmountCents}
+            sentAt={appointment.receiptUploadedAt?.toISOString() ?? null}
+            late={!closeoutWindowOpen(appointment)}
+          />
         )}
       </div>
     </li>
   )
 }
 
-/** Sending what they charged.
- *
- *  WHETHER IT APPEARS IS DECIDED BY THE CARD, in `receiptOffered`, not here. It used to be
- *  decided in both places, which is how every money bug in this codebase has started: two
- *  readings of the same question that agree until one is edited.
- *
- *  Normally this is part of signing off — see `EndOfUseChecklist`. This covers the two cases
- *  that leaves, and both of them are real:
- *
- *    AMENDING. They typed the wrong figure and need to fix it before Keoni acts. After she has
- *    acted the item has left her queue anyway.
- *
- *    LATE OR SEPARATELY. The close-out asks for the figure but never requires it — it certifies
- *    how a shared medical device was left, and a billing number is no part of that. So a
- *    provider can sign the room off now and deal with the money when they have the invoice.
- *    The window is also only twelve hours and can simply pass: somebody who finishes at 6pm
- *    and does not open the app until the next afternoon cannot sign off at all any more.
- *    Either way the figure is still owed, and this is where it goes.
- *
- *  Hidden while the close-out window is still open and nothing has been sent, so it is never
- *  TWO prompts asking the same question of somebody who has not answered it once.
- *
- *  Nothing on a cancellation or a no-show: those never produced a treatment, so there is no
- *  receipt. They reach Keoni through `heldRent`, where the question is whether anything is owed
- *  at all rather than how much. */
-function ReceiptPrompt({ appointment }: { appointment: Appointment }) {
-  if (appointment.status === 'cancelled' || appointment.status === 'no_show') return null
-  if (appointment.endTime > new Date()) return null
 
-  return (
-    <div>
-      <ReceiptForm
-        bookingId={appointment.id}
-        sentAmountCents={appointment.receiptAmountCents}
-        sentAt={appointment.receiptUploadedAt}
-        late={!closeoutWindowOpen(appointment)}
-      />
-    </div>
-  )
-}
-
-/** The close-out prompt, on a finished session.
- *
- *  This used to render three things: a photograph on arrival, a second one on the way out when
- *  nobody followed closely enough to bracket the session, and the checklist. Keoni dropped the
- *  brackets on 2026-09-17 — two prompts an appointment for a machine that was almost always fine —
- *  in favour of one photograph attached to an actual report, which the checklist now collects.
- *
- *  Only on a session that has finished and is still inside its window. A prompt on an appointment
- *  three weeks out is noise, and one from last month cannot be answered truthfully any more.
- *  Cancelled and no-show bookings never touched the machine, so they get nothing. */
-function CloseoutPrompt({ appointment }: { appointment: Appointment }) {
-  if (appointment.status === 'cancelled' || appointment.status === 'no_show') return null
-  if (appointment.endTime > new Date()) return null
-  if (!closeoutWindowOpen(appointment)) return null
-
-  return (
-    <div>
-      <EndOfUseChecklist bookingId={appointment.id} recorded={appointment.closeout} />
-    </div>
-  )
-}
 
 async function AppointmentList({
   providerId,
