@@ -31,10 +31,17 @@ import { db } from './db'
 // into dev and blocked the entire booking journey. Nothing was broken — dev was just faithfully
 // reproducing somebody's billing problem.
 //
-// THE REAL FIX, not done here: the suite should sign in as a DEDICATED fixture provider rather
-// than borrowing a real person's account. Then none of their real-world state matters and this
-// script shrinks to a password. That is a bigger change — the specs assume an account with a
-// service menu, a history and a Connect account — and it is worth doing before the roster grows.
+// THE GATE REPAIR IS NOW LOAD-BEARING ON EVERY RUN, not occasionally. The e2e provider left
+// Melanite in October and was retired in production — inactive, booking disabled — so every
+// refresh from now on imports an account that CANNOT book, every time, by design. Without the
+// repair below the suite fails at `auth.setup.ts` nightly. See `scripts/retire-provider.ts`.
+//
+// It also quietly settles the worry that used to live here: that borrowing a real person's
+// account meant inheriting their real-world state. There is no real-world state left to
+// inherit. A retired provider with a service menu, a booking history and a Connect account is
+// a better fixture than a working one, which is the whole reason she was kept rather than
+// deleted — and it is why the "use a dedicated fixture provider instead" rewrite that this
+// comment used to call for is no longer worth doing.
 
 const check = process.argv.includes('--check')
 
