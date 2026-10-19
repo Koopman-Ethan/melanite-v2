@@ -11,6 +11,7 @@ import { toCents } from '@/lib/money'
 import { planRefund } from '@/lib/refunds'
 import { chargeRentalFee } from '@/lib/rental/charge'
 import { notifyRentDecision } from '@/lib/rental/notify-decision'
+import { forgetReceipt } from '@/lib/rental/receipts'
 import { reviewRentalFee } from '@/lib/rental/review'
 
 export interface QueueState {
@@ -335,6 +336,11 @@ export async function confirmSessionRent(
   if ('error' in out) return { error: out.error }
   if ('skipped' in out) return { error: out.skipped }
 
+  // The receipt has done its job, so it stops being held. AFTER the charge and never before:
+  // if the card fails she needs the document still there to try again. Best effort by design —
+  // see `forgetReceipt`, which never throws, because a cleanup must not undo a payment.
+  await forgetReceipt(bookingId)
+
   // No email from here: `chargeRentalFee` sends the receipt itself, from the one place where the
   // money has definitely moved.
   return { success: `$${(out.charged.amountCents / 100).toFixed(2)} charged. The provider has been told.` }
@@ -354,6 +360,9 @@ export async function skipSessionRent(bookingId: string): Promise<QueueState> {
     .where(eq(bookings.id, bookingId))
 
   revalidatePath('/app/admin/queue')
+
+  // Decided, so the document is no longer needed. Same rule as charging it.
+  await forgetReceipt(bookingId)
   await notifyRentDecision(bookingId, { waived: true })
 
   return { success: 'Nothing charged for that session. The provider has been told.' }

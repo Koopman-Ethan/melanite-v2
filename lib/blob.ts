@@ -203,10 +203,16 @@ export async function readEquipmentPhoto(
  *  environment-blind delete button would let a test click on appdev destroy it, and blobs do not
  *  come back.
  *
- *  Prefix ownership, not an environment flag: production owns `equipment/` except the dev subtree,
- *  and everything else owns `equipment/dev/`. Each can only ever reach its own. */
+ *  Prefix ownership, not an environment flag: production owns everything EXCEPT the `/dev/`
+ *  subtrees, and everything else owns only those. Each can only ever reach its own.
+ *
+ *  Keyed on the `/dev/` segment rather than on a list of known prefixes. The first version
+ *  tested `equipment/dev/` literally, which was right while photographs were the only binary
+ *  and silently wrong the moment receipts arrived: every receipt key would have failed the
+ *  check on dev and passed it in production, so dev could delete nothing and production could
+ *  delete a dev object. A rule about one prefix is a rule that breaks when a second appears. */
 export function ownsStorageKey(storageKey: string): boolean {
-  const isDevKey = storageKey.startsWith('equipment/dev/')
+  const isDevKey = storageKey.includes('/dev/')
   return process.env.MELANITE_ENV === 'prod' ? !isDevKey : isDevKey
 }
 
@@ -244,5 +250,173 @@ export async function deleteEquipmentPhoto(storageKey: string): Promise<DeleteRe
   } catch (err) {
     console.error('[blob] could not remove photo', storageKey, err)
     return { ok: false, reason: 'failed', detail: 'The photo could not be removed. Try again.' }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// Receipts.
+//
+// The second binary this app handles, and the first that is about a PERSON rather than a
+// machine. A `keoni_sets` provider sends Keoni the receipt for what they charged their client,
+// and she sets what they owe from it.
+//
+// THAT MAKES THIS DIFFERENT FROM EQUIPMENT PHOTOS, in the direction the note at the top of this
+// file warns about. A receipt is very likely to carry a client's name and what treatment they
+// had, and the rental terms say in as many words that Melanite keeps no record of who a
+// provider's clients are. Three things follow, and all three are deliberate:
+//
+//   - The UPLOAD FORM asks them to cover the client's name first. The cheapest control there
+//     is, and the only one that stops the data arriving at all.
+//   - The AMOUNT is required and the file is only evidence, so the common case is Keoni reading
+//     a number off the queue rather than opening a photograph of somebody's receipt.
+//   - The FILE IS DELETED once she charges or waives the session. By then it has done its job.
+//     `bookings.receiptUploadedAt` and the amount survive, which answers "was there a receipt,
+//     and what did it say" without keeping the document. That closes the retention gap this
+//     file flags for the equipment store, for the one case where it actually bites.
+//
+// Read access is NOT the coarse any-provider rule the equipment route uses. See the route.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+/** Images, and PDF.
+ *
+ *  Equipment photos are phone photos and nothing else. A receipt is whatever the provider's own
+ *  system produced — Square and Stripe both email a PDF, and forcing somebody to photograph a
+ *  screen to satisfy a MIME check is how a feature stops being used. */
+const RECEIPT_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'application/pdf'])
+
+const RECEIPT_EXTENSIONS: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'application/pdf': 'pdf',
+}
+
+function receiptPrefix(): string {
+  return process.env.MELANITE_ENV === 'prod' ? 'receipts/' : 'receipts/dev/'
+}
+
+/**
+ * Stores one receipt against a booking.
+ *
+ * Validates before it writes, for the same reason `putEquipmentPhoto` does: a refused file that
+ * was persisted anyway is the worst of both.
+ *
+ * The key carries the booking id and nothing else — no client name, no provider name, no
+ * amount. A storage key ends up in URLs, logs and error reports, and a receipt is exactly the
+ * kind of object whose filename must not describe its contents.
+ */
+export async function putReceipt(
+  bookingId: string,
+  file: { type: string; size: number; arrayBuffer(): Promise<ArrayBuffer> },
+): Promise<BlobResult> {
+  if (!blobConfigured()) {
+    return {
+      ok: false,
+      reason: 'not-configured',
+      detail: 'Receipt storage is not set up in this environment (BLOB_READ_WRITE_TOKEN).',
+    }
+  }
+
+  if (!file.size) return { ok: false, reason: 'empty', detail: 'That file is empty.' }
+
+  if (!RECEIPT_MIME.has(file.type)) {
+    return {
+      ok: false,
+      reason: 'type',
+      detail: 'A photo or a PDF — JPEG, PNG, WebP or PDF.',
+    }
+  }
+
+  if (file.size > MAX_BYTES) {
+    return {
+      ok: false,
+      reason: 'size',
+      detail: `That file is ${(file.size / 1024 / 1024).toFixed(1)}MB. The limit is ${MAX_BYTES / 1024 / 1024}MB.`,
+    }
+  }
+
+  const key = `${receiptPrefix()}${bookingId}.${RECEIPT_EXTENSIONS[file.type]}`
+
+  let stored: Awaited<ReturnType<typeof put>>
+  try {
+    stored = await put(key, await file.arrayBuffer(), {
+      access: 'private',
+      contentType: file.type,
+      // Deliberate: re-sending a receipt for the same booking OVERWRITES rather than
+      // accumulating. A provider who photographs the wrong thing and sends again should not
+      // leave the first one in the store, where nothing points at it and nothing deletes it.
+      addRandomSuffix: false,
+      allowOverwrite: true,
+    })
+  } catch (err) {
+    console.error('[blob] receipt upload failed for', key, err)
+    return {
+      ok: false,
+      reason: 'upload-failed',
+      detail: 'That receipt did not upload — check your signal and try again.',
+    }
+  }
+
+  return {
+    ok: true,
+    blob: { storageKey: stored.pathname, mimeType: file.type, sizeBytes: file.size },
+  }
+}
+
+/** Where a browser fetches a receipt. Our own route, for the same reason as photos. */
+export function receiptUrl(bookingId: string): string {
+  return `/api/receipt/${bookingId}`
+}
+
+/** Fetches the bytes, server-side, with the token. Used only by that route. */
+export async function readReceipt(
+  storageKey: string,
+): Promise<{ body: ReadableStream<Uint8Array>; contentType: string } | null> {
+  if (!blobConfigured()) return null
+
+  try {
+    // `get` with the token, not `head` plus a fetch — see `readEquipmentPhoto` for what that
+    // cost the first time.
+    const result = await get(storageKey, { access: 'private' })
+    if (!result?.stream) return null
+
+    return {
+      body: result.stream as ReadableStream<Uint8Array>,
+      contentType: result.blob.contentType ?? 'application/octet-stream',
+    }
+  } catch (err) {
+    console.error('[blob] could not read receipt', storageKey, err)
+    return null
+  }
+}
+
+/** Removes a receipt once it has been acted on.
+ *
+ *  Called when Keoni charges or waives the session — see `lib/rental/receipts.ts`. The booking
+ *  keeps `receiptAmountCents` and `receiptUploadedAt`; only the document goes.
+ *
+ *  BEST EFFORT, and the caller must not fail on it. A receipt the store would not delete is
+ *  untidy; a charge that was refused because a cleanup failed is somebody's money. The row is
+ *  stamped `receiptDeletedAt` either way, and a sweep can catch a straggler later. */
+export async function deleteReceipt(storageKey: string): Promise<DeleteResult> {
+  if (!blobConfigured()) {
+    return { ok: false, reason: 'not-configured', detail: 'Receipt storage is not set up here.' }
+  }
+
+  if (!ownsStorageKey(storageKey)) {
+    console.warn('[blob] refusing to delete', storageKey, '— it belongs to another environment')
+    return {
+      ok: false,
+      reason: 'foreign',
+      detail: 'That receipt belongs to a different environment.',
+    }
+  }
+
+  try {
+    await del(storageKey)
+    return { ok: true }
+  } catch (err) {
+    console.error('[blob] could not remove receipt', storageKey, err)
+    return { ok: false, reason: 'failed', detail: 'The receipt could not be removed.' }
   }
 }

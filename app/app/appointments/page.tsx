@@ -13,6 +13,9 @@ import {
   type AppointmentStatus,
 } from '@/lib/db/queries/appointments'
 import { appOrigin } from '@/lib/stripe/config'
+import { eq } from 'drizzle-orm'
+import { db } from '@/lib/db'
+import { providers } from '@/lib/db/schema'
 
 import { AppointmentActions } from './appointment-actions'
 import { closeoutWindowOpen } from '@/lib/end-of-use'
@@ -22,6 +25,7 @@ import { getCheckoutSettings } from '@/lib/db/queries/checkout'
 import { getLiveSchedule } from '@/lib/rental/schedule'
 
 import { EndOfUseChecklist } from './end-of-use-checklist'
+import { ReceiptForm } from './receipt-form'
 import { PaymentLink } from './payment-link'
 import { RentalBookedBanner } from './booked-banner'
 import { Filters } from './filters'
@@ -77,9 +81,12 @@ function AppointmentCard({
   origin,
   dueCents,
   lateCancellationHours,
+  keoniSetsFee,
 }: {
   appointment: Appointment
   origin: string
+  /** This provider's fee is set by Keoni from a receipt, so the card asks them for one. */
+  keoniSetsFee: boolean
   /** From `platform_settings`. Cancelling with more notice than this asks for no reason, and
    *  nothing is owed — Keoni's rule of 12 October. */
   lateCancellationHours: number
@@ -206,8 +213,33 @@ function AppointmentCard({
           />
         )}
         <CloseoutPrompt appointment={appointment} />
+        {keoniSetsFee && <ReceiptPrompt appointment={appointment} />}
       </div>
     </li>
+  )
+}
+
+/** Asking what they charged, on a finished session.
+ *
+ *  Only for the three whose fee Keoni sets — everybody else is charged the published schedule
+ *  and Melanite needs nothing from them.
+ *
+ *  Same gating as the close-out prompt and for the same reasons: nothing before the session has
+ *  ended, and nothing on a cancellation or a no-show, which never produced a receipt because
+ *  they never produced a treatment. Those go to Keoni through `heldRent` instead, where the
+ *  question is whether anything is owed at all rather than how much. */
+function ReceiptPrompt({ appointment }: { appointment: Appointment }) {
+  if (appointment.status === 'cancelled' || appointment.status === 'no_show') return null
+  if (appointment.endTime > new Date()) return null
+
+  return (
+    <div className="mt-3 border-t border-line pt-3">
+      <ReceiptForm
+        bookingId={appointment.id}
+        sentAmountCents={appointment.receiptAmountCents}
+        sentAt={appointment.receiptUploadedAt}
+      />
+    </div>
   )
 }
 
@@ -264,7 +296,18 @@ async function AppointmentList({
   // The live schedule, loaded ONCE and mapped in code rather than queried per row — the same
   // trick `app/app/book/page.tsx` uses for its dropdown, and for the same reason: a provider
   // with a month of appointments would otherwise be a round trip each.
-  const [schedule, settings] = await Promise.all([getLiveSchedule(), getCheckoutSettings()])
+  const [schedule, settings, [me]] = await Promise.all([
+    getLiveSchedule(),
+    getCheckoutSettings(),
+    // Once per list, not once per card. Which basis they are on decides whether every finished
+    // session asks them for a receipt, and it is the same answer for every row.
+    db
+      .select({ rentBasis: providers.rentBasis })
+      .from(providers)
+      .where(eq(providers.id, providerId))
+      .limit(1),
+  ])
+  const keoniSetsFee = me?.rentBasis === 'keoni_sets'
   const feeFor = (serviceName: string): number | null => {
     const tier = tierForService(serviceName)
     if (!tier) return null
@@ -278,8 +321,9 @@ async function AppointmentList({
           key={a.id}
           appointment={a}
           origin={origin}
-          dueCents={feeFor(a.serviceName)}
+          dueCents={keoniSetsFee ? null : feeFor(a.serviceName)}
           lateCancellationHours={settings.lateCancellationHours}
+          keoniSetsFee={keoniSetsFee}
         />
       ))}
     </ul>

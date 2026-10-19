@@ -244,10 +244,36 @@ export function QueueRow({
               Don’t charge it
             </Button>
 
+            {/* What they SAID, and the document only if she wants it. The number is the point:
+                three sessions a week, for ever, is a lot of opening photographs of other
+                people's receipts to answer a question a figure already answers. */}
             <span className="self-center text-xs text-ink-faint">
-              {item.meta.adjusted === 'yes'
-                ? 'You set a figure for this already — charging uses what is in the box.'
-                : 'Melanite works out nothing here. Take the amount off their receipt.'}
+              {item.meta.adjusted === 'yes' ? (
+                'You set a figure for this already — charging uses what is in the box.'
+              ) : item.meta.claimed ? (
+                <>
+                  They charged their client{' '}
+                  <strong className="text-ink-secondary">{usd(item.meta.claimed)}</strong>.
+                  {item.meta.receipt === 'yes' ? (
+                    <>
+                      {' '}
+                      <a
+                        href={`/api/receipt/${item.id}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="underline underline-offset-4 hover:text-ink"
+                      >
+                        See the receipt
+                      </a>
+                      {' — deleted once you charge or waive this.'}
+                    </>
+                  ) : (
+                    ' No receipt attached.'
+                  )}
+                </>
+              ) : (
+                'Nothing sent yet. Melanite works out no figure for them.'
+              )}
             </span>
           </>
         )}

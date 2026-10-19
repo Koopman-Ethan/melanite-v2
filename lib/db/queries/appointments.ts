@@ -27,6 +27,13 @@ export interface AppointmentFilters {
 }
 
 export interface Appointment {
+  /** What this provider told Melanite they charged their client, in cents, and when.
+   *
+   *  Only ever set by a `keoni_sets` provider — Melanite derives no fee for them, so this is
+   *  the input Keoni sets one from. Null means they have not sent it yet. */
+  receiptAmountCents: number | null
+  receiptUploadedAt: Date | null
+
   /** Rent Melanite kept for this session, in cents, netting off a refund. Null when none was
    *  charged — which for a rental booking means a credited session covered it, or it is
    *  Melanite's own appointment.
@@ -134,6 +141,8 @@ export async function getAppointments(
       checkoutToken: checkoutLinks.token,
       checkoutStatus: checkoutLinks.status,
       checkoutExpiresAt: checkoutLinks.expiresAt,
+      receiptAmountCents: bookings.receiptAmountCents,
+      receiptUploadedAt: bookings.receiptUploadedAt,
       closeoutItems: endOfUseChecklists.completedItems,
       closeoutItemCount: endOfUseChecklists.itemCount,
       closeoutDeviceIssue: endOfUseChecklists.deviceIssue,
@@ -238,6 +247,8 @@ async function getAppointmentsById(providerId: string, bookingId: string): Promi
       checkoutToken: checkoutLinks.token,
       checkoutStatus: checkoutLinks.status,
       checkoutExpiresAt: checkoutLinks.expiresAt,
+      receiptAmountCents: bookings.receiptAmountCents,
+      receiptUploadedAt: bookings.receiptUploadedAt,
       closeoutItems: endOfUseChecklists.completedItems,
       closeoutItemCount: endOfUseChecklists.itemCount,
       closeoutDeviceIssue: endOfUseChecklists.deviceIssue,

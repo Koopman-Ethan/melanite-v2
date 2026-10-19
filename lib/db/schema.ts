@@ -845,6 +845,34 @@ export const bookings = pgTable('bookings', {
   feeOverrideCents: integer(),
   feeSetBy: uuid().references(() => providers.id, { onDelete: 'set null' }),
   feeSetAt: timestamp({ withTimezone: true }),
+
+  /** What the provider says they charged their own client, in cents, and the receipt backing it.
+   *
+   *  Only ever set by a `keoni_sets` provider. Melanite derives nothing for them, so this is
+   *  the input to Keoni's decision rather than the decision itself: she reads it, and
+   *  `feeOverrideCents` above is what she settles on. The two are deliberately separate —
+   *  "what they told me" and "what I charged them" answer different questions, and collapsing
+   *  them would lose the ability to see a disagreement.
+   *
+   *  THE AMOUNT IS REQUIRED AND THE FILE IS EVIDENCE, in that order. A number she can read off
+   *  the queue means she does not have to open an image to do the common case, which is the
+   *  whole reason this is not just a file upload.
+   *
+   *  CLIENT DATA, AND THE REASON FOR `receiptDeletedAt`. A receipt is very likely to carry a
+   *  client's name, and the rental terms say in as many words that Melanite keeps no record of
+   *  who a provider's clients are. The upload form asks them to cover the name; the file is
+   *  deleted the moment Keoni charges or waives the session, because by then it has done its
+   *  job. What survives is `receiptUploadedAt` and the amount — enough to answer "was there a
+   *  receipt, and what did it say" without keeping a document about a stranger indefinitely.
+   *  That also closes the retention gap `lib/blob.ts` flags about its store.
+   *
+   *  `receiptDeletedAt` set with a null `receiptStorageKey` means it was supplied and cleaned
+   *  up, which is the ordinary end state. Both null means none was ever sent. */
+  receiptAmountCents: integer(),
+  receiptStorageKey: text(),
+  receiptMimeType: text(),
+  receiptUploadedAt: timestamp({ withTimezone: true }),
+  receiptDeletedAt: timestamp({ withTimezone: true }),
 }, (t) => [
   index().on(t.providerId, t.startTime),
   index().on(t.startTime, t.endTime),

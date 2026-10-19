@@ -164,9 +164,12 @@ async function main() {
   }
 
   console.log(`\n${changing} provider(s) changed.`)
-  console.log('\nEverybody now pays Melanite rather than being paid by it. The three keep their')
-  console.log('own price list, because half of it is what they owe — but no client money, no')
-  console.log('Connect account and no payout ever reaches them through Melanite again.')
+  console.log('\nEverybody now pays Melanite rather than being paid by it. No client money, no')
+  console.log('Connect account and no payout ever reaches a provider through Melanite again.')
+  console.log('')
+  console.log('The three on keoni_sets are quoted NO fee when they book and are never swept.')
+  console.log('They send Keoni what they charged their client, with a receipt; she sets what')
+  console.log('they owe on /app/admin/queue, per appointment, and that is what the card takes.')
 }
 
 

@@ -182,6 +182,36 @@ describe('which photos an environment may destroy', () => {
     expect(ownsStorageKey('equipment/abc.jpg')).toBe(true)
   })
 
+  // RECEIPTS, added 19 October, and the reason this rule is keyed on the `/dev/` segment rather
+  // than on `equipment/dev/` literally. The first version tested that one prefix, which was
+  // right while photographs were the only binary and silently wrong the moment a second kind
+  // arrived: every receipt key would have failed the check on dev and passed it in production,
+  // so dev could delete nothing and production could reach into dev's subtree. A rule about one
+  // prefix is a rule that breaks when a second prefix appears, and these four say so.
+
+  it('lets production destroy production receipts', () => {
+    process.env.MELANITE_ENV = 'prod'
+    expect(ownsStorageKey('receipts/abc.pdf')).toBe(true)
+  })
+
+  it('does NOT let production reach into the dev receipts subtree', () => {
+    process.env.MELANITE_ENV = 'prod'
+    expect(ownsStorageKey('receipts/dev/abc.pdf')).toBe(false)
+  })
+
+  it('lets dev destroy its own receipts', () => {
+    process.env.MELANITE_ENV = 'dev'
+    expect(ownsStorageKey('receipts/dev/abc.pdf')).toBe(true)
+  })
+
+  it('does NOT let dev destroy a production receipt', () => {
+    // A receipt carries a client's name. Dev's database is a copy of production, so a booking
+    // on appdev points at the real document — and this is the guard that stops a test click
+    // destroying evidence of what somebody was actually charged.
+    process.env.MELANITE_ENV = 'dev'
+    expect(ownsStorageKey('receipts/abc.pdf')).toBe(false)
+  })
+
   it('does NOT let production reach into the dev subtree', () => {
     process.env.MELANITE_ENV = 'prod'
     expect(ownsStorageKey('equipment/dev/abc.jpg')).toBe(false)

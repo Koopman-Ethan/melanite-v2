@@ -287,6 +287,11 @@ export async function rentToConfirm(): Promise<QueueItem[]> {
       /** The figure Keoni has set, or null if she has not yet. THE ONLY SOURCE of the amount
        *  for these three — nothing is derived, so there is no fallback behind it. */
       overrideCents: bookings.feeOverrideCents,
+      /** What the PROVIDER says they charged their client, and whether a document came with it.
+       *  Her input, not her decision — see `bookings.receiptAmountCents`. */
+      claimedCents: bookings.receiptAmountCents,
+      receiptKey: bookings.receiptStorageKey,
+      receiptAt: bookings.receiptUploadedAt,
     })
     .from(bookings)
     .innerJoin(providers, eq(bookings.providerId, providers.id))
@@ -334,11 +339,20 @@ export async function rentToConfirm(): Promise<QueueItem[]> {
       who: `${r.firstName} ${r.lastName}`,
       detail:
         `${r.serviceName} on ${dateLabel(r.startTime.toISOString().slice(0, 10))}` +
-        (cents === null
-          ? ' — waiting on their receipt, then your figure'
-          : ' — you have set a figure'),
+        (cents !== null
+          ? ' — you have set a figure'
+          : r.claimedCents !== null
+            ? ` — they charged their client $${(r.claimedCents / 100).toFixed(2)}`
+            : ' — waiting on their receipt'),
       meta: {
         adjusted: cents === null ? null : 'yes',
+        /** What they said, as a display string. The figure Keoni reads and acts on in the
+         *  ordinary case — the document is for when it does not look right. */
+        claimed: r.claimedCents === null ? null : (r.claimedCents / 100).toFixed(2),
+        /** Only when the file is still held. It is deleted once she settles, so a link that
+         *  outlived the document would 404 — see `forgetReceipt`. */
+        receipt: r.receiptKey ? 'yes' : null,
+        sentAt: r.receiptAt ? r.receiptAt.toISOString().slice(0, 10) : null,
       },
     }
   })
