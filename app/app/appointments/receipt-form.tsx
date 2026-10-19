@@ -78,6 +78,16 @@ export function ReceiptForm({
 
   if (!open) return null
 
+  // SENT. The form collapses to its own confirmation rather than sitting there filled in —
+  // leaving it open invites a second submission of the same figure, and the fields are no
+  // longer the thing worth looking at. Matches `EndOfUseChecklist`, which has always done this.
+  //
+  // The green line stays until the card re-renders, at which point the row above shows "You
+  // told Melanite $100.00 · Change it" and becomes the durable record.
+  if (state.success) {
+    return <p className="text-xs text-success">{state.success}</p>
+  }
+
   return (
     <form action={action} className="space-y-3">
       <input type="hidden" name="bookingId" value={bookingId} />
@@ -157,9 +167,6 @@ export function ReceiptForm({
       </p>
 
       {state.error && <Notice>{state.error}</Notice>}
-      {state.success && (
-        <p className="text-xs text-success">{state.success}</p>
-      )}
     </form>
   )
 }

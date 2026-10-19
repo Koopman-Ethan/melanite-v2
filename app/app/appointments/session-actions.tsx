@@ -46,6 +46,16 @@ export function SessionActions({
 }) {
   const [open, setOpen] = useState<Panel>(null)
 
+  // Bumped to force a FRESH receipt form.
+  //
+  // After a successful send the panel collapses to its green confirmation, which lives in
+  // `useActionState` inside the form. Re-opening the same mounted component would show that
+  // confirmation again rather than the fields — so "Change it" appeared to do nothing, or
+  // worse: as a toggle it CLOSED the panel, taking the confirmation with it, and a second
+  // click was needed to get the form back. Remounting clears the action state, which is the
+  // only way back to an editable form from a submitted one.
+  const [editing, setEditing] = useState(0)
+
   // Already done, both of them. Rendered as status rather than as a button, because there is
   // nothing left to press — but the receipt stays editable, since a wrong figure has to be
   // fixable right up until Keoni acts on it.
@@ -57,6 +67,13 @@ export function SessionActions({
     : null
 
   const toggle = (panel: Panel) => setOpen((current) => (current === panel ? null : panel))
+
+  /** Always opens, never toggles. Somebody pressing "Change it" has said what they want, and
+   *  closing the panel is not it. */
+  const amend = () => {
+    setEditing((n) => n + 1)
+    setOpen('receipt')
+  }
 
   return (
     <div className="mt-3 border-t border-line pt-3">
@@ -92,7 +109,11 @@ export function SessionActions({
         )}
 
         {closedOut && (
-          <div className="text-xs">
+          // `min-h-11` is the BUTTON's height, so a one-line status sits level with the
+          // control beside it instead of floating at the top of a taller column. The row is
+          // `items-start` because the buttons carry subtitles under them; a bare line of text
+          // has nothing under it and would otherwise ride up.
+          <div className="flex min-h-11 flex-col justify-center text-xs">
             <p className={recorded.itemsDone >= recorded.itemCount ? 'text-success' : 'text-ink-muted'}>
               {recorded.itemsDone >= recorded.itemCount
                 ? '✓ Closed out — everything ticked.'
@@ -105,7 +126,7 @@ export function SessionActions({
         )}
 
         {receiptOffered && sent && (
-          <div className="flex flex-wrap items-center gap-2 text-xs text-ink-secondary">
+          <div className="flex min-h-11 flex-wrap items-center gap-2 text-xs text-ink-secondary">
             <span>
               You told Melanite{' '}
               <strong className="text-ink">${(sentAmountCents / 100).toFixed(2)}</strong>
@@ -113,7 +134,7 @@ export function SessionActions({
             </span>
             <button
               type="button"
-              onClick={() => toggle('receipt')}
+              onClick={amend}
               className="text-ink-faint underline-offset-4 hover:text-ink hover:underline"
             >
               Change it
@@ -132,6 +153,7 @@ export function SessionActions({
             onClose={() => setOpen(null)}
           />
           <ReceiptForm
+            key={editing}
             bookingId={bookingId}
             sentAmountCents={sentAmountCents}
             late={late}
