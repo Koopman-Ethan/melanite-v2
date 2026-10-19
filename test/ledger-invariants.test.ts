@@ -244,9 +244,20 @@ describe('nobody is owed a payout that cannot arrive', () => {
   // on a `payout.paid` that could never arrive. The money is in Melanite's balance and the
   // books say it is somebody else's.
   //
-  // Not hypothetical, and not a rounding error: $604.50 across 11 rows for Leyla and Karly,
-  // the oldest from 10 August. These assertions do not fix those — they are a question for
-  // Keoni and Stripe, not for a migration — but they stop the pile growing.
+  // THE ELEVEN PENDING ROWS ARE NOT THAT BUG, which took a second look to establish and is
+  // worth writing down so nobody re-reaches the first conclusion. $604.50 across 11 rows for
+  // Leyla and Karly sits at `pending`, and it is a REPORTING gap rather than a debt.
+  //
+  // Those were destination charges: `transfer_data.destination` moves the provider's share
+  // into their connected account the moment the client's card is charged, as part of the
+  // charge. Nothing has to run afterwards for them to get paid. What `payout_status` tracks is
+  // the later event — Stripe paying that balance out to their bank — and Melanite is not
+  // subscribed to it. All 18 payout.paid events ever received carry no `account` field, which
+  // means every one of them is the PLATFORM's own payout to Melanite's bank, so `handlePayout`
+  // returns at its first line and has never once marked a provider row paid.
+  //
+  // So the pile does not mean money is owed. It means the books never learned what Stripe
+  // already did.
 
   it('never records a provider payout against a provider with no Connect account', async () => {
     // The row that cannot be true. Either the money reached them, in which case there is an
@@ -283,11 +294,9 @@ describe('nobody is owed a payout that cannot arrive', () => {
     expect(bad, `rent is not shared:\n${JSON.stringify(bad, null, 2)}`).toEqual([])
   })
 
-  it('leaves no payout pending against a provider who can no longer be paid through Stripe', async () => {
-    // A WARNING, not a failure, and deliberately so. The eleven stranded rows are real and
-    // this test would otherwise be red from the day it was written — which is how a suite
-    // stops being read. It reports instead, so the figure stays in front of somebody until
-    // Keoni has settled it.
+  it('reports rows whose payout status was never reconciled', async () => {
+    // A WARNING, not a failure, and deliberately so: nothing here is broken, the books are
+    // simply behind Stripe, and a red suite over that is how a suite stops being read.
     const stranded = await rows(sql`
       SELECT p.first_name, p.last_name, count(*)::int AS rows,
              sum(l.provider_payout)::text AS owed, min(l.created_at)::date AS oldest
@@ -299,10 +308,19 @@ describe('nobody is owed a payout that cannot arrive', () => {
 
     if (stranded.length > 0) {
       console.warn(
-        `\n  [payouts] ${stranded.length} provider(s) still owed a Connect payout that will ` +
-          `never arrive now that transfers have stopped:\n` +
+        `
+  [payouts] ${stranded.length} provider(s) have ledger rows still marked 'pending'.
+` +
           JSON.stringify(stranded, null, 2) +
-          `\n  Settle these by hand and mark the rows paid — see docs/rental-cutover.md.\n`,
+          `
+  NOT a debt. These were destination charges, so Stripe moved each share into the
+` +
+          `  provider's connected account at charge time. Melanite is not subscribed to Connect
+` +
+          `  payout events, so the status never caught up. Confirm in the Stripe dashboard,
+` +
+          `  then mark them paid — see docs/rental-cutover.md.
+`,
       )
     }
 
