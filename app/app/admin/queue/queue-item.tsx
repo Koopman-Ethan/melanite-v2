@@ -108,7 +108,17 @@ export function QueueRow({
           <p className="mt-1.5 text-sm text-ink-secondary">{item.detail}</p>
         </div>
 
-        <div className="text-right text-lg font-semibold tabular-nums">{usd(item.amount)}</div>
+        {/* An EMPTY amount is not zero. A `rent_to_confirm` item has no figure until Keoni
+            sets one — Melanite derives nothing for those providers — and rendering that as
+            "$0.00" says the session was free, which is the exact misreading the empty input
+            box was built to avoid. Showing the dash here and the dash there agree. */}
+        <div className="text-right text-lg font-semibold tabular-nums">
+          {item.amount === '' ? (
+            <span className="text-ink-faint">&mdash;</span>
+          ) : (
+            usd(item.amount)
+          )}
+        </div>
       </div>
 
       {state.error && (

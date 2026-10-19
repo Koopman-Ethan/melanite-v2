@@ -22,7 +22,13 @@ export default async function AdminQueuePage() {
     getTransferTargets(todayInDenver()),
   ])
 
-  const atStake = queue.reduce((sum, item) => sum + Number(item.amount), 0)
+  // Items with no figure yet contribute nothing, and `Number('')` is 0 rather than NaN so this
+  // read correctly by accident — but only until somebody writes `|| 0` somewhere. Said
+  // explicitly, because "at stake" counting an unpriced session as zero is right and counting
+  // it as missing would be wrong: there IS money at stake, nobody has said how much.
+  const priced = queue.filter((item) => item.amount !== '')
+  const atStake = priced.reduce((sum, item) => sum + Number(item.amount), 0)
+  const unpriced = queue.length - priced.length
   const oldestDays = queue[0]?.waitingDays ?? 0
 
   return (
@@ -58,6 +64,7 @@ export default async function AdminQueuePage() {
               <div className="mt-1.5 text-2xl font-semibold tabular-nums">{queue.length}</div>
               <div className="mt-0.5 text-xs text-ink-faint">
                 {usd(atStake)} at stake
+                {unpriced > 0 && `, ${unpriced} not yet priced`}
               </div>
             </div>
             <div className="rounded-card border border-line p-4">

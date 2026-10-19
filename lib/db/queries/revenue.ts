@@ -75,6 +75,13 @@ export interface SourceRevenue {
 /** Every source in the enum, in a fixed order, so the breakdown is stable across renders. */
 const ALL_SOURCES = ledgerSource.enumValues
 
+/** Sources nothing can produce any more. Shown only if they have history behind them.
+ *
+ *  `package` is NOT here: clients really bought packages and that revenue is real. `prepaid`
+ *  is, because production never recorded one — so its row would be a permanent $0.00 for a
+ *  feature that no longer exists, which is a line rather than an answer. */
+const RETIRED_SOURCES = new Set<string>(['prepaid'])
+
 /** The breakdown v1 could not produce at all — memberships and training had no ledger row,
  *  and room rentals lived in a third table with different column names.
  *
@@ -95,16 +102,28 @@ export async function getRevenueBySource(): Promise<SourceRevenue[]> {
 
   const bySource = new Map(rows.map((r) => [r.source as string, r]))
 
-  return ALL_SOURCES.map(
-    (source): SourceRevenue =>
-      bySource.get(source) ?? {
-        source,
-        revenue: '0.00',
-        gross: '0.00',
-        payouts: '0.00',
-        entries: 0,
-      },
-  ).sort((a, b) => Number(b.revenue) - Number(a.revenue))
+  return (
+    ALL_SOURCES.map(
+      (source): SourceRevenue =>
+        bySource.get(source) ?? {
+          source,
+          revenue: '0.00',
+          gross: '0.00',
+          payouts: '0.00',
+          entries: 0,
+        },
+    )
+      // EVERY source is listed, including one that has never earned anything — a stream at zero
+      // is a real answer and hiding it would make "we have not sold any memberships" look like
+      // "memberships do not exist".
+      //
+      // Except a source nothing can produce any more. `prepaid` was removed on 14 October and
+      // production never recorded one, so its row is a permanent $0.00 for a feature that is
+      // gone: not an answer, just a line that will never change. A `package` row with real
+      // history still shows, because clients really did buy those.
+      .filter((r) => r.entries > 0 || !RETIRED_SOURCES.has(r.source))
+      .sort((a, b) => Number(b.revenue) - Number(a.revenue))
+  )
 }
 
 export interface MethodRevenue {
