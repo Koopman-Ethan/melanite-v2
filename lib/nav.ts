@@ -32,8 +32,6 @@ export interface NavItem {
    *  through Melanite, so their own price list and their payouts are how they work. For
    *  everybody else the pages exist and mean nothing, which is why they were unlinked rather
    *  than deleted when the rental model arrived. */
-  /** Only for a provider billed half their own price — the three Keoni grandfathered. */
-  ownPriceOnly?: boolean
   /** Shown only to a provider who pays rent. Charges is empty and misleading for anybody else:
    *  a 50/50 provider is never charged a rental fee, so the page would list nothing for ever. */
   rentalOnly?: boolean
@@ -81,18 +79,22 @@ const ITEMS: NavItem[] = [
   { label: 'Dashboard', href: '/app/dashboard' },
   { label: 'Appointments', href: '/app/appointments', providerOnly: true },
   { label: 'Charges', href: '/app/charges', providerOnly: true, rentalOnly: true },
-  // MY SERVICES SURVIVES THE CUT, alone of the four that came back on 12 October.
+  // ALL FOUR OF THE 12 OCTOBER RESTORATIONS ARE NOW GONE.
   //
-  // Packages and Prepaid are gone with the feature: both were a client paying Melanite in
-  // advance, and Melanite no longer takes client money from anybody. Earnings was a link to a
-  // page that has never existed — a 404 in three providers' navigation since 12 October — and
-  // there is nothing to earn now that nobody is paid through Melanite.
+  // Packages and Prepaid went with the feature: both were a client paying Melanite in advance,
+  // and Melanite no longer takes client money from anybody. Earnings was a link to a page that
+  // has never existed — a 404 in three providers' navigation for a week — and there is nothing
+  // to earn now that nobody is paid through Melanite.
   //
-  // My Services stays, for a different reason than it was restored for. It is no longer a menu
-  // clients browse; it is where Leyla, Brittany and Karly keep the prices that Melanite halves
-  // to work out what they owe. That makes it load-bearing for exactly the three people on
-  // `half_own_price` and meaningless for everybody else, which is what `ownPriceOnly` says.
-  { label: 'My Services', href: '/app/services', providerOnly: true, ownPriceOnly: true },
+  // My Services outlived them by five days. It was kept because it held the prices Melanite
+  // halved to work out what the three owed; when Keoni decided on 19 October that she would
+  // rather read their receipts than track their pricing, the page stopped feeding anything.
+  // Leaving it linked would invite them to maintain a price list nothing reads — which is
+  // worse than removing it, because the numbers would look like they mattered.
+  //
+  // THE PAGE ITSELF STILL EXISTS and is reachable by URL. It is only unlinked, which is what
+  // `/app/services` has survived twice before; deleting it is a separate decision from
+  // deciding nobody needs it in their navigation today.
   { label: 'Daily Room Rental', href: '/app/room-rental', providerOnly: true },
   { label: 'Membership', href: '/app/membership', providerOnly: true },
   { label: 'Calendar', href: '/app/admin/calendar', adminOnly: true },
@@ -120,7 +122,6 @@ export function navFor(user: SessionUser): NavItem[] {
       // The billing model decides which half of the app exists for somebody. Note these are
       // asked of every role, including the house account: Melanite's own appointments are not
       // rented, so it gets neither set.
-      !(item.ownPriceOnly && user.rentBasis !== 'half_own_price') &&
       !(item.rentalOnly && !paysRent(user.revenueModel)) &&
       // Dashboard is the director's Oversight page, so listing both is one link too many.
       !(item.label === 'Dashboard' && director),

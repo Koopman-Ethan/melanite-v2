@@ -63,9 +63,9 @@ export function QueueRow({
 }) {
   const [state, setState] = useState<QueueState>({})
   const [partial, setPartial] = useState('')
-  // Pre-filled with what Melanite worked out, so confirming an accurate figure is one click and
-  // only a disagreement costs typing. Initialised once from the item on purpose: a revalidation
-  // must not wipe a number she is halfway through correcting.
+  // Empty unless Keoni has already set one. There is nothing to pre-fill with: Melanite
+  // derives no figure for these providers. Initialised once from the item on purpose — a
+  // revalidation must not wipe a number she is halfway through typing.
   const [figure, setFigure] = useState(item.amount)
   const [showPartial, setShowPartial] = useState(false)
   const [target, setTarget] = useState(transferTargets[0]?.id ?? '')
@@ -205,16 +205,22 @@ export function QueueRow({
 
         {item.kind === 'rent_to_confirm' && (
           <>
-            {/* The amount is EDITABLE here and read-only everywhere else in this queue, because
-                this is the one item where the figure itself is the question. Half of a price the
-                provider sets is what Melanite believes the session was worth; the receipt they
-                send Keoni is what it actually was. */}
+            {/* THE ONLY EDITABLE AMOUNT IN THIS QUEUE, and the only one that starts empty.
+                Every other item asks whether money should move; this one asks how much, and
+                Melanite has no opinion. These three send Keoni the receipt for what they
+                charged their client and she sets what is owed from it.
+
+                It briefly arrived pre-filled with half their list price. That came out on
+                19 October with the derivation behind it — a prefilled number is one somebody
+                accepts without reading, and the whole reason Keoni took this over is that the
+                derived figure was the payer's own number wearing Melanite's authority. */}
             <label className="text-xs">
-              <span className="block text-ink-faint">What they charged ÷ 2</span>
+              <span className="block text-ink-faint">What they owe</span>
               <input
                 type="number"
                 min={0}
                 step={0.01}
+                placeholder="0.00"
                 value={figure}
                 onChange={(e) => setFigure(e.target.value)}
                 className="mt-1 w-28 rounded-field border border-line bg-surface px-2 py-1.5 text-xs text-ink tabular-nums"
@@ -224,16 +230,9 @@ export function QueueRow({
             <Button
               size="sm"
               disabled={pending || !figure || Number(figure) <= 0}
-              onClick={() =>
-                run(() =>
-                  // Null when it is untouched, so accepting the derived figure records no
-                  // override — the difference between "she agreed" and "she set it" stays
-                  // legible on the booking afterwards.
-                  confirmSessionRent(item.id, figure === item.amount ? null : Number(figure)),
-                )
-              }
+              onClick={() => run(() => confirmSessionRent(item.id, Number(figure)))}
             >
-              {pending ? 'Charging…' : `Charge ${usd(figure || 0)}`}
+              {pending ? 'Charging…' : figure ? `Charge ${usd(figure)}` : 'Charge'}
             </Button>
 
             <Button
@@ -247,10 +246,8 @@ export function QueueRow({
 
             <span className="self-center text-xs text-ink-faint">
               {item.meta.adjusted === 'yes'
-                ? 'You have set this figure already — charging uses what is in the box.'
-                : item.meta.unpriced === 'yes'
-                  ? 'No price on file for this service, so there is nothing to halve. Type half of what the receipt says.'
-                  : `They list it at ${usd(item.meta.ownPrice ?? 0)}. Change the figure if the receipt says otherwise.`}
+                ? 'You set a figure for this already — charging uses what is in the box.'
+                : 'Melanite works out nothing here. Take the amount off their receipt.'}
             </span>
           </>
         )}

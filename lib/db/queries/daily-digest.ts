@@ -128,14 +128,14 @@ function asDigestAppointment(row: RawDigestAppointment): DigestAppointment {
       // their ordinary state, not a bug. Every session they work would otherwise land in the
       // subject line as NOT BILLED, which is the fastest way to teach somebody to ignore the
       // only alarm Melanite has. They are counted instead, as a backlog, further down.
-      rentBasis !== 'half_own_price',
+      rentBasis !== 'keoni_sets',
     // Derived here beside `unbilled` rather than at render, so one place decides what a missing
     // ledger row means and the email cannot reach a different answer from the alarm.
     rentWaived: rentWaivedAt !== null,
     rentPastDue: endTime.getTime() < Date.now() - CLOSEOUT_GRACE_HOURS * 60 * 60_000,
     rentAwaitingDecision: row.status === 'cancelled' || row.status === 'no_show',
     rentAwaitingFigure:
-      rentBasis === 'half_own_price' &&
+      rentBasis === 'keoni_sets' &&
       row.paymentSource === 'rental' &&
       !hasRentalRow &&
       rentWaivedAt === null &&

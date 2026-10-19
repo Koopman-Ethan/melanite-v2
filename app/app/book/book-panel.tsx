@@ -24,6 +24,7 @@ export function BookPanel({
   days,
   packs,
   payingRent,
+  quotesNoFee,
   cardLast4,
   hasCard,
   termsAccepted,
@@ -38,6 +39,7 @@ export function BookPanel({
   days: DayView[]
   packs: PackView[]
   payingRent: boolean
+  quotesNoFee?: boolean
   cardLast4: string | null
   /** Whether anything can be charged at all. `cardLast4` is for display and can be null even
    *  when a payment method exists. */
@@ -67,6 +69,7 @@ export function BookPanel({
       days={days}
       packs={packs}
       payingRent={payingRent}
+      quotesNoFee={quotesNoFee}
       cardLast4={cardLast4}
       hasCard={hasCard}
       termsAccepted={termsAccepted}

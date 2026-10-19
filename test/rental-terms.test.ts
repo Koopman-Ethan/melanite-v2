@@ -83,7 +83,7 @@ describe('the terms themselves', () => {
     //   no_show_refund       heldRentalFor gates markNoShow and cancelBooking; the fee is held
     //                        and reviewRentalFee settles it
     //   late_cancellation    cancelledLate, against platform_settings.late_cancellation_hours
-    //   half_own_price       feeForProviderService, and the rent_to_confirm queue
+    //   keoni_sets       feeForProviderService, and the rent_to_confirm queue
     //   granted_sessions     claimPackSession, oldest first
     //   fee_changes          hasAcceptedRentalTerms gates createBooking
     //
@@ -97,7 +97,7 @@ describe('the terms themselves', () => {
       'card_on_file',
       'no_show_refund',
       'late_cancellation',
-      'half_own_price',
+      'keoni_sets',
       'granted_sessions',
       'fee_changes',
     ]) {
@@ -118,28 +118,28 @@ describe('which terms a provider actually sees', () => {
   // it — the same reasoning that kept a hollow "terms" section off the 50/50 account page.
 
   it('tells a half-own-price provider how their fee is worked out', () => {
-    const keys = rentalTermsFor('half_own_price').map((t) => t.key)
-    expect(keys).toContain('half_own_price')
+    const keys = rentalTermsFor('keoni_sets').map((t) => t.key)
+    expect(keys).toContain('keoni_sets')
   })
 
   it('never shows that term to anybody on the published schedule', () => {
     const keys = rentalTermsFor('tier').map((t) => t.key)
     expect(keys, 'a tier provider would be agreeing to billing they are not on').not.toContain(
-      'half_own_price',
+      'keoni_sets',
     )
   })
 
   it('shows everybody everything else', () => {
     // The filter must hide one term, not quietly fork the list into two that drift apart.
     const tier = rentalTermsFor('tier').map((t) => t.key)
-    const own = rentalTermsFor('half_own_price').map((t) => t.key)
+    const own = rentalTermsFor('keoni_sets').map((t) => t.key)
 
-    expect(own.filter((k) => k !== 'half_own_price')).toEqual(tier)
+    expect(own.filter((k) => k !== 'keoni_sets')).toEqual(tier)
     expect(tier.length).toBeGreaterThan(5)
   })
 
   it('says something substantive whichever list you are on', () => {
-    for (const term of [...rentalTermsFor('tier'), ...rentalTermsFor('half_own_price')]) {
+    for (const term of [...rentalTermsFor('tier'), ...rentalTermsFor('keoni_sets')]) {
       expect(term.text.length, `${term.key} is too short to mean anything`).toBeGreaterThan(40)
     }
   })

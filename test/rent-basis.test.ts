@@ -1,27 +1,31 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { getProviderSharePct } from '@/lib/db/queries/admin-tools'
 import { rentalFeeForBooking } from '@/lib/rental/charge'
 import { feeForProviderService, feeForService } from '@/lib/rental/schedule'
 import { settleDueRent } from '@/lib/rental/settle'
 
 // How much a provider owes for a session, and who decides it.
 //
-// From 14 October there are two bases. Most providers pay the published fee for the service's
-// tier. Leyla, Brittany and Karly pay half of what THEY charge for it — the last trace of the
-// 50/50 they were grandfathered into, arrived at from the other side now that they bill their
-// clients directly rather than through Melanite.
+// Two bases. Most providers pay the published fee for the service's tier. Leyla, Brittany and
+// Karly — `keoni_sets` — have NO DERIVED FEE AT ALL: they send Keoni the receipt for what they
+// charged their client and she sets what is owed from it, by hand, per appointment.
 //
-// THE TWO THINGS WORTH TESTING HARDEST ARE BOTH ABOUT THE SECOND BASIS:
+// IT USED TO DERIVE HALF THEIR OWN LIST PRICE, and these tests used to assert that arithmetic.
+// Keoni dropped it on 19 October: the list is theirs to maintain, so half of it was the payer's
+// own number wearing Melanite's authority — right only while the list matched what the client
+// was actually charged, which Melanite cannot see. She would rather read the receipt.
 //
-//   1. The amount really is half their own price, not the tier price. Getting this wrong
-//      charges a provider the wrong rent on every session they ever book, quietly, and the
-//      number looks plausible either way.
+// So what is worth testing hardest has changed with it:
 //
-//   2. They are NEVER swept automatically. Their price list is theirs to edit, so the derived
-//      figure is a number the payer chose; Keoni confirms each session against a receipt before
-//      the card is touched. The sweep has four entry points and the guard is in the predicate
-//      rather than at the call sites, so this is the test that the guard is where it claims.
+//   1. Melanite offers no figure, and the null it returns is PERMANENT rather than a gap.
+//      The dangerous failure is a caller treating null as "not priced yet" and falling back to
+//      the tier fee — charging them somebody else's price, in a number that looks plausible.
+//
+//   2. They are NEVER swept. There is nothing to sweep with. The guard is in the predicate
+//      rather than at the four call sites, so this is the test that it is where it claims.
+//
+//   3. `feeOverrideCents` is what the card is actually charged, because for these three it is
+//      the only source there is.
 
 const { neon } = await import('@neondatabase/serverless')
 const sql = neon(process.env.DATABASE_URL!)
@@ -32,7 +36,6 @@ const SERVICE = 'Laser Hair Removal — Chin'
 let providerId = ''
 let providerServiceId = ''
 let originalBasis = 'tier'
-let listPrice = 0
 const made: string[] = []
 
 beforeAll(async () => {
@@ -67,11 +70,10 @@ beforeAll(async () => {
       )) as { id: string }[]
     )[0].id
 
-  // A price they charge their own client, so there is a half to take.
-  listPrice = 180
-  await sql.query(`UPDATE provider_services SET price = $2, is_active = true WHERE id = $1`, [
+  // A price on their own list, deliberately. Nothing should read it any more, and a test that
+  // leaves it blank could not tell "ignored correctly" from "there was nothing to ignore".
+  await sql.query(`UPDATE provider_services SET price = '180.00', is_active = true WHERE id = $1`, [
     providerServiceId,
-    listPrice.toFixed(2),
   ])
 })
 
@@ -79,13 +81,13 @@ afterAll(async () => {
   // Put the provider back exactly as found. A test that leaves somebody on a bespoke billing
   // arrangement is worse than no test — `test/owed-by-provider.test.ts` restored a hardcoded
   // value for the same reason and corrupted a real row the day a third value existed.
-  await sql.query(`UPDATE providers SET rent_basis = $2 WHERE id = $1`, [
-    providerId,
-    originalBasis,
-  ])
+  await sql.query(`UPDATE providers SET rent_basis = $2 WHERE id = $1`, [providerId, originalBasis])
   await sql.query(`DELETE FROM ledger_entries WHERE subject_id = ANY($1::uuid[])`, [made])
   await sql.query(`DELETE FROM bookings WHERE id = ANY($1::uuid[])`, [made])
 })
+
+const setBasis = (basis: string) =>
+  sql.query(`UPDATE providers SET rent_basis = $2 WHERE id = $1`, [providerId, basis])
 
 /** A past session for this provider, old enough that the sweep would want it. */
 async function pastSession(): Promise<string> {
@@ -113,61 +115,50 @@ async function pastSession(): Promise<string> {
 
 describe('what the fee is', () => {
   it('is the published tier fee on the ordinary basis', async () => {
-    await sql.query(`UPDATE providers SET rent_basis = 'tier' WHERE id = $1`, [providerId])
+    await setBasis('tier')
 
     const tier = await feeForService(SERVICE)
     expect(tier, 'Chin must be priced for this test to mean anything').not.toBeNull()
     expect(await feeForProviderService(providerId, SERVICE)).toBe(tier)
   })
 
-  it('is half their own price on the grandfathered basis', async () => {
-    await sql.query(`UPDATE providers SET rent_basis = 'half_own_price' WHERE id = $1`, [
-      providerId,
-    ])
-
-    const share = await getProviderSharePct()
-    const expected = Math.round(listPrice * 100 * (1 - share))
-
-    expect(await feeForProviderService(providerId, SERVICE)).toBe(expected)
+  it('is nothing at all when Keoni sets it', async () => {
+    await setBasis('keoni_sets')
+    expect(await feeForProviderService(providerId, SERVICE)).toBeNull()
   })
 
-  it('is not the tier fee on the grandfathered basis', async () => {
-    // The assertion that would catch the basis silently falling back. Both numbers are
-    // plausible rent for a session, so a wrong one does not look wrong.
-    await sql.query(`UPDATE providers SET rent_basis = 'half_own_price' WHERE id = $1`, [
-      providerId,
-    ])
-    expect(await feeForProviderService(providerId, SERVICE)).not.toBe(await feeForService(SERVICE))
-  })
+  it('is nothing even though they have a price on their own list', async () => {
+    // THE ASSERTION THAT WOULD CATCH THE OLD BEHAVIOUR COMING BACK. They have $180 against this
+    // service; half of it is $90, which is a perfectly plausible rent. Nothing may read it.
+    await setBasis('keoni_sets')
 
-  it('refuses rather than charging nothing when they have not priced it', async () => {
-    // A blank price must not become a free session. Letting a zero through would hand them an
-    // unlimited free laser every time they left a price out.
-    await sql.query(`UPDATE providers SET rent_basis = 'half_own_price' WHERE id = $1`, [
-      providerId,
-    ])
-    await sql.query(`UPDATE provider_services SET price = '0.00' WHERE id = $1`, [
+    const [row] = (await sql.query(`SELECT price FROM provider_services WHERE id = $1`, [
       providerServiceId,
-    ])
+    ])) as { price: string }[]
+    expect(Number(row.price), 'the fixture must have a price to ignore').toBeGreaterThan(0)
 
     expect(await feeForProviderService(providerId, SERVICE)).toBeNull()
+  })
 
-    await sql.query(`UPDATE provider_services SET price = $2 WHERE id = $1`, [
-      providerServiceId,
-      listPrice.toFixed(2),
-    ])
+  it('never falls back to the tier fee', async () => {
+    // The dangerous misreading of null: "no fee set yet, use the published one". That charges
+    // them somebody else's price, in a figure that looks entirely reasonable on a receipt.
+    await setBasis('keoni_sets')
+
+    const tier = await feeForService(SERVICE)
+    expect(tier, 'the tier fee must be a real number for this to distinguish anything').not.toBeNull()
+    expect(await feeForProviderService(providerId, SERVICE)).not.toBe(tier)
   })
 })
 
 describe('what Keoni sets instead', () => {
-  it('wins over the derived figure', async () => {
-    await sql.query(`UPDATE providers SET rent_basis = 'half_own_price' WHERE id = $1`, [
-      providerId,
-    ])
+  it('is what the card is charged', async () => {
+    await setBasis('keoni_sets')
     const id = await pastSession()
 
-    const derived = await rentalFeeForBooking(id)
-    expect(derived).not.toBeNull()
+    // Nothing to charge until she has said so — which is the state every one of their sessions
+    // starts in, not an error.
+    expect(await rentalFeeForBooking(id)).toBeNull()
 
     await sql.query(`UPDATE bookings SET fee_override_cents = 4321 WHERE id = $1`, [id])
     expect(await rentalFeeForBooking(id)).toBe(4321)
@@ -175,13 +166,11 @@ describe('what Keoni sets instead', () => {
 })
 
 describe('the sweep', () => {
-  it('never takes a session from a provider billed half their own price', async () => {
+  it('never takes a session from a provider whose fee Keoni sets', async () => {
     // The guard lives in the predicate rather than at the four call sites — the digest, the
     // cron route, the admin button and the page-load trigger. This is the test that it is
     // actually there, driven through the same function all four of them call.
-    await sql.query(`UPDATE providers SET rent_basis = 'half_own_price' WHERE id = $1`, [
-      providerId,
-    ])
+    await setBasis('keoni_sets')
     const id = await pastSession()
 
     await settleDueRent({ limit: 25 })
@@ -194,90 +183,31 @@ describe('the sweep', () => {
     expect(row.n, 'their rent is never taken without Keoni').toBe(0)
   })
 
+  it('does not take it even once she has set a figure', async () => {
+    // An override is her decision about the AMOUNT, not permission for the sweep to act on it.
+    // She charges it from the queue, where she can see what she is doing.
+    await setBasis('keoni_sets')
+    const id = await pastSession()
+    await sql.query(`UPDATE bookings SET fee_override_cents = 5000 WHERE id = $1`, [id])
+
+    await settleDueRent({ limit: 25 })
+
+    const [row] = (await sql.query(
+      `SELECT count(*)::int AS n FROM ledger_entries
+        WHERE subject_id = $1 AND source = 'rental_fee'`,
+      [id],
+    )) as { n: number }[]
+    expect(row.n, 'a figure is not a go-ahead').toBe(0)
+  })
+
   it('would have taken it on the ordinary basis', async () => {
-    // The control. Without this, the test above passes equally well if the sweep is simply
+    // The control. Without this, the two tests above pass equally well if the sweep is simply
     // broken — and a sweep that charges nobody looks exactly like a guard that works.
     const id = await pastSession()
-    await sql.query(`UPDATE providers SET rent_basis = 'tier' WHERE id = $1`, [providerId])
+    await setBasis('tier')
 
     const out = await settleDueRent({ limit: 25 })
-    expect(out.charged + out.failed, 'the sweep must be reaching this provider at all')
-      .toBeGreaterThan(0)
+    expect(out.charged + out.failed, 'the sweep must be reaching this provider at all').toBeGreaterThan(0)
     expect(id).not.toBe('')
-  })
-})
-
-describe('what the booking page quotes is what the card is charged', () => {
-  // TWO PLACES WORK OUT THE SAME NUMBER, which is the shape of every money bug in this
-  // codebase so far. `app/app/book/page.tsx` prices the dropdown so a provider can see the fee
-  // before committing; `feeForProviderService` prices the actual charge twelve hours later.
-  // A provider who is quoted $60 and charged $75 has been lied to, and would not find out
-  // until the receipt.
-  //
-  // The booking page cannot call `feeForProviderService` per row — twenty services is twenty
-  // round trips to render one dropdown — so it recomputes from a price it already selected.
-  // That duplication is deliberate and this is the test that keeps the two honest.
-
-  it('agrees on every service a half-own-price provider has priced', async () => {
-    const [prov] = (await sql.query(
-      `SELECT id FROM providers WHERE rent_basis = 'half_own_price' LIMIT 1`,
-    )) as { id: string }[]
-    if (!prov) throw new Error('no half_own_price provider in dev — this test needs one')
-
-    const priced = (await sql.query(
-      `SELECT s.name, ps.price::numeric AS price
-         FROM provider_services ps
-         JOIN services s ON s.id = ps.service_id
-        WHERE ps.provider_id = $1 AND s.active AND ps.is_active AND ps.price > 0
-        ORDER BY s.name`,
-      [prov.id],
-    )) as { name: string; price: string }[]
-
-    expect(priced.length, 'the fixture provider has priced nothing — this would pass vacuously')
-      .toBeGreaterThan(0)
-
-    const share = await getProviderSharePct()
-
-    for (const row of priced) {
-      // The booking page's arithmetic, copied deliberately rather than imported: importing the
-      // page's helper would make this test pass by construction and prove nothing.
-      const quoted = Math.round(Number(row.price) * 100 * (1 - share))
-      const charged = await feeForProviderService(prov.id, row.name)
-
-      expect(charged, `${row.name}: quoted ${quoted}, charge refused`).not.toBeNull()
-      expect(charged, `${row.name}: page quotes ${quoted}, card takes ${charged}`).toBe(quoted)
-    }
-  })
-
-  it('quotes nothing rather than a tier fee for a service they have not priced', async () => {
-    // The failure the walkthrough actually caught. The page used to price every row off the
-    // published schedule whoever was looking, so one of the three was shown $60 for a session
-    // that would cost them half of their own price — a number they would plan around and never
-    // be charged. Refusing is correct: there is genuinely no half to take.
-    const [prov] = (await sql.query(
-      `SELECT id FROM providers WHERE rent_basis = 'half_own_price' LIMIT 1`,
-    )) as { id: string }[]
-
-    const [unpriced] = (await sql.query(
-      `SELECT s.name FROM services s
-        WHERE s.active
-          AND NOT EXISTS (
-            SELECT 1 FROM provider_services ps
-             WHERE ps.service_id = s.id AND ps.provider_id = $1 AND ps.price > 0
-          )
-        LIMIT 1`,
-      [prov.id],
-    )) as { name: string }[]
-
-    if (!unpriced) return // every service priced — nothing to assert, and not a failure
-
-    expect(
-      await feeForProviderService(prov.id, unpriced.name),
-      `${unpriced.name} has no price, so there is no half of it`,
-    ).toBeNull()
-
-    // And the tier fee, which is what they must NOT be quoted, is a real number — so the
-    // assertion above is distinguishing the two rather than finding nothing either way.
-    expect(await feeForService(unpriced.name)).not.toBeNull()
   })
 })

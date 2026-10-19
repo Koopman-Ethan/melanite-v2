@@ -1,0 +1,12 @@
+-- `half_own_price` becomes `keoni_sets`.
+--
+-- RENAME, not a new value plus a backfill. ALTER TYPE ... RENAME VALUE rewrites the label in
+-- place, so every row already carrying it moves with it and there is no window where some
+-- providers are on the old name and some on the new. Postgres has done this since 10.
+--
+-- Why the name changed: the old one described an arithmetic Melanite no longer does. The fee
+-- was half of the provider's own list price, which is a number the payer maintains — so the
+-- derived figure was always the payer's own answer wearing Melanite's authority. On 19 October
+-- Keoni decided she does not want to track their pricing at all: they send her the receipt and
+-- she sets the figure. Nothing is derived, and the column now says so.
+ALTER TYPE "public"."provider_rent_basis" RENAME VALUE 'half_own_price' TO 'keoni_sets';

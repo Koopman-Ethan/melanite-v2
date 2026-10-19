@@ -101,7 +101,7 @@ export const providerRevenueModel = pgEnum('provider_revenue_model', [
 ])
 
 /** How a provider's rental fee is derived. See `providers.rentBasis`. */
-export const providerRentBasis = pgEnum('provider_rent_basis', ['tier', 'half_own_price'])
+export const providerRentBasis = pgEnum('provider_rent_basis', ['tier', 'keoni_sets'])
 
 export const medicalDirectorType = pgEnum('medical_director_type', ['melanite', 'own'])
 
@@ -408,11 +408,17 @@ export const providers = pgTable('providers', {
  *  `tier` — the published schedule. A service belongs to a tier and the tier has a price Keoni
  *  sets on `/app/admin/pricing`. Everybody is on this.
  *
- *  `half_own_price` — half of what the PROVIDER charges for that service, read from their own
- *  price list. Leyla, Brittany and Karly only, and the last trace of the 50/50 arrangement they
- *  were grandfathered into: they used to keep half of what their client paid Melanite, and now
- *  they bill the client directly and pay Melanite the other half as rent. The same split,
- *  arrived at from the opposite direction.
+ *  `keoni_sets` — NOTHING IS DERIVED. The provider books a service, works the session, sends
+ *  Keoni the receipt for what they charged their client, and Keoni reads it and sets the figure
+ *  by hand. Leyla, Brittany and Karly only, and the last trace of the 50/50 they were
+ *  grandfathered into.
+ *
+ *  It was briefly `half_own_price`, computed as half of the provider's own list price, and the
+ *  rename is the whole point: Keoni decided on 19 October that she does not want to track their
+ *  pricing at all. Half of a number the payer maintains was always a figure the payer chose —
+ *  deriving it gave an answer that looked authoritative and was not. Now Melanite offers no
+ *  answer, which is honest, and `bookings.feeOverrideCents` is the ONLY source of the amount
+ *  for these three.
  *
  *  SEPARATE FROM `revenueModel` on purpose. That column answers where a client's money GOES,
  *  and since 14 October the answer is the same for everybody — nowhere near Melanite. This one
@@ -424,10 +430,13 @@ export const providers = pgTable('providers', {
  *  provider invited next March must not quietly inherit a bespoke arrangement with Keoni. The
  *  three are set by script, once, and nobody joins them.
  *
- *  It also carries a consequence beyond the amount: a `half_own_price` provider is NEVER swept
- *  automatically. Their price list is theirs to edit, so the fee is theirs to influence, and
- *  Keoni confirms every session against a receipt before the card is charged. See
- *  `lib/rental/settle.ts` and the `rent_to_confirm` queue. */
+ *  Three consequences beyond the amount, all of them following from "a human decides":
+ *
+ *    - NEVER SWEPT. There is no figure to sweep with. See `lib/rental/settle.ts`.
+ *    - NO FEE QUOTED when they book. The booking form shows them a service and a time and no
+ *      price, because any price it showed would be invented.
+ *    - EXEMPT FROM THE FEE SCHEDULE. `hasAcceptedRentalTerms` does not ask them to accept a
+ *      price list that does not apply to them — see `lib/rental-terms.ts`. */
   rentBasis: providerRentBasis().notNull().default('tier'),
 
   // Stripe Connect (money out, to the provider).

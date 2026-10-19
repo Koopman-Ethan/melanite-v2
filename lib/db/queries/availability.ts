@@ -323,13 +323,6 @@ export interface BookableService {
   minDurationMins: number
   maxDurationMins: number
   colorHex: string | null
-  /** What THIS provider charges their own client for it, from their price list, or null if
-   *  they have never priced it.
-   *
-   *  Only meaningful for a provider on `half_own_price`, whose rental fee is half of this
-   *  rather than the published tier fee. Selected here because the booking page prices a whole
-   *  dropdown at once and a per-row lookup would be twenty round trips. */
-  ownPrice: string | null
 }
 
 /** Services this provider can actually book right now.
@@ -390,7 +383,6 @@ export async function getBookableServices(providerId: string): Promise<BookableS
       minDurationMins: services.minDurationMins,
       maxDurationMins: services.maxDurationMins,
       colorHex: services.colorHex,
-      ownPrice: providerServices.price,
     })
     .from(services)
     // EVERY active service, not the ones this provider ticked in a setup form. The menu was a

@@ -14,7 +14,6 @@ import {
 import { packBalancesFor } from '@/lib/rental/packs'
 import { tierForService } from '@/lib/rental-fees'
 import { getLiveSchedule } from '@/lib/rental/schedule'
-import { getProviderSharePct } from '@/lib/db/queries/admin-tools'
 import { paysRent } from '@/lib/revenue-model'
 import { hasAcceptedRentalTerms } from '@/lib/rental-terms'
 
@@ -116,28 +115,13 @@ export default async function BookPage({
   // for the house account rather than showing it a charge of nothing.
   const payingRent = !provider || paysRent(provider.revenueModel)
 
-  // One read, and only when it is going to be used. `getProviderSharePct` is the same number
-  // the ledger splits on, so the quote and the charge cannot drift apart.
-  const sharePct = provider?.rentBasis === 'half_own_price' ? await getProviderSharePct() : 0.5
-
-  /** TWO BASES, and the dropdown has to quote the right one.
+  /** This provider is never quoted a fee, because Melanite does not work one out for them.
    *
-   *  This page used to price every row off the published schedule regardless of who was
-   *  looking. For Leyla, Brittany and Karly that is a number they are never charged: their fee
-   *  is half of what they charge their own client. Quoting them $60 for a session that will
-   *  cost them $75 is worse than quoting nothing — it is a figure they would plan around.
-   *
-   *  The same arithmetic as `halfOwnPriceFor`, against the price already selected with the
-   *  service list rather than re-read per row. Null for an unpriced service, which the form
-   *  renders as "cannot be booked" — correct, because there is genuinely no half to take. */
-  const ownPriceHalf = (price: string | null): number | null => {
-    const value = Number(price ?? 0)
-    if (!Number.isFinite(value) || value <= 0) return null
-    const cents = Math.round(value * 100 * (1 - sharePct))
-    return cents > 0 ? cents : null
-  }
+   *  Distinct from "this service has no published price", which is a gap. This is a permanent
+   *  property of the arrangement, and the form says so differently: an unpriced service cannot
+   *  be booked, whereas these three book normally and find out the figure when Keoni sets it. */
+  const quotesNoFee = provider?.rentBasis === 'keoni_sets'
 
-  const onOwnPrice = provider?.rentBasis === 'half_own_price'
 
 
   return (
@@ -161,11 +145,12 @@ export default async function BookPage({
           // What Melanite charges the provider for the slot. Null means the service has no
           // published fee and cannot be booked — the form says so rather than letting them
           // find out after picking a time.
-          rentalFeeCents: payingRent
-            ? onOwnPrice
-              ? ownPriceHalf(s.ownPrice)
-              : feeFromSchedule(s.name)
-            : 0,
+          // NO FEE AT ALL for a `keoni_sets` provider, and null is the right answer rather
+          // than a missing one. Melanite derives nothing for them — Keoni reads their receipt
+          // after the session and sets the figure — so any number quoted here would be
+          // invented. The form reads null as "no fee set" and lets them book anyway; see
+          // `quotesNoFee` below, which is what keeps that from looking like a fault.
+          rentalFeeCents: payingRent ? (quotesNoFee ? null : feeFromSchedule(s.name)) : 0,
           tierKey: tierForService(s.name)?.key ?? null,
         }))}
         packs={packs.map((p) => ({
@@ -174,6 +159,7 @@ export default async function BookPage({
           sessionsRemaining: p.sessionsRemaining,
         }))}
         payingRent={payingRent}
+        quotesNoFee={quotesNoFee}
         cardLast4={provider?.cardLast4 ?? null}
         hasCard={Boolean(provider?.paymentMethodId)}
         termsAccepted={hasAcceptedRentalTerms(provider, schedule.version)}

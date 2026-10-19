@@ -4,7 +4,7 @@ import { and, eq } from 'drizzle-orm'
 
 import { bookings, providerServices, providers, services } from '@/lib/db/schema'
 import { CLOSEOUT_GRACE_HOURS } from '@/lib/end-of-use'
-import { feeForProviderService, feeForService } from '@/lib/rental/schedule'
+import { feeForService } from '@/lib/rental/schedule'
 
 import { describeDatabase, requireEnv } from '../lib/env-guard'
 import { db } from './db'
@@ -190,14 +190,11 @@ async function main() {
   const dueIn = hoursAgo - CLOSEOUT_GRACE_HOURS
 
   // WHAT WILL ACTUALLY BE CHARGED, which since 14 October is not always the schedule fee. A
-  // provider on `half_own_price` pays half of their own price for the service, and is never
-  // swept at all — so printing the tier fee and "the sweep will take it" would describe a
-  // different booking from the one just made, to the person using this script to test exactly
-  // that difference.
-  const ownsTheFigure = provider.rentBasis === 'half_own_price'
-  const actual = ownsTheFigure
-    ? await feeForProviderService(provider.id, service.name)
-    : fee
+  // provider on `keoni_sets` has no derived fee at all and is never swept — so printing the
+  // tier fee and "the sweep will take it" would describe a different booking from the one just
+  // made, to the person using this script to test exactly that difference.
+  const keoniSets = provider.rentBasis === 'keoni_sets'
+  const actual = keoniSets ? null : fee
 
   console.log(
     actual === null
@@ -205,10 +202,8 @@ async function main() {
       : `  unpaid   $${(actual / 100).toFixed(2)} owed, nothing charged yet (card ends ${provider.cardLast4})`,
   )
 
-  if (ownsTheFigure) {
-    console.log(
-      `  review   never swept - half of their own price, so it waits for Keoni to confirm it`,
-    )
+  if (keoniSets) {
+    console.log(`  review   never swept - there is no figure to sweep with`)
     console.log('')
     console.log('To price it and charge it:')
     console.log('  /app/admin/queue -> "Awaiting your figure"')

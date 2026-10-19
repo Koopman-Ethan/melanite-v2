@@ -53,7 +53,7 @@ export interface RentalTerm {
    *  Added in v5 because one term is true of exactly three people, and showing it to the other
    *  six would describe an arrangement they are not on. The alternative — two separate lists —
    *  is how one of them stops being maintained. */
-  basis?: 'tier' | 'half_own_price'
+  basis?: 'tier' | 'keoni_sets'
 }
 
 /**
@@ -104,12 +104,13 @@ export const RENTAL_TERMS: readonly RentalTerm[] = [
       'keeps no record of who they are.',
   },
   {
-    key: 'half_own_price',
-    basis: 'half_own_price',
+    key: 'keoni_sets',
+    basis: 'keoni_sets',
     text:
-      'Your rental fee is half of what you charged your client for that service, rather than ' +
-      'the published fee. Send Melanite the receipt for each session; Keoni confirms the ' +
-      'amount against it and only then is your card charged. Nothing is taken automatically.',
+      'The published fee schedule does not apply to you. For each session you send Melanite ' +
+      'the receipt for what you charged your client, and Keoni sets what you owe from it — so ' +
+      'you will not see a price when you book, and nothing is ever taken from your card ' +
+      'automatically. You are told the amount when it is charged.',
   },
   {
     key: 'granted_sessions',
@@ -143,11 +144,11 @@ export const RENTAL_TERMS: readonly RentalTerm[] = [
 /** The terms this provider is actually agreeing to.
  *
  *  Filtered rather than branched, so there is one list and one place a term is written. A
- *  provider on the published schedule must not be shown the half-their-own-price term: it would
- *  describe an arrangement they are not on, and a consent screen that says things that are not
- *  true of the reader is how the whole screen stops being read.
+ *  provider on the published schedule must not be shown the `keoni_sets` term, and vice versa:
+ *  a consent screen that says things that are not true of the reader is how the whole screen
+ *  stops being read.
  */
-export function rentalTermsFor(basis: 'tier' | 'half_own_price'): readonly RentalTerm[] {
+export function rentalTermsFor(basis: 'tier' | 'keoni_sets'): readonly RentalTerm[] {
   return RENTAL_TERMS.filter((t) => t.basis === undefined || t.basis === basis)
 }
 
@@ -174,12 +175,30 @@ export const RENTAL_TERMS_FEE_NOTE =
  *  Required means a caller that forgets the column does not build. */
 export function hasAcceptedRentalTerms(
   provider:
-    | { rentalTermsVersion: string | null; rentalScheduleVersion: number | null }
+    | {
+        rentalTermsVersion: string | null
+        rentalScheduleVersion: number | null
+        /** Omitted reads as `tier`, which is the safe default: it asks for MORE agreement, not
+         *  less. A caller that forgets this column makes somebody accept a schedule they did
+         *  not need to, which is a nuisance; the other way round would let somebody book
+         *  against prices they never saw. */
+        rentBasis?: 'tier' | 'keoni_sets'
+      }
     | null
     | undefined,
   liveSchedule: number | null = null,
 ): boolean {
   if (provider?.rentalTermsVersion !== RENTAL_TERMS_VERSION) return false
+
+  // THE PRICES ARE NOT THEIRS TO ACCEPT. Keoni sets these three a figure per session from the
+  // receipt they send her; the published schedule governs nothing about what they pay. Asking
+  // them to re-accept it every time Keoni edits a tier would block their calendar over numbers
+  // that do not apply to them — and worse, teach them that the consent screen is noise.
+  //
+  // The PROSE still binds them, which is the check above: the close-out duty, the no-show
+  // rule, the card on file. Only the price list is skipped.
+  if (provider.rentBasis === 'keoni_sets') return true
+
   if (liveSchedule === null) return true
   return provider?.rentalScheduleVersion === liveSchedule
 }

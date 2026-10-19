@@ -19,7 +19,7 @@ import { db } from './db'
 // Everybody active and not `house` becomes `rental`. The difference is the BASIS:
 //
 //   tier            the published schedule price for the service. Everybody.
-//   half_own_price  half of what the provider charges for it. Leyla, Brittany and Karly.
+//   keoni_sets      nothing derived. Keoni reads their receipt and sets the figure.
 //
 // The three were grandfathered onto the 50/50 on 9 October ("I'm going to lose those girls if I
 // don't allow them the 50/50"). On 14 October Keoni took Connect away from them too, so they
@@ -93,27 +93,27 @@ async function main() {
     return
   }
 
-  const halfPrice: Row[] = []
+  const keoniSet: Row[] = []
   const toRental: Row[] = []
   const settled: Row[] = []
 
   for (const r of all) {
     if (r.revenue_model === 'house') continue
     const grandfathered = (GRANDFATHERED as readonly string[]).includes(r.email)
-    const wantBasis = grandfathered ? 'half_own_price' : 'tier'
+    const wantBasis = grandfathered ? 'keoni_sets' : 'tier'
 
     if (r.revenue_model === 'rental' && r.rent_basis === wantBasis) settled.push(r)
-    else if (grandfathered) halfPrice.push(r)
+    else if (grandfathered) keoniSet.push(r)
     else toRental.push(r)
   }
 
   console.log('Rent billed as half their own price, by arrangement:')
-  if (halfPrice.length === 0 && settled.filter((r) => r.rent_basis === 'half_own_price').length === 0) {
+  if (keoniSet.length === 0 && settled.filter((r) => r.rent_basis === 'keoni_sets').length === 0) {
     console.log('  (nobody — check the list above against Keoni’s)')
   }
-  for (const r of halfPrice) {
+  for (const r of keoniSet) {
     console.log(
-      `  half     ${r.name.padEnd(22)} ${r.revenue_model}/${r.rent_basis} → rental/half_own_price`,
+      `  keoni    ${r.name.padEnd(22)} ${r.revenue_model}/${r.rent_basis} → rental/keoni_sets`,
     )
   }
 
@@ -137,23 +137,23 @@ async function main() {
 
   // The three need a card now too, and that is new for them — they were never charged anything
   // before. Said loudly because it is the one thing that stops them working on the day.
-  const halfNoCard = [...halfPrice, ...settled.filter((r) => r.rent_basis === 'half_own_price')]
+  const keoniSetNoCard = [...keoniSet, ...settled.filter((r) => r.rent_basis === 'keoni_sets')]
     .filter((r) => r.booking_enabled && !r.card_last4)
-  if (halfNoCard.length > 0) {
+  if (keoniSetNoCard.length > 0) {
     console.log('\n** These owe rent now and have no card on file:')
-    for (const r of halfNoCard) console.log(`     ${r.name}`)
+    for (const r of keoniSetNoCard) console.log(`     ${r.name}`)
   }
 
-  const changing = halfPrice.length + toRental.length
+  const changing = keoniSet.length + toRental.length
   if (!apply) {
     console.log(`\n${changing} provider(s) would change. Re-run with --apply.`)
     return
   }
 
-  if (halfPrice.length > 0) {
+  if (keoniSet.length > 0) {
     await db.execute(sql`
-      UPDATE providers SET revenue_model = 'rental', rent_basis = 'half_own_price'
-       WHERE id = ANY(${sql.raw(`ARRAY['${halfPrice.map((r) => r.id).join("','")}']::uuid[]`)})
+      UPDATE providers SET revenue_model = 'rental', rent_basis = 'keoni_sets'
+       WHERE id = ANY(${sql.raw(`ARRAY['${keoniSet.map((r) => r.id).join("','")}']::uuid[]`)})
     `)
   }
   if (toRental.length > 0) {

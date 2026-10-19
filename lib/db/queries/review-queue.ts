@@ -257,12 +257,15 @@ async function heldRent(): Promise<QueueItem[]> {
  *  went wrong — a failed card, a cancelled course, a session nobody turned up for. These are
  *  ordinary sessions that went perfectly well, and they are here because of who worked them.
  *
- *  WHY THEY CANNOT BE SWEPT. Leyla, Brittany and Karly pay half of what they charge their own
- *  client, read from a price list they maintain themselves. So the figure Melanite derives is a
- *  number the payer chose — accurate only as long as the list matches what the client was
- *  actually charged, which Melanite has no way to see. Keoni's answer on 14 October was that
- *  they send her the receipt and she confirms the amount before the card is touched. The sweep
- *  is closed to them in `lib/rental/settle.ts`; this is where they go instead.
+ *  WHY THEY CANNOT BE SWEPT. There is no figure to sweep with. Melanite derives nothing for
+ *  Leyla, Brittany and Karly: they send Keoni the receipt for what they charged their client
+ *  and she sets what is owed from it.
+ *
+ *  It briefly derived half of their own list price, and that came out on 19 October. The list
+ *  is theirs to maintain, so half of it was the payer's own number wearing Melanite's
+ *  authority — right only while the list matched what the client was actually charged, which
+ *  Melanite has no way to see. Keoni would rather read the receipt than track their pricing.
+ *  The sweep is closed to them in `lib/rental/settle.ts`; this is where they go instead.
  *
  *  Derived, like everything else in this file. An item leaves when it is charged (a ledger row
  *  appears) or waived — no flag says "done", because a flag can disagree with the money.
@@ -281,9 +284,9 @@ export async function rentToConfirm(): Promise<QueueItem[]> {
       firstName: providers.firstName,
       lastName: providers.lastName,
       providerId: bookings.providerId,
+      /** The figure Keoni has set, or null if she has not yet. THE ONLY SOURCE of the amount
+       *  for these three — nothing is derived, so there is no fallback behind it. */
       overrideCents: bookings.feeOverrideCents,
-      /** Their own price for it. Half is what Melanite believes it is owed. */
-      ownPrice: providerServices.price,
     })
     .from(bookings)
     .innerJoin(providers, eq(bookings.providerId, providers.id))
@@ -292,7 +295,7 @@ export async function rentToConfirm(): Promise<QueueItem[]> {
     .where(
       and(
         eq(bookings.paymentSource, 'rental'),
-        eq(providers.rentBasis, 'half_own_price'),
+        eq(providers.rentBasis, 'keoni_sets'),
         // It happened. Cancelled and missed sessions are a different question and a different
         // kind — see `heldRent`.
         sql`${bookings.status} IN ('upcoming', 'completed')`,
@@ -314,19 +317,11 @@ export async function rentToConfirm(): Promise<QueueItem[]> {
     )
     .orderBy(asc(bookings.endTime))
 
-  const sharePct = await getProviderSharePct()
-
   return rows.map((r) => {
-    const ownPrice = Number(r.ownPrice ?? 0)
-    const derived = Math.round(ownPrice * 100 * (1 - sharePct))
-    const cents = r.overrideCents ?? derived
-
-    // NOT PRICED IS A DISTINCT STATE, and saying "they list it at $0.00" would read as a broken
-    // query rather than as a missing price. A provider on this basis can book a service they
-    // have never put a price against — `/app/services` does not require one — and then there is
-    // nothing to halve. The item still belongs here: the session happened and is owed for. Keoni
-    // simply has to take the whole figure off the receipt instead of correcting a starting point.
-    const unpriced = ownPrice <= 0
+    // NO DERIVED FALLBACK. Null until Keoni has read the receipt and typed a number, and the
+    // row says so rather than showing a plausible figure nobody stands behind. An amount of
+    // "0.00" would be read as "this session is free"; "awaiting" cannot be misread.
+    const cents = r.overrideCents
 
     return {
       kind: 'rent_to_confirm' as const,
@@ -335,20 +330,15 @@ export async function rentToConfirm(): Promise<QueueItem[]> {
       // provider has been waiting to know what they owe.
       since: r.endTime,
       waitingDays: 0,
-      amount: (cents / 100).toFixed(2),
+      amount: cents === null ? '' : (cents / 100).toFixed(2),
       who: `${r.firstName} ${r.lastName}`,
       detail:
         `${r.serviceName} on ${dateLabel(r.startTime.toISOString().slice(0, 10))}` +
-        (r.overrideCents !== null
-          ? ' — you have set a figure'
-          : unpriced
-            ? ' — they have never priced this service, so there is nothing to halve'
-            : ` — they list it at $${ownPrice.toFixed(2)}`),
+        (cents === null
+          ? ' — waiting on their receipt, then your figure'
+          : ' — you have set a figure'),
       meta: {
-        ownPrice: ownPrice.toFixed(2),
-        derivedAmount: (derived / 100).toFixed(2),
-        unpriced: unpriced ? 'yes' : null,
-        adjusted: r.overrideCents === null ? null : 'yes',
+        adjusted: cents === null ? null : 'yes',
       },
     }
   })

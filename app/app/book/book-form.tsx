@@ -98,6 +98,7 @@ export function BookForm({
   days,
   packs,
   payingRent,
+  quotesNoFee = false,
   cardLast4,
   hasCard,
   termsAccepted,
@@ -118,6 +119,12 @@ export function BookForm({
   days: DayView[]
   packs: PackView[]
   payingRent: boolean
+  /** Melanite derives no fee for this provider — Keoni sets it from their receipt afterwards.
+   *
+   *  Distinct from a service with no published price, which is a gap and blocks the booking.
+   *  This is a permanent property of their arrangement, so a missing figure here is correct
+   *  and must NOT read as a fault or stop them booking. */
+  quotesNoFee?: boolean
   cardLast4: string | null
   /** Whether anything can be charged at all. `cardLast4` is for display and can be null even
    *  when a payment method exists. */
@@ -140,7 +147,10 @@ export function BookForm({
     ? packs.find((p) => p.tierKey === service.tierKey && p.sessionsRemaining > 0)
     : undefined
 
-  const unpriced = payingRent && service?.rentalFeeCents === null
+  // A service Melanite prices and has not priced. NOT the same as a provider Melanite never
+  // prices for — hence `quotesNoFee`, without which the three would be blocked from booking
+  // anything at all, because every service looks unpriced to them by design.
+  const unpriced = payingRent && !quotesNoFee && service?.rentalFeeCents === null
   const needsCard = payingRent && !pack && !hasCard
   // A credited session does NOT excuse this one. The terms cover what the fee schedule is and
   // what happens on a no-show, which apply just as much to a session that costs nothing.
@@ -167,7 +177,11 @@ export function BookForm({
             const options = group.items.map((s) => (
               <option key={s.serviceId} value={s.serviceId}>
                 {s.name}
-                {s.rentalFeeCents !== null ? ` · ${usd(s.rentalFeeCents)} rental` : ' · no fee set'}
+                {quotesNoFee
+                  ? ''
+                  : s.rentalFeeCents !== null
+                    ? ` · ${usd(s.rentalFeeCents)} rental`
+                    : ' · no fee set'}
               </option>
             ))
             return group.category ? (
@@ -350,16 +364,29 @@ export function BookForm({
             </Notice>
           ) : (
             <div className="rounded-field border border-line p-3 text-xs leading-relaxed text-ink-secondary">
-              <strong className="text-ink">
-                {service?.rentalFeeCents !== null && service?.rentalFeeCents !== undefined
-                  ? usd(service.rentalFeeCents)
-                  : ''}{' '}
-                after your session
-              </strong>{' '}
-              — taken from {cardLast4 ? `the card ending ${cardLast4}` : 'your payment method on file'}{' '}
-              about twelve hours after it ends, for the equipment and the room. Nothing is charged
-              now. What you charge your client is between you and them.
-              <br />
+              {quotesNoFee ? (
+                <>
+                  <strong className="text-ink">Keoni sets the fee for this one</strong> — send her
+                  the receipt for what you charged your client and she works it out from that.
+                  Nothing is taken from{' '}
+                  {cardLast4 ? `the card ending ${cardLast4}` : 'your card'} until she has.
+                  <br />
+                </>
+              ) : (
+                <>
+                  <strong className="text-ink">
+                    {service?.rentalFeeCents !== null && service?.rentalFeeCents !== undefined
+                      ? usd(service.rentalFeeCents)
+                      : ''}{' '}
+                    after your session
+                  </strong>{' '}
+                  — taken from{' '}
+                  {cardLast4 ? `the card ending ${cardLast4}` : 'your payment method on file'} about
+                  twelve hours after it ends, for the equipment and the room. Nothing is charged
+                  now. What you charge your client is between you and them.
+                  <br />
+                </>
+              )}
               {/* Replaces "if the card is declined the slot isn't held", which was true while the
                   fee was taken up front and is now the opposite of what happens. The twelve hours
                   is the same window the close-out form stays open — tell Melanite inside it and
@@ -376,7 +403,7 @@ export function BookForm({
       <SubmitButton
         disabled={!selectedSlot || unpriced || needsCard || needsTerms}
         label={
-          !payingRent || pack
+          !payingRent || pack || quotesNoFee
             ? 'Book appointment'
             : service?.rentalFeeCents
               ? `Book — ${usd(service.rentalFeeCents)} after the session`
