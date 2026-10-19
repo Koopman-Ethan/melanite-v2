@@ -97,10 +97,7 @@ export default async function AdminToolsPage() {
                     <span className="font-normal text-ink-muted">· {c.what}</span>
                   </p>
                   <p className="mt-0.5 text-xs text-ink-faint">
-                    {/* Which one it is decides how it gets settled, so it is stated rather
-                        than left to be inferred from the name beside it. */}
-                    {c.kind === 'package' ? 'Package' : 'Appointment'} · {c.providerName} ·
-                    started{' '}
+                    Appointment · {c.providerName} · started{' '}
                     {c.waitingDays === 0
                       ? 'today'
                       : `${c.waitingDays} day${c.waitingDays === 1 ? '' : 's'} ago`}

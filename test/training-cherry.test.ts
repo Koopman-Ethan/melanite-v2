@@ -87,11 +87,20 @@ describe('a student financing through Cherry', () => {
   })
 
   it('is not held forever', async () => {
-    // An abandoned application must not keep one of five seats indefinitely. The hold expires
-    // like any other; it is just measured in days.
+    // An abandoned application must not keep a seat indefinitely. The hold expires like any
+    // other; it is just measured in days.
+    //
+    // AGAINST ITS OWN FIXTURE. This used to take `LIMIT 1` from every Cherry enrolment in the
+    // database, which on a dev box refreshed nightly from production meant it tested whichever
+    // real row happened to come back first — and failed whenever that row had no hold. It was
+    // written off as a flake for weeks. The same mistake once waived a real booking in
+    // `rental-review`: a test that reaches for the first matching row is testing somebody
+    // else's data.
+    const id = await enrol('zz.cherry.held@example.com', true, 72 * 60)
+
     const [row] = (await sql.query(
-      `SELECT seat_held_until IS NOT NULL AS bounded FROM training_enrollments
-        WHERE cherry_started_at IS NOT NULL LIMIT 1`,
+      `SELECT seat_held_until IS NOT NULL AS bounded FROM training_enrollments WHERE id = $1`,
+      [id],
     )) as { bounded: boolean }[]
     expect(row.bounded).toBe(true)
   })

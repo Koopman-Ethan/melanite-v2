@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { noteBookingCherryHandoff, noteCherryHandoff } from '@/app/pay/actions'
+import { noteBookingCherryHandoff } from '@/app/pay/actions'
 import { getCherryHandoffs } from '@/lib/db/queries/admin-tools'
 import { cherryAvailable, CHERRY_MINIMUM } from '@/lib/payments/cherry'
 
@@ -14,8 +14,13 @@ import { cherryAvailable, CHERRY_MINIMUM } from '@/lib/payments/cherry'
 // That is not hypothetical: `cherry_started_at` was originally added to `checkout_links` while
 // building PACKAGE financing. The two tables have near-identical column lists, so the write
 // compiled, matched zero rows, and recorded nothing. `db:verify` cannot see that class of
-// mistake — both tables have the column now and both are legitimate — so it is caught here, by
-// running each action and reading back the row it was supposed to touch.
+// mistake — both tables have the column — so it is caught here, by running the action and
+// reading back the row it was supposed to touch.
+//
+// PACKAGE FINANCING WENT ON 14 OCTOBER, and this file matters MORE for it, not less. There is
+// only one writer now, so a write landing on the wrong table would have nothing to contradict
+// it: the package column would simply fill up and nobody would ever read it. The package link
+// fixture is kept for exactly that reason — as the row that must stay untouched.
 
 const { neon } = await import('@neondatabase/serverless')
 const sql = neon(process.env.DATABASE_URL!)
@@ -111,26 +116,16 @@ describe('the hand-off lands on the right row', () => {
     expect(link.cherry_started_at, 'the appointment hand-off recorded nothing').not.toBeNull()
   })
 
-  it('and does not touch the package link', async () => {
-    // The failure this whole file exists for. A token from one space matching a row in the
-    // other would be silent in both directions.
+  it('and never touches the package link', async () => {
+    // The failure this whole file exists for, and the only remaining guard against it now that
+    // package financing is gone: nothing writes to that table any more, so a stray write would
+    // land there unopposed and unread.
     const [pkg] = (await sql.query(
       `SELECT cherry_started_at FROM package_checkout_links WHERE token = $1`,
       [packageLinkToken],
     )) as Record<string, unknown>[]
 
-    expect(pkg.cherry_started_at).toBeNull()
-  })
-
-  it('a package hand-off writes to package_checkout_links', async () => {
-    await noteCherryHandoff(packageLinkToken)
-
-    const [pkg] = (await sql.query(
-      `SELECT cherry_started_at FROM package_checkout_links WHERE token = $1`,
-      [packageLinkToken],
-    )) as Record<string, unknown>[]
-
-    expect(pkg.cherry_started_at).not.toBeNull()
+    expect(pkg.cherry_started_at, 'nothing may write to the package table any more').toBeNull()
   })
 
   it('keeps the FIRST hand-off when somebody clicks through twice', async () => {
@@ -159,17 +154,14 @@ describe('the hand-off lands on the right row', () => {
 })
 
 describe('what Keoni has to chase', () => {
-  it('lists appointments alongside packages, oldest first', async () => {
+  it('lists the appointment, oldest first', async () => {
     const handoffs = await getCherryHandoffs(50)
 
     const booking = handoffs.find((h) => h.kind === 'booking' && h.what.includes(','))
-    const pkg = handoffs.find((h) => h.what === 'ZZ Cherry Package')
-
-    // Two lists would mean two places to remember to look, and the newer one is the one that
-    // gets forgotten — the exact failure this screen exists to prevent.
     expect(booking, 'an appointment financed through Cherry appears nowhere for Keoni').toBeTruthy()
-    expect(pkg, 'the package hand-off fell off the list').toBeTruthy()
-    expect(pkg!.kind).toBe('package')
+
+    // A package hand-off can no longer be made, and the list must not be carrying one.
+    expect(handoffs.every((h) => h.kind === 'booking')).toBe(true)
 
     const times = handoffs.map((h) => new Date(h.startedAt).getTime())
     expect(times).toEqual([...times].sort((a, b) => a - b))

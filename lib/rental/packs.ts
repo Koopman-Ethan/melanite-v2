@@ -21,9 +21,9 @@ import { getLiveSchedule } from './schedule'
 // that somebody has to remember to remove. `scripts/cutover-grant-packs.ts` creates them.
 //
 // The mechanics are deliberately the same shape as a client package — a counter pair with a check
-// constraint, plus an append-only redemption row per session spent — because that shape has
-// already been debugged here. The comment in `app/app/packages/actions.ts` records what it cost
-// to learn: reading a count early and acting on it later handed out a free treatment.
+// constraint, plus an append-only redemption row per session spent — because that shape had
+// already been debugged there. What it cost to learn, recorded here now that the package code is
+// gone: reading a count early and acting on it later handed out a free treatment.
 //
 // Two rules carry over, and both matter more here than they look:
 //

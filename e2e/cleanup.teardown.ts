@@ -50,12 +50,11 @@ teardown('remove e2e rows', async () => {
   }
   await query.query(`DELETE FROM clients WHERE email = 'zz.e2e@example.com'`)
 
-  // The package spec sends a real payment link each run. Without this they pile up on the
-  // provider's "awaiting payment" list, which is meant to be a short list of real sales.
+  // The package specs went with the feature on 14 October, so nothing creates these any more.
+  // The sweep stays one more run to clear whatever the last run left behind, and the tables
+  // themselves stay for good — real clients bought real packages and the ledger points at them.
   await query.query(`DELETE FROM package_checkout_links WHERE client_name LIKE 'ZZ E2E %'`)
 
-  // And the template it sells. Left behind, it shows up on a real provider's packages list on
-  // appdev, which Keoni looks at — the spec rebuilds it from scratch next run.
   const tmpl = `SELECT id FROM package_templates WHERE name = 'ZZ E2E Package'`
   await query.query(`DELETE FROM package_template_items WHERE package_template_id IN (${tmpl})`)
   await query.query(

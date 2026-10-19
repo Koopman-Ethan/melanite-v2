@@ -7,8 +7,6 @@ import type { Appointment } from '@/lib/db/queries/appointments'
 
 import {
   cancelBooking,
-  cancelPackageRedemption,
-  cancelPrepaidBooking,
   markCompleted,
   markNoShow,
   type ActionState,
@@ -16,16 +14,16 @@ import {
 
 /** Actions available on one appointment.
  *
- *  Which cancel is offered comes from the booking itself, so the provider is never asked to
- *  know the difference. In v1 both paths looked identical — a redemption came back as an
- *  ordinary $0 booking — and picking wrong destroyed a paid session, which is why the backend
- *  had to refuse with USE_PACKAGE_CANCEL. Here the right button is simply the only one shown.
+ *  ONE CANCEL AGAIN, since 14 October. There were three — an ordinary one, one that returned a
+ *  package session, and one that returned prepaid money — because a booking could hold value
+ *  that cancelling had to hand back. Packages and prepaid are gone, and with them the only two
+ *  ways a cancellation could destroy something a client had paid for.
  *
- *  There are three now: an ordinary cancel, one that returns a package session, and one that
- *  returns prepaid money. The third was missing for a day — the server action existed, was
- *  tested, and refused the ordinary cancel with a message naming a button nobody had built,
- *  which left the provider reading an instruction they could not follow. Exactly what the
- *  paragraph above says this component exists to prevent.
+ *  What that history leaves behind is the rule this component still exists to keep: which
+ *  cancel is offered comes from the booking itself, never from the provider knowing the
+ *  difference. In v1 both paths looked identical — a redemption came back as an ordinary $0
+ *  booking — and picking wrong destroyed a paid session, which is why the backend had to refuse
+ *  with USE_PACKAGE_CANCEL.
  */
 /** Keep in step with `MIN_REASON` in `./actions`. Duplicated rather than imported because that
  *  module is `server-only` and importing it here would pull the database into the bundle.
@@ -70,11 +68,6 @@ export function AppointmentActions({
   // Over, not merely started. A session still running can be called off; one that has finished
   // has two honest endings, Completed or No-show, and `cancelBooking` refuses it server-side.
   const isFinished = appointment.endTime <= new Date()
-  const restoresSession = appointment.isPackageRedemption
-  const returnsBalance = appointment.isPrepaidRedemption
-  // Either kind of prepaid value coming back. Both refuse the ordinary cancel server-side, so
-  // this decides which of the two specific buttons is offered.
-  const returnsValue = restoresSession || returnsBalance
 
   const run = (fn: (id: string) => Promise<ActionState>) => {
     startTransition(async () => {
@@ -234,15 +227,11 @@ export function AppointmentActions({
       ) : confirming === 'cancel' ? (
         <div className="space-y-2 rounded-field border border-line bg-overlay p-3">
           <p className="text-xs text-ink-secondary">
-            {restoresSession
-              ? 'Cancel this appointment and return the session to the client’s package?'
-              : returnsBalance
-                ? 'Cancel this appointment and put the money back on the client’s prepaid balance? Anything they have already paid on a card is refunded in Stripe, not here.'
-                : asksWhy
-                  ? `Cancel this appointment? The slot reopens straight away for somebody else. ${rentSentence}`
-                  : isRental
-                    ? 'Cancel this appointment? The slot reopens.'
-                    : 'Cancel this appointment? The client’s payment link will be cancelled if it is still unpaid.'}
+            {asksWhy
+              ? `Cancel this appointment? The slot reopens straight away for somebody else. ${rentSentence}`
+              : isRental
+                ? 'Cancel this appointment? The slot reopens.'
+                : 'Cancel this appointment? The client’s payment link will be cancelled if it is still unpaid.'}
           </p>
           {reasonBox('cancel')}
           <div className="flex flex-wrap gap-2">
@@ -250,19 +239,11 @@ export function AppointmentActions({
               size="sm"
               variant="danger"
               disabled={pending || !reasonOk}
-              onClick={() =>
-                run(
-                  restoresSession
-                    ? cancelPackageRedemption
-                    : returnsBalance
-                      ? cancelPrepaidBooking
-                      : (id) => cancelBooking(id, reason),
-                )
-              }
+              onClick={() => run((id) => cancelBooking(id, reason))}
             >
               {pending ? 'Cancelling…' : 'Yes, cancel'}
             </Button>
-            {!returnsValue && canCharge && (
+            {canCharge && (
               <Button
                 size="sm"
                 variant="outline"
@@ -307,11 +288,7 @@ export function AppointmentActions({
               are the two things they actually want. */}
           {!isFinished && (
           <Button size="sm" variant="ghost" disabled={pending} onClick={() => setConfirming('cancel')}>
-            {restoresSession
-              ? 'Cancel and restore session'
-              : returnsBalance
-                ? 'Cancel and return the balance'
-                : 'Cancel'}
+            Cancel
           </Button>
           )}
         </div>

@@ -205,17 +205,14 @@ describe('not blocking over an appointment', () => {
 
 describe('every path that takes laser time', () => {
   it('checks blocked time wherever it checks training courses', async () => {
-    // Five call sites across four files, and a path that forgets one fails silently — only on
-    // the day somebody books into a closed room. Asserted against the source, because there is
-    // no runtime seam that covers all five.
+    // A path that forgets one fails silently — only on the day somebody books into a closed
+    // room. Asserted against the source, because there is no runtime seam that covers them all.
+    //
+    // Two of the four files went on 14 October with packages and prepaid. The list is shorter
+    // and the rule is unchanged: every remaining way of taking laser time asks both questions.
     const { readFileSync } = await import('node:fs')
 
-    const paths = [
-      'app/app/book/actions.ts',
-      'app/app/packages/actions.ts',
-      'app/app/prepaid/actions.ts',
-      'app/app/admin/tools/actions.ts',
-    ]
+    const paths = ['app/app/book/actions.ts', 'app/app/admin/tools/actions.ts']
 
     for (const path of paths) {
       const source = readFileSync(path, 'utf8')

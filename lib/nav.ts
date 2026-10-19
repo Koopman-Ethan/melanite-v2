@@ -1,6 +1,6 @@
 import { isAdmin, isMedicalDirector } from '@/lib/auth/roles'
 import type { SessionUser } from '@/lib/auth/session'
-import { paysRent, sharesRevenue } from '@/lib/revenue-model'
+import { paysRent } from '@/lib/revenue-model'
 
 // The provider sidebar, ported from v1's nav wiring.
 //
@@ -32,7 +32,8 @@ export interface NavItem {
    *  through Melanite, so their own price list and their payouts are how they work. For
    *  everybody else the pages exist and mean nothing, which is why they were unlinked rather
    *  than deleted when the rental model arrived. */
-  splitOnly?: boolean
+  /** Only for a provider billed half their own price — the three Keoni grandfathered. */
+  ownPriceOnly?: boolean
   /** Shown only to a provider who pays rent. Charges is empty and misleading for anybody else:
    *  a 50/50 provider is never charged a rental fee, so the page would list nothing for ever. */
   rentalOnly?: boolean
@@ -80,22 +81,18 @@ const ITEMS: NavItem[] = [
   { label: 'Dashboard', href: '/app/dashboard' },
   { label: 'Appointments', href: '/app/appointments', providerOnly: true },
   { label: 'Charges', href: '/app/charges', providerOnly: true, rentalOnly: true },
-  // Packages, Prepaid, My Services and Earnings came BACK on 12 October, for the three
-  // providers Keoni grandfathered onto the 50/50 split.
+  // MY SERVICES SURVIVES THE CUT, alone of the four that came back on 12 October.
   //
-  // They were unlinked in October when the rental model arrived, on the reasoning that a
-  // package and a prepaid balance are a client paying Melanite in advance — which Melanite no
-  // longer did — and that My Services curated a menu nobody browses. All true of a provider who
-  // pays rent, and none of it true of Leyla, Brittany or Karly: they still bill their clients
-  // through Melanite, so their own price list is how they set what a session costs and their
-  // earnings are what they are owed.
+  // Packages and Prepaid are gone with the feature: both were a client paying Melanite in
+  // advance, and Melanite no longer takes client money from anybody. Earnings was a link to a
+  // page that has never existed — a 404 in three providers' navigation since 12 October — and
+  // there is nothing to earn now that nobody is paid through Melanite.
   //
-  // The pages were never deleted, which is the only reason this is a one-line change rather
-  // than a rebuild. The planned post-cutover commit that removed them does not happen now.
-  { label: 'My Services', href: '/app/services', providerOnly: true, splitOnly: true },
-  { label: 'Packages', href: '/app/packages', providerOnly: true, splitOnly: true },
-  { label: 'Prepaid', href: '/app/prepaid', providerOnly: true, splitOnly: true },
-  { label: 'Earnings', href: '/app/earnings', providerOnly: true, splitOnly: true },
+  // My Services stays, for a different reason than it was restored for. It is no longer a menu
+  // clients browse; it is where Leyla, Brittany and Karly keep the prices that Melanite halves
+  // to work out what they owe. That makes it load-bearing for exactly the three people on
+  // `half_own_price` and meaningless for everybody else, which is what `ownPriceOnly` says.
+  { label: 'My Services', href: '/app/services', providerOnly: true, ownPriceOnly: true },
   { label: 'Daily Room Rental', href: '/app/room-rental', providerOnly: true },
   { label: 'Membership', href: '/app/membership', providerOnly: true },
   { label: 'Calendar', href: '/app/admin/calendar', adminOnly: true },
@@ -121,9 +118,9 @@ export function navFor(user: SessionUser): NavItem[] {
       !(item.adminOnly && !admin) &&
       !(item.directorOnly && !director) &&
       // The billing model decides which half of the app exists for somebody. Note these are
-      // asked of every role, including the house account: Melanite's own appointments are
-      // neither rented nor split, so it gets neither set.
-      !(item.splitOnly && !sharesRevenue(user.revenueModel)) &&
+      // asked of every role, including the house account: Melanite's own appointments are not
+      // rented, so it gets neither set.
+      !(item.ownPriceOnly && user.rentBasis !== 'half_own_price') &&
       !(item.rentalOnly && !paysRent(user.revenueModel)) &&
       // Dashboard is the director's Oversight page, so listing both is one link too many.
       !(item.label === 'Dashboard' && director),
@@ -131,8 +128,8 @@ export function navFor(user: SessionUser): NavItem[] {
 }
 
 /** Marks the active item. Exact match for `/app/dashboard` and `/app/admin` so that a nested
- *  admin route does not also light up Dashboard; prefix match elsewhere so `/app/packages/new`
- *  keeps Packages highlighted. */
+ *  admin route does not also light up Dashboard; prefix match elsewhere so `/app/admin/training/new`
+ *  keeps Training highlighted. */
 export function isActive(pathname: string, href: string): boolean {
   if (href === '/app/dashboard' || href === '/app/admin') return pathname === href
   return pathname === href || pathname.startsWith(`${href}/`)

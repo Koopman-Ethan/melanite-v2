@@ -5,16 +5,12 @@ import { and, eq, isNull } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import {
   getBookingCheckout,
-  getPackageCheckout,
-  getPrepaidCheckout,
 } from '@/lib/db/queries/checkout'
 import {
   bookings,
   checkoutLinks,
   clients,
-  packageCheckoutLinks,
   platformSettings,
-  prepaidCheckoutLinks,
   providers,
 } from '@/lib/db/schema'
 import { splitClientPayment, splitHouse, toCents, toMoney } from '@/lib/money'
@@ -195,237 +191,6 @@ export async function createBookingIntent(input: {
   }
 }
 
-/** Creates the PaymentIntent for a package link. Same destination-charge shape as a booking. */
-export async function createPackageIntent(input: {
-  token: string
-  tipAmount: number
-  clientName: string | null
-  clientEmail: string | null
-  saveCard: boolean
-}): Promise<IntentState> {
-  const checkout = await getPackageCheckout(input.token)
-  if (!checkout) return { error: 'That payment link does not exist.' }
-  if (checkout.state !== 'payable') return { error: notPayableMessage(checkout.state) }
-
-  const tip = Number.isFinite(input.tipAmount) ? Math.max(input.tipAmount, 0) : 0
-
-  const [link] = await db
-    .select({
-      id: packageCheckoutLinks.id,
-      providerId: packageCheckoutLinks.providerId,
-      clientId: packageCheckoutLinks.clientId,
-      templateId: packageCheckoutLinks.packageTemplateId,
-    })
-    .from(packageCheckoutLinks)
-    .where(eq(packageCheckoutLinks.id, checkout.linkId))
-    .limit(1)
-
-  if (!link) return { error: 'That payment link does not exist.' }
-
-  const [provider] = await db
-    .select({
-      stripeAccountId: providers.stripeAccountId,
-      revenueModel: providers.revenueModel,
-    })
-    .from(providers)
-    .where(eq(providers.id, link.providerId))
-    .limit(1)
-
-  // Same rule as a booking: when the provider IS Melanite there is nothing to transfer and no
-  // Connect account to require. See `providerRevenueModel` in the schema.
-  const house = !!provider && isHouse(provider.revenueModel)
-
-  if (!house && !provider?.stripeAccountId) {
-    return { error: 'This provider cannot accept payments yet. Contact them directly.' }
-  }
-
-  const name = input.clientName?.trim() || checkout.clientName
-  const email = input.clientEmail?.trim() || checkout.clientEmail
-  // A package creates a durable balance owned by a client row, so unlike a booking there is no
-  // walk-in path — without an identity there is nothing to attach the sessions to.
-  if (!email) return { error: 'Enter an email so your package can be tracked.' }
-  // The package balance is keyed on this address and the receipt goes to it. A typo here means
-  // a client who paid four figures and can never be found by the email they gave.
-  if (!isValidEmail(email)) return { error: 'That doesn’t look like an email address.' }
-
-  const settings = await getSplitSettings()
-  const priceCents = toCents(checkout.price)
-  const tipCents = toCents(tip)
-  const { melaniteCutCents: feeCents } = house
-    ? splitHouse({ grossCents: priceCents, tipCents })
-    : splitClientPayment({
-        grossCents: priceCents,
-        tipCents,
-        providerSharePct: settings.providerSharePct,
-      })
-
-  try {
-    const clientId = await ensureClientRow({
-      clientId: link.clientId,
-      name: name ?? null,
-      email,
-      phone: null,
-    })
-
-    const customerId = await ensureStripeCustomer(clientId, name, email)
-
-    const intent = await stripePost<{ id: string; client_secret: string }>('/payment_intents', {
-      amount: priceCents + tipCents,
-      currency: 'usd',
-      customer: customerId,
-      payment_method_types: PAYMENT_METHODS,
-      receipt_email: email,
-      ...(house
-        ? {}
-        : {
-            transfer_data: { destination: provider!.stripeAccountId },
-            application_fee_amount: feeCents,
-          }),
-      ...(input.saveCard ? { setup_future_usage: 'off_session' } : {}),
-      metadata: {
-        type: 'package_purchase',
-        revenue_model: provider?.revenueModel ?? 'split',
-        package_template_id: link.templateId,
-        package_checkout_link_id: link.id,
-        provider_id: link.providerId,
-        client_id: clientId,
-        tip_amount: toMoney(toCents(tip)),
-        save_card: input.saveCard ? '1' : '0',
-        card_policy_version: settings.cardPolicyVersion,
-      },
-    })
-
-    await db
-      .update(packageCheckoutLinks)
-      .set({
-        tipAmount: toMoney(toCents(tip)),
-        clientId,
-        clientName: name,
-        clientEmail: email,
-        stripeCustomerId: customerId,
-        stripePaymentIntentId: intent.id,
-      })
-      .where(eq(packageCheckoutLinks.id, link.id))
-
-    return { clientSecret: intent.client_secret, amount: (priceCents + tipCents) / 100 }
-  } catch (err) {
-    return { error: friendlyStripeError(err, 'Could not start the payment. Try again shortly.') }
-  }
-}
-
-/** Creates the PaymentIntent for a prepaid balance.
- *
- *  A destination charge like a package, and split the same way — the provider's share reaches
- *  them when the balance is BOUGHT, not when it is eventually used. That is what Keoni asked
- *  for, and it is why redeeming later moves no money at all.
- *
- *  No tip. There is nothing to tip for yet; the treatment has not happened, and the tip on the
- *  eventual appointment is collected there, where all of it goes to the provider.
- *
- *  No card is saved either. The consent wording exists to authorise no-show fees against a
- *  future appointment, and nobody has booked one — asking for that authorisation months early,
- *  on a purchase that is not an appointment, is consent collected under the wrong pretext.
- */
-export async function createPrepaidIntent(input: {
-  token: string
-  purchaserEmail: string | null
-}): Promise<IntentState> {
-  const checkout = await getPrepaidCheckout(input.token)
-  if (!checkout) return { error: 'That payment link does not exist.' }
-  if (checkout.state !== 'payable') return { error: notPayableMessage(checkout.state) }
-
-  const [link] = await db
-    .select({
-      id: prepaidCheckoutLinks.id,
-      providerId: prepaidCheckoutLinks.providerId,
-      clientId: prepaidCheckoutLinks.clientId,
-      amount: prepaidCheckoutLinks.amount,
-      purchaserName: prepaidCheckoutLinks.purchaserName,
-    })
-    .from(prepaidCheckoutLinks)
-    .where(eq(prepaidCheckoutLinks.id, checkout.linkId))
-    .limit(1)
-
-  if (!link) return { error: 'That payment link does not exist.' }
-
-  const [provider] = await db
-    .select({
-      stripeAccountId: providers.stripeAccountId,
-      revenueModel: providers.revenueModel,
-    })
-    .from(providers)
-    .where(eq(providers.id, link.providerId))
-    .limit(1)
-
-  // Same rule as a booking: when the provider IS Melanite there is nothing to transfer and no
-  // Connect account to require. See `providerRevenueModel` in the schema.
-  const house = !!provider && isHouse(provider.revenueModel)
-
-  if (!house && !provider?.stripeAccountId) {
-    return { error: 'This provider cannot accept payments yet. Contact them directly.' }
-  }
-
-  // The receipt goes to whoever is PAYING, which for a gift is not the person the balance
-  // belongs to. Sending it to the beneficiary would tell somebody what their present cost.
-  const receiptEmail = input.purchaserEmail?.trim() || checkout.purchaserEmail || checkout.clientEmail
-  if (receiptEmail && !isValidEmail(receiptEmail)) {
-    return { error: 'That doesn’t look like an email address.' }
-  }
-
-  const settings = await getSplitSettings()
-  const amountCents = toCents(link.amount)
-  const { melaniteCutCents: feeCents } = house
-    ? splitHouse({ grossCents: amountCents, tipCents: 0 })
-    : splitClientPayment({
-        grossCents: amountCents,
-        tipCents: 0,
-        providerSharePct: settings.providerSharePct,
-      })
-
-  try {
-    const customerId = await ensureStripeCustomer(
-      link.clientId,
-      checkout.clientName,
-      checkout.clientEmail,
-    )
-
-    const intent = await stripePost<{ id: string; client_secret: string }>('/payment_intents', {
-      amount: amountCents,
-      currency: 'usd',
-      customer: customerId,
-      payment_method_types: PAYMENT_METHODS,
-      ...(receiptEmail ? { receipt_email: receiptEmail } : {}),
-      ...(house
-        ? {}
-        : {
-            transfer_data: { destination: provider!.stripeAccountId },
-            application_fee_amount: feeCents,
-          }),
-      metadata: {
-        type: 'prepaid_purchase',
-        revenue_model: provider?.revenueModel ?? 'split',
-        prepaid_checkout_link_id: link.id,
-        provider_id: link.providerId,
-        // The BENEFICIARY. The handler attaches the balance to this, never to whoever paid.
-        client_id: link.clientId,
-        ...(link.purchaserName ? { purchaser_name: link.purchaserName } : {}),
-        ...(receiptEmail ? { purchaser_email: receiptEmail } : {}),
-      },
-    })
-
-    await db
-      .update(prepaidCheckoutLinks)
-      .set({ stripeCustomerId: customerId, stripePaymentIntentId: intent.id })
-      .where(eq(prepaidCheckoutLinks.id, link.id))
-
-    return { clientSecret: intent.client_secret, amount: amountCents / 100 }
-  } catch (err) {
-    return { error: friendlyStripeError(err, 'Could not start the payment. Try again shortly.') }
-  }
-}
-
-// ---------------------------------------------------------------------------
-
 async function getSplitSettings() {
   const [row] = await db
     .select({
@@ -537,7 +302,7 @@ function notPayableMessage(state: string): string {
 }
 
 /**
- * Records that a client left for Cherry.
+ * Records that a client left for Cherry to finance an appointment.
  *
  * Cherry is a hand-off, not an integration: the client finishes on Cherry's site and the money
  * reaches Keoni directly, so no webhook ever comes back here. Without this the link sits at
@@ -546,39 +311,20 @@ function notPayableMessage(state: string): string {
  * remembering to pass a message on.
  *
  * This records INTENT, never payment. It says they went, not that they paid, and the wording
- * everywhere downstream says the same — a package marked paid because somebody clicked a link
- * would be worse than no signal at all.
+ * everywhere downstream says the same.
  *
- * Deliberately forgiving: the client is mid-checkout on a four-figure purchase, and a failure
- * to write a tracking timestamp must never stand between them and Cherry.
- */
-export async function noteCherryHandoff(token: string): Promise<void> {
-  try {
-    await db
-      .update(packageCheckoutLinks)
-      .set({ cherryStartedAt: new Date() })
-      .where(
-        and(
-          eq(packageCheckoutLinks.token, token),
-          eq(packageCheckoutLinks.status, 'pending'),
-          isNull(packageCheckoutLinks.cherryStartedAt),
-        ),
-      )
-  } catch (err) {
-    console.error('[cherry] could not record package hand-off for', token, err)
-  }
-}
-
-/**
- * The same, for an appointment.
- *
- * A separate function rather than a `table` parameter, because the two token spaces are
- * separate and the tables have near-identical column lists. Passing the wrong one would compile
- * cleanly, match nothing, and silently record nothing — which is exactly how `cherry_started_at`
- * ended up on the wrong table the first time round.
+ * WRITES TO `checkout_links`. There was a package version of this too, deleted on 14 October,
+ * and the two tables have near-identical column lists — so writing to the wrong one compiled
+ * cleanly, matched nothing and recorded nothing, which is exactly how `cherry_started_at` ended
+ * up on the wrong table the first time round. Losing the package half also loses the second
+ * writer that would have made a drift back obvious, so
+ * `test/cherry-and-reconciliation.test.ts` holds this one to the right table instead.
  *
  * `isNull` keeps the FIRST hand-off. Somebody who clicks through to Cherry, comes back, and
  * clicks again has been waiting since the first click, and that is the number Keoni chases on.
+ *
+ * Deliberately forgiving: the client is mid-checkout, and a failure to write a tracking
+ * timestamp must never stand between them and Cherry.
  */
 export async function noteBookingCherryHandoff(token: string): Promise<void> {
   try {

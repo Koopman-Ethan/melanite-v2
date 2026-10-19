@@ -8,8 +8,6 @@ import {
   bookings,
   checkoutLinks,
   ledgerEntries,
-  packageCheckoutLinks,
-  packageTemplates,
   platformSettings,
   providerServices,
   providers,
@@ -92,9 +90,10 @@ export async function getUnpaidBookings(limit = 50): Promise<UnpaidBooking[]> {
 
 export interface CherryHandoff {
   id: string
-  /** Which financing route this is, because the two are settled differently: a package is
-   *  recorded as a package payment, an appointment against the appointment itself. */
-  kind: 'package' | 'booking'
+  /** Which financing route this is. Only appointments now — packages were removed on
+   *  14 October — but the field stays rather than being dropped, because the shape is what the
+   *  tools page renders and a second route through Cherry is more likely than not. */
+  kind: 'booking'
   clientName: string | null
   clientEmail: string | null
   providerName: string
@@ -117,38 +116,15 @@ export interface CherryHandoff {
  *  the thing is paid for by any route — including Keoni recording it by hand — so it cannot
  *  linger after it has been dealt with.
  *
- *  Packages and appointments in ONE list, oldest first. Two lists would mean two places to
- *  remember to look, and the newer one is the one that gets forgotten — the entire failure this
- *  screen exists to prevent. Merged in JS rather than a SQL union because the two sides join
- *  through completely different tables; a union would need matching column lists across both,
- *  which is how `cherry_started_at` got added to the wrong table in the first place.
+ *  APPOINTMENTS ONLY since 14 October. It used to merge package links in as well, and the
+ *  merge is gone with the feature — but `package_checkout_links` and its historical
+ *  `cherry_started_at` rows are untouched, because a client who financed a package through
+ *  Cherry really did, and the ledger still points at it.
+ *
+ *  Oldest first: the one waiting longest is the one to chase.
  */
 export async function getCherryHandoffs(limit = 25): Promise<CherryHandoff[]> {
-  const [packages, appointments] = await Promise.all([
-    db
-      .select({
-        id: packageCheckoutLinks.id,
-        clientName: packageCheckoutLinks.clientName,
-        clientEmail: packageCheckoutLinks.clientEmail,
-        providerName: sql<string>`${providers.firstName} || ' ' || ${providers.lastName}`,
-        what: packageTemplates.name,
-        price: packageCheckoutLinks.price,
-        startedAt: sql<Date>`${packageCheckoutLinks.cherryStartedAt}`,
-        waitingDays: sql<number>`floor(extract(epoch from now() - ${packageCheckoutLinks.cherryStartedAt}) / 86400)::int`,
-      })
-      .from(packageCheckoutLinks)
-      .innerJoin(providers, eq(packageCheckoutLinks.providerId, providers.id))
-      .innerJoin(packageTemplates, eq(packageCheckoutLinks.packageTemplateId, packageTemplates.id))
-      .where(
-        and(
-          isNotNull(packageCheckoutLinks.cherryStartedAt),
-          eq(packageCheckoutLinks.status, 'pending'),
-        ),
-      )
-      .orderBy(asc(packageCheckoutLinks.cherryStartedAt))
-      .limit(limit),
-
-    db
+  const appointments = await db
       .select({
         id: checkoutLinks.id,
         clientName: bookings.clientName,
@@ -180,16 +156,9 @@ export async function getCherryHandoffs(limit = 25): Promise<CherryHandoff[]> {
         ),
       )
       .orderBy(asc(checkoutLinks.cherryStartedAt))
-      .limit(limit),
-  ])
+      .limit(limit)
 
-  return [
-    ...packages.map((p) => ({ ...p, kind: 'package' as const })),
-    ...appointments.map((b) => ({ ...b, kind: 'booking' as const })),
-  ]
-    // Oldest first: the one waiting longest is the one to chase.
-    .sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime())
-    .slice(0, limit)
+  return appointments.map((b) => ({ ...b, kind: 'booking' as const }))
 }
 
 export interface ManualEntry {

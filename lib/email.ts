@@ -383,39 +383,6 @@ export function bookingCancelledEmail(input: {
   }
 }
 
-export function packageLinkEmail(input: {
-  clientName: string | null
-  providerName: string
-  packageName: string
-  sessions: number
-  amount: string
-  url: string
-}): Omit<EmailMessage, 'to'> {
-  const first = input.clientName?.split(' ')[0] ?? 'there'
-  return {
-    subject: `Your ${input.packageName} from ${input.providerName}`,
-    text: [
-      `Hi ${first},`,
-      '',
-      `${input.packageName} — ${input.sessions} sessions with ${input.providerName}`,
-      `Total: ${input.amount}`,
-      '',
-      'Purchase here:',
-      input.url,
-      '',
-      'Monthly payment plans through Cherry are available at checkout.',
-    ].join('\n'),
-    html: wrap(
-      input.packageName,
-      p(`Hi ${first},`) +
-        p(`<strong>${input.sessions} sessions</strong> with ${input.providerName}`) +
-        p(`Total: <strong>${input.amount}</strong>`) +
-        p('Monthly payment plans through Cherry are available at checkout.'),
-      { label: `Purchase — ${input.amount}`, url: input.url },
-    ),
-  }
-}
-
 /** Tells a client their card on file was charged.
  *
  *  Sent because taking money from someone who is not present and saying nothing is indefensible

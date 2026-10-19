@@ -1006,8 +1006,27 @@ export const endOfUseChecklists = pgTable('end_of_use_checklists', {
 ])
 
 // ---------------------------------------------------------------------------
-// Packages
+// Packages and prepaid balances — HISTORICAL. Nothing writes to these any more.
 // ---------------------------------------------------------------------------
+//
+// The feature was removed on 14 October, when Keoni took Melanite out of client payments
+// entirely. The pages, queries, actions, emails and webhook handlers are gone; these tables
+// are not, and must not be.
+//
+// WHY THEY STAY. Real clients paid real money for packages and prepaid balances, and the
+// ledger still points at the rows recording it. `test/ledger-invariants.test.ts` asserts that
+// a `subject_type = 'client_package'` entry resolves to a live `client_packages` row — drop
+// the table and that invariant fails, correctly. "Get rid of the functionality" is not "erase
+// what clients paid". The enum VALUES stay for the same reason, and because Postgres cannot
+// DROP VALUE without recreating three shared types.
+//
+// Karly was owed nine sessions worth $411.30 when this landed; `scripts/cutover-grant-sessions.ts`
+// converts outstanding obligations like that into fee-free `provider_packs` grants, which is
+// where an unfinished client package goes now.
+//
+// NOT TO BE CONFUSED WITH `provider_packs` / `provider_pack_redemptions`, further down. Those
+// are the RENTAL grant — sessions a provider owes no rent on — and are fully live. The string
+// `pack` matches both; `package` matches only these, which is the safer way to search.
 
 /** What a provider sells. Soft-deleted via `active`, never removed — sold packages
  *  reference the template they came from. */
@@ -1143,7 +1162,7 @@ export const packageCheckoutLinks = pgTable('package_checkout_links', {
 ])
 
 // ---------------------------------------------------------------------------
-// Prepaid balances
+// Prepaid balances — HISTORICAL. See the note on the Packages section above.
 // ---------------------------------------------------------------------------
 
 /** Money paid up front and spent later on whatever the client books.

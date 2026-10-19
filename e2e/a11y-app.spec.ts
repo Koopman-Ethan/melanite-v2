@@ -27,8 +27,6 @@ const PROVIDER_PAGES = [
   { path: '/app/dashboard', name: 'dashboard' },
   { path: '/app/book', name: 'book laser time' },
   { path: '/app/appointments', name: 'appointments' },
-  { path: '/app/earnings', name: 'earnings' },
-  { path: '/app/packages', name: 'packages' },
   { path: '/app/room-rental', name: 'room rental' },
   { path: '/app/services', name: 'my services' },
   { path: '/app/membership', name: 'membership' },

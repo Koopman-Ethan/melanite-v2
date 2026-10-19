@@ -88,6 +88,13 @@ export interface SessionUser {
    *  its comment argues: whether somebody treats clients and how their money works are separate
    *  questions, and conflating them is how an admin who is also a provider loses a menu. */
   revenueModel: (typeof providers.$inferSelect)['revenueModel']
+  /** How their rent is worked out. On the session for the same reason as `revenueModel`: the
+   *  navigation is rendered by client components that cannot query, and this decides one item.
+   *
+   *  My Services exists only for a provider billed half their own price, because their price
+   *  list is the input to what Melanite charges them. For everybody else the fee comes from the
+   *  published schedule and that page would be a menu of numbers that decide nothing. */
+  rentBasis: (typeof providers.$inferSelect)['rentBasis']
 }
 
 /** Resolves the cookie to a live provider, or null. Reads the provider row every time on
@@ -116,6 +123,7 @@ export async function getSessionUser(): Promise<SessionUser | null> {
       licenseExpiry: providers.licenseExpiry,
       requiresPasswordReset: providers.requiresPasswordReset,
       revenueModel: providers.revenueModel,
+      rentBasis: providers.rentBasis,
     })
     .from(sessions)
     .innerJoin(providers, eq(sessions.providerId, providers.id))

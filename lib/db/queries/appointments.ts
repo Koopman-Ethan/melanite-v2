@@ -8,8 +8,6 @@ import {
   bookings,
   checkoutLinks,
   endOfUseChecklists,
-  packageRedemptions,
-  prepaidRedemptions,
   providerServices,
   services,
 } from '@/lib/db/schema'
@@ -58,17 +56,6 @@ export interface Appointment {
   serviceName: string
   serviceColor: string | null
   providerServiceId: string
-  /** True when a live (non-voided) redemption points at this booking.
-   *
-   *  This is what decides which cancel action is legal. v1 could not tell from the booking
-   *  alone — a redemption came back as an ordinary $0 booking — so its cancel endpoint had to
-   *  look for a redemption row and refuse with USE_PACKAGE_CANCEL. Cancelling the wrong way
-   *  would have destroyed a session the client had already paid for. */
-  isPackageRedemption: boolean
-  /** Drew on a prepaid dollar balance. Decides which cancel is offered, exactly as the
-   *  flag above does — cancelling one of these as an ordinary booking would keep the
-   *  client's money and give them nothing. */
-  isPrepaidRedemption: boolean
   /** Whether the laser was photographed around this session. Selected here rather than fetched
    *  per card, because the appointments list is the one place a provider is already looking on
    *  the day they need to do it. */
@@ -144,20 +131,6 @@ export async function getAppointments(
       // `package_redemptions.booking_id` to `package_redemptions.id` and was false for every
       // appointment that has ever existed.
       //
-      // Not a cosmetic flag: it decides which cancel the provider is offered. Always-false
-      // meant a package redemption was cancelled as an ordinary booking and the client's paid
-      // session was NOT returned — the exact v1 failure the comment on AppointmentActions says
-      // this field exists to prevent.
-      isPackageRedemption: sql<boolean>`exists (
-        select 1 from ${packageRedemptions}
-        where ${packageRedemptions}.booking_id = ${bookings}.id
-          and ${packageRedemptions}.voided_at is null
-      )`,
-      isPrepaidRedemption: sql<boolean>`exists (
-        select 1 from ${prepaidRedemptions}
-        where ${prepaidRedemptions}.booking_id = ${bookings}.id
-          and ${prepaidRedemptions}.voided_at is null
-      )`,
       checkoutToken: checkoutLinks.token,
       checkoutStatus: checkoutLinks.status,
       checkoutExpiresAt: checkoutLinks.expiresAt,
@@ -262,20 +235,6 @@ async function getAppointmentsById(providerId: string, bookingId: string): Promi
       // `package_redemptions.booking_id` to `package_redemptions.id` and was false for every
       // appointment that has ever existed.
       //
-      // Not a cosmetic flag: it decides which cancel the provider is offered. Always-false
-      // meant a package redemption was cancelled as an ordinary booking and the client's paid
-      // session was NOT returned — the exact v1 failure the comment on AppointmentActions says
-      // this field exists to prevent.
-      isPackageRedemption: sql<boolean>`exists (
-        select 1 from ${packageRedemptions}
-        where ${packageRedemptions}.booking_id = ${bookings}.id
-          and ${packageRedemptions}.voided_at is null
-      )`,
-      isPrepaidRedemption: sql<boolean>`exists (
-        select 1 from ${prepaidRedemptions}
-        where ${prepaidRedemptions}.booking_id = ${bookings}.id
-          and ${prepaidRedemptions}.voided_at is null
-      )`,
       checkoutToken: checkoutLinks.token,
       checkoutStatus: checkoutLinks.status,
       checkoutExpiresAt: checkoutLinks.expiresAt,
