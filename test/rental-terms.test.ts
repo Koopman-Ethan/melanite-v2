@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  rentalTermsFor,
   RENTAL_TERMS,
   RENTAL_TERMS_VERSION,
   hasAcceptedRentalTerms,
@@ -16,7 +17,7 @@ import {
 describe('the version', () => {
   it('is the one currently in force', () => {
     // Change this deliberately, at the same time as the terms themselves, and never for a typo.
-    expect(RENTAL_TERMS_VERSION).toBe('2026-10-07.v3')
+    expect(RENTAL_TERMS_VERSION).toBe('2026-10-19.v5')
   })
 
   it('sorts after an earlier version', () => {
@@ -77,18 +78,26 @@ describe('the terms themselves', () => {
     // something to a provider's money that they were never told about, which is the failure
     // this list exists to prevent — so removing one has to break a test.
     //
-    //   fee_per_session      chargeRentalFee, from createBooking
-    //   decline_no_booking   createBooking deletes the booking on a declined card
+    //   fee_per_session      settleDueRent, twelve hours after the session ends
+    //   card_on_file         the unpaid-rent gate on createBooking
     //   no_show_refund       heldRentalFor gates markNoShow and cancelBooking; the fee is held
-  //                        and reviewRentalFee settles it. NOT releaseRentalForBooking any more —
-  //                        that is now reachable only from Keoni's queue.
+    //                        and reviewRentalFee settles it
+    //   late_cancellation    cancelledLate, against platform_settings.late_cancellation_hours
+    //   half_own_price       feeForProviderService, and the rent_to_confirm queue
     //   granted_sessions     claimPackSession, oldest first
     //   fee_changes          hasAcceptedRentalTerms gates createBooking
+    //
+    // `decline_no_booking` was dropped in v5 and is NOT an omission. It said a declined card
+    // meant no appointment, which has been false since 9 October: there is no card transaction
+    // at booking to decline. What replaced it is `card_on_file` — the gate is now on the NEXT
+    // booking, not this one.
     const keys = RENTAL_TERMS.map((t) => t.key)
     for (const required of [
       'fee_per_session',
-      'decline_no_booking',
+      'card_on_file',
       'no_show_refund',
+      'late_cancellation',
+      'half_own_price',
       'granted_sessions',
       'fee_changes',
     ]) {
@@ -98,6 +107,39 @@ describe('the terms themselves', () => {
 
   it('says something substantive for every term', () => {
     for (const term of RENTAL_TERMS) {
+      expect(term.text.length, `${term.key} is too short to mean anything`).toBeGreaterThan(40)
+    }
+  })
+})
+
+describe('which terms a provider actually sees', () => {
+  // One term is true of exactly three people. A consent screen that describes an arrangement
+  // the reader is not on is one they learn to scroll past, and the next real change goes with
+  // it — the same reasoning that kept a hollow "terms" section off the 50/50 account page.
+
+  it('tells a half-own-price provider how their fee is worked out', () => {
+    const keys = rentalTermsFor('half_own_price').map((t) => t.key)
+    expect(keys).toContain('half_own_price')
+  })
+
+  it('never shows that term to anybody on the published schedule', () => {
+    const keys = rentalTermsFor('tier').map((t) => t.key)
+    expect(keys, 'a tier provider would be agreeing to billing they are not on').not.toContain(
+      'half_own_price',
+    )
+  })
+
+  it('shows everybody everything else', () => {
+    // The filter must hide one term, not quietly fork the list into two that drift apart.
+    const tier = rentalTermsFor('tier').map((t) => t.key)
+    const own = rentalTermsFor('half_own_price').map((t) => t.key)
+
+    expect(own.filter((k) => k !== 'half_own_price')).toEqual(tier)
+    expect(tier.length).toBeGreaterThan(5)
+  })
+
+  it('says something substantive whichever list you are on', () => {
+    for (const term of [...rentalTermsFor('tier'), ...rentalTermsFor('half_own_price')]) {
       expect(term.text.length, `${term.key} is too short to mean anything`).toBeGreaterThan(40)
     }
   })

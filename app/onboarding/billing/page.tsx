@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
 import { providers } from '@/lib/db/schema'
-import { hasAcceptedRentalTerms, RENTAL_TERMS } from '@/lib/rental-terms'
+import { hasAcceptedRentalTerms, rentalTermsFor } from '@/lib/rental-terms'
 import { getLiveSchedule } from '@/lib/rental/schedule'
 
 import { requireOnboardingStep } from '../guard'
@@ -27,6 +27,7 @@ export default async function BillingStep() {
       cardExpYear: providers.billingCardExpYear,
       rentalTermsVersion: providers.rentalTermsVersion,
       rentalScheduleVersion: providers.rentalScheduleVersion,
+      rentBasis: providers.rentBasis,
     })
     .from(providers)
     .where(eq(providers.id, user.id))
@@ -68,7 +69,10 @@ export default async function BillingStep() {
             : null
         }
         termsAccepted={hasAcceptedRentalTerms(row, schedule.version)}
-        terms={RENTAL_TERMS.map((t) => ({ key: t.key, text: t.text }))}
+        // Filtered to THIS provider's arrangement. One term applies to exactly three people,
+        // and showing it to anybody else would describe billing they are not on — a consent
+        // screen that says untrue things about the reader is one that stops being read.
+        terms={rentalTermsFor(row?.rentBasis ?? 'tier').map((t) => ({ key: t.key, text: t.text }))}
         // The fee schedule is part of what is being agreed to, so it is on the screen where the
         // agreeing happens rather than a link somebody could reasonably not follow.
         // The schedule actually in force, not the one the code shipped with — a provider is
