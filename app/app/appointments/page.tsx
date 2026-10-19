@@ -212,22 +212,30 @@ function AppointmentCard({
             hasEmail={Boolean(appointment.clientEmail)}
           />
         )}
-        <CloseoutPrompt appointment={appointment} />
-        {keoniSetsFee && <ReceiptPrompt appointment={appointment} />}
+        <CloseoutPrompt appointment={appointment} asksForReceipt={keoniSetsFee} />
+        {/* The standalone receipt form is only for AMENDING now. Sending it is part of closing
+            out — see `EndOfUseChecklist`. It used to be the primary prompt and that was wrong
+            in a way Keoni's queue made obvious: a session could be closed out, plainly
+            delivered, and still say "waiting on their receipt", because the provider had
+            finished with the appointment and had no reason to come back to it. */}
+        {keoniSetsFee && appointment.receiptAmountCents !== null && (
+          <ReceiptPrompt appointment={appointment} />
+        )}
       </div>
     </li>
   )
 }
 
-/** Asking what they charged, on a finished session.
+/** CORRECTING what they said they charged, after the fact.
  *
- *  Only for the three whose fee Keoni sets — everybody else is charged the published schedule
- *  and Melanite needs nothing from them.
+ *  The sending happens at close-out. This is the amendment path: a provider who typed the wrong
+ *  figure must be able to fix it before Keoni acts, and after she has acted the item has left
+ *  her queue anyway. Rendered only once something has been sent, so it is never the first time
+ *  somebody is asked.
  *
- *  Same gating as the close-out prompt and for the same reasons: nothing before the session has
- *  ended, and nothing on a cancellation or a no-show, which never produced a receipt because
- *  they never produced a treatment. Those go to Keoni through `heldRent` instead, where the
- *  question is whether anything is owed at all rather than how much. */
+ *  Nothing on a cancellation or a no-show: those never produced a treatment, so there is no
+ *  receipt. They reach Keoni through `heldRent`, where the question is whether anything is owed
+ *  at all rather than how much. */
 function ReceiptPrompt({ appointment }: { appointment: Appointment }) {
   if (appointment.status === 'cancelled' || appointment.status === 'no_show') return null
   if (appointment.endTime > new Date()) return null
@@ -253,14 +261,25 @@ function ReceiptPrompt({ appointment }: { appointment: Appointment }) {
  *  Only on a session that has finished and is still inside its window. A prompt on an appointment
  *  three weeks out is noise, and one from last month cannot be answered truthfully any more.
  *  Cancelled and no-show bookings never touched the machine, so they get nothing. */
-function CloseoutPrompt({ appointment }: { appointment: Appointment }) {
+function CloseoutPrompt({
+  appointment,
+  asksForReceipt,
+}: {
+  appointment: Appointment
+  asksForReceipt: boolean
+}) {
   if (appointment.status === 'cancelled' || appointment.status === 'no_show') return null
   if (appointment.endTime > new Date()) return null
   if (!closeoutWindowOpen(appointment)) return null
 
   return (
     <div className="mt-3 border-t border-line pt-3">
-      <EndOfUseChecklist bookingId={appointment.id} recorded={appointment.closeout} />
+      <EndOfUseChecklist
+        bookingId={appointment.id}
+        recorded={appointment.closeout}
+        asksForReceipt={asksForReceipt}
+        sentAmountCents={appointment.receiptAmountCents}
+      />
     </div>
   )
 }

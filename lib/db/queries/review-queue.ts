@@ -292,6 +292,12 @@ export async function rentToConfirm(): Promise<QueueItem[]> {
       claimedCents: bookings.receiptAmountCents,
       receiptKey: bookings.receiptStorageKey,
       receiptAt: bookings.receiptUploadedAt,
+      /** Whether they have signed the session off. Sending what they charged is PART of
+       *  closing out, so a missing figure on a closed-out session is a different situation
+       *  from one nobody has touched — and the row should say which. */
+      closedOut: sql<boolean>`exists (
+        select 1 from end_of_use_checklists c where c.booking_id = bookings.id
+      )`,
     })
     .from(bookings)
     .innerJoin(providers, eq(bookings.providerId, providers.id))
@@ -343,9 +349,14 @@ export async function rentToConfirm(): Promise<QueueItem[]> {
           ? ' — you have set a figure'
           : r.claimedCents !== null
             ? ` — they charged their client $${(r.claimedCents / 100).toFixed(2)}`
-            : ' — waiting on their receipt'),
+            : // NOT "waiting on their receipt" any more. Sending it is part of closing out, so
+              // a session with no figure is one nobody has signed off — which is a different
+              // thing to chase, and chasing the wrong one wastes Keoni's time on a provider who
+              // has already done what was asked.
+              ' — not closed out yet, so nothing has been sent'),
       meta: {
         adjusted: cents === null ? null : 'yes',
+        closedOut: r.closedOut ? 'yes' : null,
         /** What they said, as a display string. The figure Keoni reads and acts on in the
          *  ordinary case — the document is for when it does not look right. */
         claimed: r.claimedCents === null ? null : (r.claimedCents / 100).toFixed(2),

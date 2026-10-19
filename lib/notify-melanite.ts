@@ -352,6 +352,7 @@ export async function notifyProviderCharged(input: {
         firstName: providers.firstName,
         cardLast4: providers.billingCardLast4,
         wants: providers.notifyBookingConfirmed,
+        rentBasis: providers.rentBasis,
       })
       .from(providers)
       .where(eq(providers.id, input.providerId))
@@ -367,6 +368,10 @@ export async function notifyProviderCharged(input: {
         when: appointmentWhen(input.when),
         charged: `$${toMoney(input.amountCents)}`,
         cardLast4: provider.cardLast4,
+        // Whose number this is. For the three, Keoni worked it out from the receipt they sent;
+        // for everybody else it came off the published schedule. Saying which answers the
+        // question the email would otherwise provoke.
+        setByMelanite: provider.rentBasis === 'keoni_sets',
         url: `${await appOrigin()}/app/charges`,
       }),
     })

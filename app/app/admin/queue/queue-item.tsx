@@ -242,7 +242,9 @@ export function QueueRow({
               disabled={pending || !figure || Number(figure) <= 0}
               onClick={() => run(() => confirmSessionRent(item.id, Number(figure)))}
             >
-              {pending ? 'Charging…' : figure ? `Charge ${usd(figure)}` : 'Charge'}
+              {/* "Charge $0.00" on a disabled button reads as an offer to charge nothing.
+                  Only names a figure once there is one worth naming. */}
+              {pending ? 'Charging…' : Number(figure) > 0 ? `Charge ${usd(figure)}` : 'Charge'}
             </Button>
 
             <Button
@@ -281,8 +283,10 @@ export function QueueRow({
                     ' No receipt attached.'
                   )}
                 </>
+              ) : item.meta.closedOut === 'yes' ? (
+                'Closed out, but no figure came with it — ask them what they charged.'
               ) : (
-                'Nothing sent yet. Melanite works out no figure for them.'
+                'They have not closed out this session yet. The figure comes with that.'
               )}
             </span>
           </>

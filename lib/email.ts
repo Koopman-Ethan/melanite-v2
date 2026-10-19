@@ -550,8 +550,18 @@ export function providerPaidEmail(input: {
  *  reconcile a statement line against "a $60 charge" — and the card is the thing most likely to
  *  be wrong at the moment it matters, because an expired one fails the booking outright.
  *
- *  Says how to get it back. A no-show refund that nobody knows about is a refund nobody claims,
- *  and this is the message they will still have in their inbox when the client does not turn up.
+ *  IT ARRIVES AFTER THE SESSION, NOT AT BOOKING, and until 19 October it did not know that.
+ *
+ *  It was written when the fee was taken the moment a slot was reserved, so it opened "Laser
+ *  booked / You have booked the laser for X" and closed by telling them that if the session did
+ *  not go ahead they could cancel it or mark it a no-show. Since 9 October it is sent twelve
+ *  hours AFTER the session ends. By then the appointment has happened, the provider has almost
+ *  certainly closed it out, and `markNoShow` refuses anything that is not `upcoming` — so the
+ *  only instruction in it named an action the app actively rejects.
+ *
+ *  What replaced it says what is true at the moment it lands: the session happened, this is the
+ *  rent for it, and the window for saying otherwise was the twelve hours before this email.
+ *  Anything after that is a conversation, not a button.
  */
 export function rentalChargedEmail(input: {
   firstName: string
@@ -560,43 +570,55 @@ export function rentalChargedEmail(input: {
   charged: string
   /** Last four of the card on file, or null if it is somehow unknown. */
   cardLast4: string | null
+  /** True when Keoni set this figure herself from a receipt rather than it coming off the
+   *  published schedule. Those three are told whose number it is, because "we charged you
+   *  $77.55" with no account of where that came from invites a query already answerable. */
+  setByMelanite?: boolean
   url: string
 }): Omit<EmailMessage, 'to'> {
   const card = input.cardLast4 ? ` to your card ending ${input.cardLast4}` : ''
+
+  const basis = input.setByMelanite
+    ? 'That is the equipment rental, worked out by Keoni from the receipt you sent.'
+    : 'That is the equipment rental, including card processing.'
 
   return {
     subject: `${input.charged} laser rental — ${input.serviceName}`,
     text: [
       `Hi ${input.firstName},`,
       '',
-      `You have booked the laser for ${input.serviceName}.`,
+      `The laser rental for ${input.serviceName} has been charged.`,
       input.when,
       '',
       `Charged${card}: ${input.charged}`,
       '',
-      'That is the equipment rental. What you charge your client is yours, and does not come',
-      'through Melanite.',
+      basis,
+      'What you charged your own client is yours, and does not come through Melanite.',
       '',
-      'If the session does not go ahead, cancel it or mark it a no-show and say what happened.',
-      'Melanite reads that and decides whether the fee stands. It is not refunded automatically',
-      'either way.',
+      'Rent is taken about twelve hours after a session ends, so if something had gone wrong',
+      'with this one there was time to tell Melanite first. If you think this charge is wrong,',
+      'reply to this email — it is past the point where the app can undo it.',
       '',
       'See it against everything else here:',
       input.url,
     ].join('\n'),
     html: wrap(
-      'Laser booked',
+      'Rental charged',
       p(`Hi ${input.firstName},`) +
-        p(`You have booked the laser for <strong>${esc(input.serviceName)}</strong>.<br>${esc(input.when)}`) +
+        p(
+          `The laser rental for <strong>${esc(input.serviceName)}</strong> has been charged.` +
+            `<br>${esc(input.when)}`,
+        ) +
         p(`Charged${esc(card)}: <strong>${esc(input.charged)}</strong>`) +
         p(
-          '<span style="font-size:13px;color:#666">That is the equipment rental. What you charge ' +
-            'your client is yours, and does not come through Melanite.</span>',
+          `<span style="font-size:13px;color:#666">${esc(basis)} What you charged your own ` +
+            'client is yours, and does not come through Melanite.</span>',
         ) +
         p(
-          '<span style="font-size:13px;color:#666">If the session does not go ahead, cancel it ' +
-            'or mark it a no-show and say what happened. Melanite reads that and decides whether ' +
-            'the fee stands — it is not refunded automatically either way.</span>',
+          '<span style="font-size:13px;color:#666">Rent is taken about twelve hours after a ' +
+            'session ends, so if something had gone wrong with this one there was time to tell ' +
+            'Melanite first. If you think this charge is wrong, reply to this email — it is ' +
+            'past the point where the app can undo it.</span>',
         ),
       { label: 'View your charges', url: input.url },
     ),

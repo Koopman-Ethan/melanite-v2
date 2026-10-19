@@ -91,17 +91,48 @@ describe("the provider's receipt", () => {
     expect(mail.text).not.toMatch(/ending\s*$/m)
   })
 
-  it('says the money comes back on a no-show', () => {
-    // A refund nobody knows about is a refund nobody claims, and this is the message still in
-    // their inbox on the day the client does not turn up.
+  it('never tells them to mark it a no-show', () => {
+    // THE REVERSE OF WHAT THIS TEST USED TO ASSERT, and the reversal is the point.
+    //
+    // It was written when the fee was taken at booking, so this message sat in the inbox
+    // waiting for the day a client did not turn up and told them how to get the money back.
+    // Rent has been taken twelve hours AFTER the session since 9 October: by the time this
+    // lands the appointment has happened, the provider has usually closed it out, and
+    // `markNoShow` refuses anything that is not `upcoming`.
+    //
+    // So the old wording named an action the app actively rejects. Telling somebody to do
+    // something impossible about their own money is worse than saying nothing.
     const mail = rentalChargedEmail(BASE)
-    expect(mail.text).toMatch(/no-show/i)
-    expect(mail.html).toMatch(/no-show/i)
+    expect(mail.text).not.toMatch(/no-show/i)
+    expect(mail.html).not.toMatch(/no-show/i)
+    expect(mail.text).not.toMatch(/cancel it/i)
+  })
+
+  it('describes a session that has happened, not one that is booked', () => {
+    // Same root cause. "Laser booked / You have booked the laser for X" was the heading on a
+    // receipt that arrives half a day after the treatment is over.
+    const mail = rentalChargedEmail(BASE)
+    expect(mail.html).not.toMatch(/laser booked/i)
+    expect(mail.text).not.toMatch(/you have booked/i)
+    expect(mail.text).toMatch(/has been charged/i)
   })
 
   it('says what the fee is not', () => {
     // The single most likely misreading is that Melanite is taking a cut of their treatment.
-    expect(rentalChargedEmail(BASE).text).toMatch(/what you charge your client is yours/i)
+    expect(rentalChargedEmail(BASE).text).toMatch(/what you charged your own client is yours/i)
+  })
+
+  it('tells the three whose figure it is', () => {
+    // "We charged you $77.55" with no account of where that came from invites a query that is
+    // already answerable: Keoni worked it out from the receipt they sent her.
+    const theirs = rentalChargedEmail({ ...BASE, setByMelanite: true })
+    expect(theirs.text).toMatch(/worked out by Keoni from the receipt/i)
+
+    // And everybody else is told the opposite thing — that processing is in the number — so
+    // neither group is reading a sentence about the other's arrangement.
+    const schedule = rentalChargedEmail(BASE)
+    expect(schedule.text).toMatch(/including card processing/i)
+    expect(schedule.text).not.toMatch(/Keoni/i)
   })
 
   it('points at charges rather than earnings', () => {

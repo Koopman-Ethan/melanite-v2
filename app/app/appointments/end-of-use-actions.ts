@@ -6,8 +6,10 @@ import { revalidatePath } from 'next/cache'
 import { requireProvider } from '@/lib/auth/dal'
 import { db } from '@/lib/db'
 import { isUniqueViolation } from '@/lib/db/errors'
-import { bookings, endOfUseChecklists } from '@/lib/db/schema'
-import { deleteEquipmentPhoto, putEquipmentPhoto } from '@/lib/blob'
+import { bookings, endOfUseChecklists, providers } from '@/lib/db/schema'
+import { deleteEquipmentPhoto, putEquipmentPhoto, putReceipt } from '@/lib/blob'
+import { recordReceipt } from '@/lib/rental/receipts'
+import { toCents } from '@/lib/money'
 import {
   END_OF_USE_ITEM_COUNT,
   END_OF_USE_VERSION,
@@ -99,6 +101,27 @@ export async function recordEndOfUseChecklist(
     }
   }
 
+  // WHAT THEY CHARGED, for a provider whose fee Keoni sets. Required, because Melanite works
+  // out no figure for them and a close-out without it drops the session into Keoni's queue with
+  // nothing to act on — the "waiting on their receipt" state that should not be reachable once
+  // somebody has certified the session happened.
+  //
+  // Checked server-side as well as disabling the button, for the same reason the twenty ticks
+  // are: the disabled button is a courtesy to whoever is standing in the room, and it is not
+  // what makes this true.
+  const [me] = await db
+    .select({ rentBasis: providers.rentBasis })
+    .from(providers)
+    .where(eq(providers.id, user.id))
+    .limit(1)
+
+  const asksForReceipt = me?.rentBasis === 'keoni_sets'
+  const chargedAmount = Number(formData.get('chargedAmount') ?? '')
+
+  if (asksForReceipt && !(Number.isFinite(chargedAmount) && chargedAmount > 0)) {
+    return { error: 'Say what you charged your client before signing off.' }
+  }
+
   const items = sanitiseItems(formData.getAll('items').map(String))
 
   // The rule, enforced here and not by the disabled button. v1 had no check at all on this side,
@@ -123,6 +146,28 @@ export async function recordEndOfUseChecklist(
     const result = await putEquipmentPhoto(crypto.randomUUID(), photo)
     if (!result.ok) return { error: result.detail }
     stored = result.blob
+  }
+
+  // The receipt itself is OPTIONAL where the amount is not. A provider on a bad signal in a
+  // treatment room must still be able to sign off — Keoni has the figure, and the queue item
+  // tells her whether a document came with it so she can ask.
+  if (asksForReceipt) {
+    const receipt = formData.get('receipt')
+    let receiptBlob: { storageKey: string; mimeType: string } | null = null
+
+    if (receipt instanceof File && receipt.size > 0) {
+      const put = await putReceipt(bookingId, receipt)
+      if (!put.ok) return { error: put.detail }
+      receiptBlob = { storageKey: put.blob.storageKey, mimeType: put.blob.mimeType }
+    }
+
+    const noted = await recordReceipt({
+      bookingId,
+      providerId: user.id,
+      amountCents: toCents(chargedAmount),
+      stored: receiptBlob,
+    })
+    if (noted.error) return { error: noted.error }
   }
 
   let checklistId: string

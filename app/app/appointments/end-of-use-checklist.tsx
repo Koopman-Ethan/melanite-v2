@@ -136,10 +136,24 @@ function Item({
 export function EndOfUseChecklist({
   bookingId,
   recorded,
+  asksForReceipt,
+  sentAmountCents,
 }: {
   bookingId: string
   /** The row, if this session was already closed out. Null means nobody has. */
   recorded: { itemsDone: number; itemCount: number; deviceIssue: boolean } | null
+  /** This provider's fee is set by Keoni from a receipt, so signing off asks for one.
+   *
+   *  CAPTURED HERE RATHER THAN IN A SEPARATE FORM. It was a second prompt on the appointment
+   *  card and that was wrong in a way the queue made obvious: a session could be closed out,
+   *  plainly delivered, and still sit in Keoni's queue saying "waiting on their receipt". The
+   *  provider had finished with the appointment and had no reason to come back to it.
+   *
+   *  Closing out IS the moment they are certifying what happened in that room. What they
+   *  charged belongs in the same act. */
+  asksForReceipt?: boolean
+  /** What they have already told Melanite, if they are amending. */
+  sentAmountCents?: number | null
 }) {
   const [state, action, pending] = useActionState<ChecklistState, FormData>(
     recordEndOfUseChecklist,
@@ -149,8 +163,19 @@ export function EndOfUseChecklist({
   const [ticked, setTicked] = useState<string[]>([])
   const [collapsed, setCollapsed] = useState<string[]>([])
   const [issue, setIssue] = useState<'none' | 'reported' | ''>('')
+  const [charged, setCharged] = useState(
+    sentAmountCents === null || sentAmountCents === undefined
+      ? ''
+      : (sentAmountCents / 100).toFixed(2),
+  )
+  const [receiptName, setReceiptName] = useState<string | null>(null)
+  const receiptRef = useRef<HTMLInputElement>(null)
   const [photoName, setPhotoName] = useState<string | null>(null)
   const photoRef = useRef<HTMLInputElement>(null)
+
+  // Signing off without it would put the session straight into Keoni's queue with nothing to
+  // act on, which is the state this whole change exists to remove.
+  const receiptMissing = Boolean(asksForReceipt) && !(Number(charged) > 0)
 
   const done = new Set(ticked)
   const outstanding = missingRequired(ticked)
@@ -407,6 +432,70 @@ export function EndOfUseChecklist({
         </div>
       )}
 
+      {/* WHAT THEY CHARGED, for the three whose fee Keoni sets. Required to sign off.
+          Melanite works out no figure for them, so without this her queue has nothing to act
+          on — and asking at any other moment means asking somebody who has mentally finished
+          with the appointment. */}
+      {asksForReceipt && (
+        <div className="rounded-card border border-gold/40 bg-gold/5 p-3 space-y-3">
+          <p className="text-[11px] font-medium text-ink-secondary">
+            What did you charge your client for this?
+          </p>
+          <p className="text-[11px] text-ink-muted">
+            Melanite does not set a price for your sessions — Keoni works out what you owe from
+            this.
+          </p>
+
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="text-[11px]">
+              <span className="block text-ink-faint">Amount</span>
+              <input
+                type="number"
+                name="chargedAmount"
+                min={0}
+                step={0.01}
+                value={charged}
+                onChange={(e) => setCharged(e.target.value)}
+                placeholder="0.00"
+                className="mt-1 w-28 rounded-control border border-line-control bg-transparent px-2 py-1.5 text-xs tabular-nums"
+              />
+            </label>
+
+            <div className="text-[11px]">
+              <span className="block text-ink-faint">Receipt</span>
+              <input
+                ref={receiptRef}
+                type="file"
+                name="receipt"
+                accept="image/jpeg,image/png,image/webp,application/pdf"
+                onChange={(e) => setReceiptName(e.target.files?.[0]?.name ?? null)}
+                className="hidden"
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="mt-1"
+                onClick={() => receiptRef.current?.click()}
+              >
+                {receiptName ? 'Choose another' : 'Attach a photo or PDF'}
+              </Button>
+            </div>
+          </div>
+
+          {receiptName && <p className="text-[11px] text-ink-faint">Attached: {receiptName}</p>}
+
+          {/* The redaction prompt, beside the control rather than in a policy page. Phrased as a
+              thing to do — "cover the name" is an action, "we may store personal data" is a
+              sentence people skip. */}
+          <p className="text-[11px] text-ink-faint">
+            <strong className="text-ink-secondary">Cover your client&rsquo;s name</strong> before
+            you photograph it — Melanite only needs the amount and the date. The receipt is
+            deleted once Keoni has settled the session.
+          </p>
+        </div>
+      )}
+
       {/* One sentence, always. It is true for anything that can be submitted: the required twenty
           are done, and the five that are not ticked are the ones that did not apply. */}
       <p className="text-[11px] text-ink-muted">{END_OF_USE_CERTIFICATION}</p>
@@ -414,7 +503,11 @@ export function EndOfUseChecklist({
       {state.error && <Notice>{state.error}</Notice>}
 
       <div className="flex items-center gap-3">
-        <Button type="submit" size="sm" disabled={pending || issue === '' || !ready || photoMissing}>
+        <Button
+          type="submit"
+          size="sm"
+          disabled={pending || issue === '' || !ready || photoMissing || receiptMissing}
+        >
           {pending
             ? 'Saving…'
             : ready
