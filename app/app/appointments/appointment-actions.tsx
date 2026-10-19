@@ -79,7 +79,6 @@ export function AppointmentActions({
   // A fee is never charged as a side effect of a status change. Both paths ask first, and both
   // offer the no-fee option beside the fee one — a provider who does not want to bill a regular
   // client should not have to avoid the button that records what happened.
-  const canCharge = appointment.paymentSource === 'checkout_link' && Number(appointment.price) > 0
   // A rental booking has no client and no payment link — the only money on it is the rent the
   // provider paid. Every other branch here describes a client's money.
   const isRental = appointment.paymentSource === 'rental'
@@ -197,27 +196,17 @@ export function AppointmentActions({
           <p className="text-xs text-ink-secondary">
             {asksWhy
               ? `Mark this as a no-show — the hour is gone and nobody else could book it. ${rentSentence} You will hear once it has been looked at.`
-              : `Mark ${appointment.clientName} as a no-show. Charging the fee uses the card they left on file — if there is none, the status is still recorded and nothing is charged.`}
+              : `Mark ${appointment.clientName} as a no-show. Melanite charges nobody for it — what the client owes you is between the two of you.`}
           </p>
           {noShowAsksWhy ? reasonBox('no_show', true) : null}
           <div className="flex flex-wrap gap-2">
-            {canCharge && (
-              <Button
-                size="sm"
-                variant="danger"
-                disabled={pending}
-                onClick={() => run((id) => markNoShow(id, reason, true))}
-              >
-                {pending ? 'Working…' : 'No-show and charge fee'}
-              </Button>
-            )}
             <Button
               size="sm"
-              variant={canCharge ? 'outline' : 'danger'}
+              variant="danger"
               disabled={pending || !noShowReasonOk}
-              onClick={() => run((id) => markNoShow(id, reason, false))}
+              onClick={() => run((id) => markNoShow(id, reason))}
             >
-              {pending ? 'Working…' : canCharge ? 'No-show, no fee' : 'Mark as no-show'}
+              {pending ? 'Working…' : 'Mark as no-show'}
             </Button>
             <Button size="sm" variant="ghost" disabled={pending} onClick={() => setConfirming(null)}>
               Back
@@ -243,16 +232,6 @@ export function AppointmentActions({
             >
               {pending ? 'Cancelling…' : 'Yes, cancel'}
             </Button>
-            {canCharge && (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={pending}
-                onClick={() => run((id) => cancelBooking(id, reason, true))}
-              >
-                Cancel and charge late fee
-              </Button>
-            )}
             <Button size="sm" variant="ghost" disabled={pending} onClick={() => setConfirming(null)}>
               Keep it
             </Button>
@@ -273,11 +252,7 @@ export function AppointmentActions({
                 // was no fee to ask about and the refund was automatic. Now it is the one that
                 // most needs asking: the provider is about to keep or lose real money on the
                 // strength of what they type.
-                onClick={() =>
-                  canCharge || asksWhy
-                    ? setConfirming('no_show')
-                    : run((id) => markNoShow(id, '', false))
-                }
+                onClick={() => (asksWhy ? setConfirming('no_show') : run((id) => markNoShow(id)))}
               >
                 No-show
               </Button>

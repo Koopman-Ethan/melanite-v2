@@ -9,7 +9,6 @@ import { bookings, ledgerEntries, roomBookings, trainingEnrollments } from '@/li
 import { friendlyStripeError, stripePost, stripeWritesEnabled } from '@/lib/stripe/client'
 import { toCents } from '@/lib/money'
 import { planRefund } from '@/lib/refunds'
-import { chargeBookingFee } from '@/lib/stripe/fees'
 import { chargeRentalFee } from '@/lib/rental/charge'
 import { notifyRentDecision } from '@/lib/rental/notify-decision'
 import { reviewRentalFee } from '@/lib/rental/review'
@@ -113,40 +112,6 @@ export async function declineRoomRefund(rentalId: string): Promise<QueueState> {
 
   revalidatePath('/app/admin/queue')
   return { success: 'Marked as cancelled with no refund. The provider keeps no charge back.' }
-}
-
-/** Tries the fee again — for a card that has since been replaced or a decline that was temporary. */
-export async function retryFee(bookingId: string): Promise<QueueState> {
-  await requireAdmin()
-
-  const [booking] = await db
-    .select({ status: bookings.status })
-    .from(bookings)
-    .where(eq(bookings.id, bookingId))
-    .limit(1)
-
-  if (!booking) return { error: 'That appointment does not exist.' }
-
-  const kind = booking.status === 'no_show' ? 'no_show_fee' : 'late_cancellation_fee'
-  const result = await chargeBookingFee(bookingId, kind)
-
-  revalidatePath('/app/admin/queue')
-
-  if (result.charged) return { success: `Charged $${result.amount}.` }
-  return { error: result.error ?? result.skipped ?? 'The charge did not go through.' }
-}
-
-/** Records a decision not to pursue the fee. */
-export async function waiveFee(bookingId: string): Promise<QueueState> {
-  const admin = await requireAdmin()
-
-  await db
-    .update(bookings)
-    .set({ feeWaivedAt: new Date(), feeWaivedBy: admin.id })
-    .where(eq(bookings.id, bookingId))
-
-  revalidatePath('/app/admin/queue')
-  return { success: 'Fee waived. It stays on the record as a decision, not an oversight.' }
 }
 
 /** Refunds a student whose course was cancelled. */

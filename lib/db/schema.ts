@@ -730,16 +730,21 @@ export const bookings = pgTable('bookings', {
   policyAckAt: timestamp({ withTimezone: true }),
   policyAckVersion: text(),
 
-  /** A no-show or late-cancellation fee that was attempted and did not go through — a declined
-   *  card, no card on file, no consent.
+  /** HISTORICAL. A no-show or late-cancellation fee Melanite charged the CLIENT, which it no
+   *  longer does: from 14 October a provider bills their own client and what passed between
+   *  them is not Melanite's business. The charging code, the buttons and the queue kind are all
+   *  gone.
    *
-   *  Stamped on the booking rather than kept in a separate queue table: the fact belongs to this
-   *  appointment, and a parallel work-queue store is one more thing that can disagree with
-   *  reality. Cleared when the fee is later charged or deliberately waived. */
+   *  Kept rather than dropped because they are the record of a decision somebody made. In
+   *  practice they record nothing — production has never had a single failed client fee, which
+   *  is why removing the queue kind lost nothing — but a column that has never been written is
+   *  still cheaper to keep than a migration that cannot be undone.
+   *
+   *  DO NOT CONFUSE WITH `rentChargeFailedAt` / `rentWaivedAt` below, which are the PROVIDER's
+   *  rental fee and very much live. The two were deliberately kept apart for this exact
+   *  reason, and this is the moment that paid off: one of the pair died and the other did not. */
   feeChargeFailedAt: timestamp({ withTimezone: true }),
   feeChargeError: text(),
-  /** Set when someone decides not to pursue the fee. Distinguishes "handled, no" from "nobody
-   *  has looked at it", which is the entire point of a review queue. */
   feeWaivedAt: timestamp({ withTimezone: true }),
   feeWaivedBy: uuid().references(() => providers.id, { onDelete: 'set null' }),
 

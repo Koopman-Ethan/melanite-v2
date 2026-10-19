@@ -383,45 +383,6 @@ export function bookingCancelledEmail(input: {
   }
 }
 
-/** Tells a client their card on file was charged.
- *
- *  Sent because taking money from someone who is not present and saying nothing is indefensible
- *  — they agreed to the fee, not to finding out from their statement. Failure to send must not
- *  undo the charge, so the caller swallows errors. */
-export function feeChargedEmail(input: {
-  clientName: string
-  providerName: string
-  reason: 'no_show_fee' | 'late_cancellation_fee'
-  amount: string
-  when: string
-}): Omit<EmailMessage, 'to'> {
-  const first = input.clientName.split(' ')[0]
-  const label =
-    input.reason === 'no_show_fee' ? 'missed appointment fee' : 'late cancellation fee'
-
-  return {
-    subject: `${input.amount} ${label} — Melanite Laser Suite`,
-    text: [
-      `Hi ${first},`,
-      '',
-      `We've charged the card you left on file ${input.amount} — a ${label} for your appointment with ${input.providerName} on ${input.when}.`,
-      '',
-      'You agreed to this when you paid, as set out in the appointment policy.',
-      '',
-      'If you think this is a mistake, contact your provider and they will sort it out.',
-    ].join('\n'),
-    html: wrap(
-      `${label.charAt(0).toUpperCase() + label.slice(1)}`,
-      p(`Hi ${first},`) +
-        p(
-          `We've charged the card you left on file <strong>${input.amount}</strong> — a ${label} for your appointment with ${input.providerName} on ${input.when}.`,
-        ) +
-        p('You agreed to this when you paid, as set out in the appointment policy.') +
-        p('If you think this is a mistake, contact your provider and they will sort it out.'),
-    ),
-  }
-}
-
 export function trainingBalanceEmail(input: {
   firstName: string
   amount: string

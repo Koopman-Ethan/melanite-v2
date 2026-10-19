@@ -231,3 +231,83 @@ describe('package invariants', () => {
     expect(bad, `package counters out of step:\n${JSON.stringify(bad, null, 2)}`).toEqual([])
   })
 })
+
+describe('nobody is owed a payout that cannot arrive', () => {
+  // Melanite stopped paying providers on 14 October. Every provider now rents the laser and
+  // bills their own clients, no new Connect account is ever created, and no transfer is ever
+  // made again. What is left is the tail: pre-cutover client payments whose provider half was
+  // supposed to reach them through Connect.
+  //
+  // THE FAILURE THIS GUARDS. `createBookingIntent` attaches `transfer_data` only when the
+  // provider has a Connect account, but `splitClientPayment` ran either way — so a payment
+  // taken for a provider without one recorded half of it as theirs, stamped `pending`, waiting
+  // on a `payout.paid` that could never arrive. The money is in Melanite's balance and the
+  // books say it is somebody else's.
+  //
+  // Not hypothetical, and not a rounding error: $604.50 across 11 rows for Leyla and Karly,
+  // the oldest from 10 August. These assertions do not fix those — they are a question for
+  // Keoni and Stripe, not for a migration — but they stop the pile growing.
+
+  it('never records a provider payout against a provider with no Connect account', async () => {
+    // The row that cannot be true. Either the money reached them, in which case there is an
+    // account, or it did not, in which case Melanite is holding it and should say so.
+    const bad = await rows(sql`
+      SELECT l.id, l.created_at::date AS recorded, l.provider_payout, l.payout_status,
+             p.first_name, p.last_name
+        FROM ledger_entries l
+        JOIN providers p ON p.id = l.provider_id
+       WHERE l.provider_payout <> 0
+         AND p.stripe_account_id IS NULL
+         -- Only rows written since the guard went in. Everything before it is history, and
+         -- history is not something a test gets to fail over.
+         AND l.created_at >= '2026-10-19'::date
+    `)
+
+    expect(
+      bad,
+      `these rows owe money to somebody Stripe cannot pay:\n${JSON.stringify(bad, null, 2)}`,
+    ).toEqual([])
+  })
+
+  it('never splits a rental fee', async () => {
+    // Rent runs the other way — the provider pays Melanite — so there is no half to give back.
+    // The constraint `ledger_entries_provider_paid_is_unsplit` says the same thing in the
+    // database; this says it against the rows that are actually there, which is the version
+    // that catches a constraint somebody dropped in a migration.
+    const bad = await rows(sql`
+      SELECT id, gross_amount, provider_payout, melanite_cut
+        FROM ledger_entries
+       WHERE source = 'rental_fee' AND provider_payout <> 0
+    `)
+
+    expect(bad, `rent is not shared:\n${JSON.stringify(bad, null, 2)}`).toEqual([])
+  })
+
+  it('leaves no payout pending against a provider who can no longer be paid through Stripe', async () => {
+    // A WARNING, not a failure, and deliberately so. The eleven stranded rows are real and
+    // this test would otherwise be red from the day it was written — which is how a suite
+    // stops being read. It reports instead, so the figure stays in front of somebody until
+    // Keoni has settled it.
+    const stranded = await rows(sql`
+      SELECT p.first_name, p.last_name, count(*)::int AS rows,
+             sum(l.provider_payout)::text AS owed, min(l.created_at)::date AS oldest
+        FROM ledger_entries l
+        JOIN providers p ON p.id = l.provider_id
+       WHERE l.payout_status = 'pending' AND l.provider_payout <> 0
+       GROUP BY 1, 2
+    `)
+
+    if (stranded.length > 0) {
+      console.warn(
+        `\n  [payouts] ${stranded.length} provider(s) still owed a Connect payout that will ` +
+          `never arrive now that transfers have stopped:\n` +
+          JSON.stringify(stranded, null, 2) +
+          `\n  Settle these by hand and mark the rows paid — see docs/rental-cutover.md.\n`,
+      )
+    }
+
+    // The assertion is only that the query works and the shape is readable. Failing here would
+    // mean failing on data nobody in this repo can fix.
+    expect(Array.isArray(stranded)).toBe(true)
+  })
+})

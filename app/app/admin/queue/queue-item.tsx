@@ -15,10 +15,8 @@ import {
   refundEnrollment,
   waiveOwedRent,
   refundRoomRental,
-  retryFee,
   skipSessionRent,
   transferEnrollment,
-  waiveFee,
   type QueueState,
 } from './actions'
 
@@ -27,7 +25,6 @@ const usd = (v: string | number) =>
 
 const KIND_LABELS: Record<QueueItem['kind'], string> = {
   room_refund: 'Room refund',
-  failed_fee: 'Fee not collected',
   cancelled_course_deposit: 'Cancelled course',
   // Not "Rent held". Since rent is taken after the session, most of these have had nothing
   // taken — the item is a decision to make, not money sitting somewhere.
@@ -40,7 +37,6 @@ const KIND_LABELS: Record<QueueItem['kind'], string> = {
 
 const KIND_STYLES: Record<QueueItem['kind'], string> = {
   room_refund: 'border-warning/40 bg-warning/10 text-warning',
-  failed_fee: 'border-danger/40 bg-danger/10 text-danger',
   cancelled_course_deposit: 'border-info/40 bg-info/10 text-info',
   // Gold, not a warning colour. Nothing has gone wrong here — a provider cancelled and is
   // waiting to hear, which is the system working. Painting it red beside genuine failures
@@ -168,22 +164,6 @@ export function QueueRow({
               onClick={() => run(() => declineRoomRefund(item.id))}
             >
               No refund
-            </Button>
-          </>
-        )}
-
-        {item.kind === 'failed_fee' && (
-          <>
-            <Button size="sm" disabled={pending} onClick={() => run(() => retryFee(item.id))}>
-              {pending ? 'Trying…' : 'Try the card again'}
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={pending}
-              onClick={() => run(() => waiveFee(item.id))}
-            >
-              Waive it
             </Button>
           </>
         )}

@@ -1,8 +1,7 @@
 import 'server-only'
 
-import { and, asc, eq, isNotNull, isNull, sql } from 'drizzle-orm'
+import { and, asc, eq, isNull, sql } from 'drizzle-orm'
 
-import { clientLabel } from '@/lib/booking-labels'
 import { getProviderSharePct } from '@/lib/db/queries/admin-tools'
 import { CLOSEOUT_GRACE_HOURS } from '@/lib/end-of-use'
 import { sharesRevenueSql } from '@/lib/db/revenue-model'
@@ -52,7 +51,6 @@ import {
 
 export type QueueKind =
   | 'room_refund'
-  | 'failed_fee'
   | 'cancelled_course_deposit'
   | 'held_rent'
   | 'rent_to_confirm'
@@ -106,46 +104,6 @@ async function roomRefunds(): Promise<QueueItem[]> {
       },
     }
   })
-}
-
-async function failedFees(): Promise<QueueItem[]> {
-  const rows = await db
-    .select({
-      id: bookings.id,
-      clientName: bookings.clientName,
-      status: bookings.status,
-      startTime: bookings.startTime,
-      price: bookings.price,
-      failedAt: bookings.feeChargeFailedAt,
-      error: bookings.feeChargeError,
-      serviceName: services.name,
-      firstName: providers.firstName,
-      lastName: providers.lastName,
-    })
-    .from(bookings)
-    .innerJoin(providers, eq(bookings.providerId, providers.id))
-    .innerJoin(providerServices, eq(bookings.providerServiceId, providerServices.id))
-    .innerJoin(services, eq(providerServices.serviceId, services.id))
-    .where(
-      and(
-        isNotNull(bookings.feeChargeFailedAt),
-        // A waived fee is a decision already made. It stays on the booking as a record and
-        // leaves the queue.
-        isNull(bookings.feeWaivedAt),
-      ),
-    )
-    .orderBy(asc(bookings.feeChargeFailedAt))
-
-  return rows.map((r) => ({
-    kind: 'failed_fee' as const,
-    id: r.id,
-    since: r.failedAt ?? r.startTime,
-    waitingDays: 0,
-    amount: r.price,
-    who: clientLabel(r.clientName),
-    detail: `${r.status === 'no_show' ? 'No-show' : 'Late cancellation'} · ${r.serviceName} with ${r.firstName} ${r.lastName} on ${dateLabel(r.startTime.toISOString().slice(0, 10))} — ${r.error ?? 'the charge did not go through'}`,
-    meta: { bookingStatus: r.status },
-  }))
 }
 
 /** Laser sessions that did not happen, with the provider's rent still held.
@@ -434,9 +392,8 @@ async function cancelledCourseDeposits(): Promise<QueueItem[]> {
 }
 
 export async function getReviewQueue(now: Date = new Date()): Promise<QueueItem[]> {
-  const [rooms, fees, deposits, rent, confirm] = await Promise.all([
+  const [rooms, deposits, rent, confirm] = await Promise.all([
     roomRefunds(),
-    failedFees(),
     cancelledCourseDeposits(),
     heldRent(),
     rentToConfirm(),
@@ -444,7 +401,7 @@ export async function getReviewQueue(now: Date = new Date()): Promise<QueueItem[
 
   // Oldest first across all three. Age is what matters in a queue — the thing waiting longest
   // is the thing most likely to have been forgotten.
-  return [...rooms, ...fees, ...deposits, ...rent, ...confirm]
+  return [...rooms, ...deposits, ...rent, ...confirm]
     .sort((a, b) => a.since.getTime() - b.since.getTime())
     .map((item) => ({
       ...item,

@@ -20,7 +20,6 @@ import {
 } from '@/lib/db/schema'
 import { appointmentWhen, bookingCancelledEmail, sendEmail } from '@/lib/email'
 import { notifyMelaniteCancelled, notifyMelaniteNoShow } from '@/lib/notify-melanite'
-import { chargeBookingFee } from '@/lib/stripe/fees'
 
 // Ported from v1's three booking-action endpoints. The preconditions are theirs, deliberately
 // — they encode real money rules, not incidental validation.
@@ -88,11 +87,7 @@ function rentalHeldNote(held: RentOwed | null): string {
   return ''
 }
 
-export async function cancelBooking(
-  bookingId: string,
-  reason = '',
-  chargeLateFee = false,
-): Promise<ActionState> {
+export async function cancelBooking(bookingId: string, reason = ''): Promise<ActionState> {
   const user = await requireProvider()
 
   const [booking] = await db
@@ -212,25 +207,7 @@ export async function cancelBooking(
   await notifyCancelled(bookingId, false)
 
   // The fee is opt-in per cancellation, never automatic. Charging a card without the provider
-  // deciding to is not a default anyone should be able to stumble into.
-  if (!chargeLateFee) return { success: `Appointment cancelled.${rentNote}` }
-
-  const settings = await getCheckoutSettings()
-  const hoursOut = (booking.startTime.getTime() - Date.now()) / 3_600_000
-  if (hoursOut > settings.lateCancellationHours) {
-    return {
-      success: `Appointment cancelled.${rentNote}`,
-      feeNote: `No fee charged — this was cancelled more than ${settings.lateCancellationHours} hours ahead.`,
-    }
-  }
-
-  const fee = await chargeBookingFee(bookingId, 'late_cancellation_fee')
-  if (fee.charged) {
-    return {
-      success: `Appointment cancelled.${rentNote} $${fee.amount} late cancellation fee charged.`,
-    }
-  }
-  return { success: `Appointment cancelled.${rentNote}`, feeNote: fee.error ?? fee.skipped }
+  return { success: `Appointment cancelled.${rentNote}` }
 }
 
 /** Cancel a package redemption and give the session back.
@@ -303,11 +280,7 @@ async function notifyCancelled(
  *  unfinished. The booking must already be in the past; labelling a future appointment a
  *  no-show is always a mistake.
  */
-export async function markNoShow(
-  bookingId: string,
-  reason = '',
-  chargeFee = false,
-): Promise<ActionState> {
+export async function markNoShow(bookingId: string, reason = ''): Promise<ActionState> {
   const user = await requireProvider()
 
   const [booking] = await db
@@ -353,13 +326,7 @@ export async function markNoShow(
   // somebody act.
   if (held) await notifyMelaniteNoShow(bookingId)
 
-  if (!chargeFee) return { success: `Marked as a no-show.${rentNote}` }
-
-  const fee = await chargeBookingFee(bookingId, 'no_show_fee')
-  if (fee.charged) {
-    return { success: `Marked as a no-show.${rentNote} $${fee.amount} fee charged.` }
-  }
-  return { success: `Marked as a no-show.${rentNote}`, feeNote: fee.error ?? fee.skipped }
+  return { success: `Marked as a no-show.${rentNote}` }
 }
 
 /** Mark a past appointment as completed. v1 had no such endpoint — bookings simply stayed

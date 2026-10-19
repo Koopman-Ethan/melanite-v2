@@ -228,6 +228,30 @@ async function bookingPaid(pi: StripePaymentIntentObject): Promise<HandlerResult
         providerSharePct: await providerShare(),
       })
 
+  // CAN THE PROVIDER'S HALF ACTUALLY REACH THEM? Asked separately from how the money splits,
+  // because the two were conflated and the ledger told a lie because of it.
+  //
+  // `createBookingIntent` attaches `transfer_data` only when the provider has a Connect
+  // account. With no account the charge still succeeds — it simply lands entirely in
+  // Melanite's balance — but `splitClientPayment` ran regardless, so the row recorded half of
+  // it as the provider's against a transfer that was never made. That half then sat at
+  // `pending` waiting for a `payout.paid` that could not arrive, for ever.
+  //
+  // This matters more now, not less. Every provider is on rent, nobody new gets a Connect
+  // account, and the only client payments left are the handful of pre-cutover links still
+  // outstanding — so an account missing here is the ordinary case rather than the odd one.
+  //
+  // When the money cannot be transferred, Melanite is holding all of it. The row says so, and
+  // what the provider is owed becomes a debt somebody has to settle by hand rather than a
+  // payout that silently never happens.
+  const [payee] = await db
+    .select({ stripeAccountId: providers.stripeAccountId })
+    .from(providers)
+    .where(eq(providers.id, booking.providerId))
+    .limit(1)
+
+  const transferable = house || !!payee?.stripeAccountId
+
   const serviceId = await serviceIdFor(booking.providerServiceId)
 
   await db.insert(ledgerEntries).values({
@@ -241,14 +265,18 @@ async function bookingPaid(pi: StripePaymentIntentObject): Promise<HandlerResult
     serviceId,
     grossAmount: toMoney(grossCents),
     tipAmount: toMoney(tipCents),
-    providerPayout: toMoney(providerPayoutCents),
-    melaniteCut: toMoney(melaniteCutCents),
+    providerPayout: toMoney(transferable ? providerPayoutCents : 0),
+    melaniteCut: toMoney(transferable ? melaniteCutCents : grossCents + tipCents),
     paymentMethod: 'stripe',
     stripePaymentIntentId: pi.id,
     // Nothing is owed to anybody on a house appointment, so it is settled the moment it is
     // recorded. Left at 'pending' it would sit in the payout queue for ever, describing a
-    // payment that is never going to be made.
-    payoutStatus: house ? 'paid' : 'pending',
+    // payment that is never going to be made — which is the same reason an untransferable
+    // payment is 'paid' here too: Melanite has all of it, and there is no payout coming.
+    payoutStatus: transferable ? (house ? 'paid' : 'pending') : 'paid',
+    ...(transferable
+      ? {}
+      : { note: 'No Connect account — Melanite holds the whole payment; the provider’s share is owed by hand.' }),
   })
 
   if (link) {
