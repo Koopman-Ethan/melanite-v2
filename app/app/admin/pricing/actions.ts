@@ -15,6 +15,14 @@ import { todayInDenver } from '@/lib/validation'
 export interface PricingState {
   error?: string
   success?: string
+  /** The promotion just created, if one was. The create form uses it as a React `key` so a
+   *  success discards the filled-in fields by remounting.
+   *
+   *  AN ID RATHER THAN A FLAG, because the key has to CHANGE on every success and a boolean
+   *  does not. Nor does the success sentence: the same name and dates on a different service
+   *  reads identically, and the second promotion would leave the form full. An id is the only
+   *  thing here guaranteed distinct every time. */
+  createdId?: string
 }
 
 /**
@@ -133,11 +141,12 @@ export async function startPromotion(
   })
   if (invalid) return { error: invalid }
 
-  await createPromotion(draft, admin.id)
+  const { id } = await createPromotion(draft, admin.id)
 
   revalidateEverythingPriced()
 
   return {
+    createdId: id,
     success: `“${draft.name.trim()}” is running from ${draft.startsOn} to ${draft.endsOn}. Nobody has to accept anything.`,
   }
 }

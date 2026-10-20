@@ -67,55 +67,7 @@ export function Promotions({
   const [ending, startEnding] = useTransition()
   const [endState, setEndState] = useState<PricingState>({})
 
-  const [kind, setKind] = useState<'percent' | 'amount'>('percent')
-  const [value, setValue] = useState('')
-  const [tierKey, setTierKey] = useState('')
-  const [startsOn, setStartsOn] = useState(today)
-  const [endsOn, setEndsOn] = useState('')
-  const [name, setName] = useState('')
-
-  const draft: DraftPromotion = useMemo(
-    () => ({
-      name,
-      tierKey: tierKey === '' ? null : tierKey,
-      kind,
-      // Dollars in the box, cents in the model — converted in one place, as the schedule form
-      // does, so the preview and the server cannot disagree about what was typed.
-      value: kind === 'percent' ? Math.round(Number(value)) : Math.round(Number(value) * 100),
-      startsOn,
-      endsOn,
-    }),
-    [name, tierKey, kind, value, startsOn, endsOn],
-  )
-
-  const typed = value.trim() !== '' && Number.isFinite(Number(value))
-
-  /** The same function the action runs. The form refuses before the round trip and the server
-   *  refuses again — one set of rules, checked twice, which is the only way they stay the
-   *  same rules. */
-  const invalid = useMemo(
-    () => (typed ? validatePromotion(draft, { today, tiers: entries, existing: running }) : null),
-    [draft, typed, today, entries, running],
-  )
-
-  /** What it does to every tier it touches, at the fee in force today. */
-  const effect = useMemo(() => {
-    if (!typed || invalid) return []
-    return entries
-      .filter((e) => covers({ ...draft, id: '' }, e.tierKey))
-      .map((e) => {
-        const now = discountedCents(e.singleCents, { ...draft, id: '' })
-        const up = (c: number) =>
-          grossUpForProcessing({ netCents: c, pct: processing.pct, fixedCents: processing.fixedCents })
-            .chargeCents
-        return { label: e.label, from: e.singleCents, to: now, charged: up(now) }
-      })
-  }, [draft, typed, invalid, entries, processing])
-
-  const span = startsOn && endsOn && endsOn >= startsOn ? daysLeft(endsOn, startsOn) : null
-
-  const end = (id: string) =>
-    startEnding(async () => setEndState(await endPromotion(id)))
+  const end = (id: string) => startEnding(async () => setEndState(await endPromotion(id)))
 
   return (
     <section className="space-y-4">
@@ -170,124 +122,210 @@ export function Promotions({
       {endState.error && <Notice>{endState.error}</Notice>}
       {endState.success && <Notice tone="success">{endState.success}</Notice>}
 
-      <form action={formAction} className="space-y-4 rounded-card border border-line p-4">
-        {/* READS AS A SENTENCE rather than a grid of labelled boxes. Six fields in a form
-            layout is a thing to fill in; one line of English is a thing to check. */}
-        <div className="flex flex-wrap items-center gap-2 text-sm text-ink-secondary">
-          <span>Take</span>
-          <input
-            name="value"
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            inputMode="decimal"
-            aria-label="How much off"
-            className="w-20 min-h-11 rounded-field border border-line bg-surface px-3 py-2 text-right text-sm tabular-nums text-ink"
-          />
-          <select
-            name="kind"
-            value={kind}
-            onChange={(e) => setKind(e.target.value as 'percent' | 'amount')}
-            aria-label="A percentage or an amount"
-            className="min-h-11 rounded-field border border-line bg-surface px-3 py-2 text-sm text-ink"
-          >
-            <option value="percent">% off</option>
-            <option value="amount">$ off</option>
-          </select>
-          <span>off</span>
-          <select
-            name="tierKey"
-            value={tierKey}
-            onChange={(e) => setTierKey(e.target.value)}
-            aria-label="Which service"
-            className="min-h-11 max-w-full rounded-field border border-line bg-surface px-3 py-2 text-sm text-ink"
-          >
-            <option value="">every service</option>
-            {entries.map((e) => (
-              <option key={e.tierKey} value={e.tierKey}>
-                {e.label}
-              </option>
-            ))}
-          </select>
-          <span>from</span>
-          <input
-            type="date"
-            name="startsOn"
-            value={startsOn}
-            min={today}
-            onChange={(e) => setStartsOn(e.target.value)}
-            aria-label="First day"
-            className="min-h-11 rounded-field border border-line bg-surface px-3 py-2 text-sm text-ink"
-          />
-          <span>to</span>
-          <input
-            type="date"
-            name="endsOn"
-            value={endsOn}
-            min={startsOn || today}
-            onChange={(e) => setEndsOn(e.target.value)}
-            aria-label="Last day, included"
-            className="min-h-11 rounded-field border border-line bg-surface px-3 py-2 text-sm text-ink"
-          />
-        </div>
+      {/* EMPTIED BY REMOUNTING, which is why the fields live in their own component. Resetting
+          six pieces of state from an effect is the obvious way and the wrong one — React's own
+          lint rule refuses it, because a synchronous setState in an effect cascades renders.
+          Changing the key throws the old fields away instead, which is what "clear the form"
+          actually means.
 
-        <label className="block text-xs">
-          <span className="block text-ink-faint">
-            What is it called? Providers see this on their receipt.
-          </span>
-          <input
-            name="name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. October promotion"
-            className="mt-1 w-full min-h-11 rounded-field border border-line bg-surface px-3 py-2 text-sm text-ink"
-          />
-        </label>
-
-        {invalid && <Notice>{invalid}</Notice>}
-
-        {effect.length > 0 && (
-          // The same gold panel the schedule form uses to read a change back before publishing.
-          <section className="rounded-card border border-gold/40 bg-gold/5 p-5">
-            <h3 className="text-sm font-medium">
-              What this does
-              {span !== null && (
-                <span className="text-ink-faint">
-                  {' '}
-                  · {span} day{span === 1 ? '' : 's'}, {prettyDay(startsOn)} to {prettyDay(endsOn)}
-                </span>
-              )}
-            </h3>
-            <ul className="mt-3 space-y-1">
-              {effect.slice(0, 8).map((e) => (
-                <li key={e.label} className="text-xs tabular-nums text-ink-secondary">
-                  <span className="text-ink">{e.label}</span>
-                  <span className="text-ink-faint"> · </span>
-                  {usd(e.from)} → <strong>{usd(e.to)}</strong>
-                  {/* What the provider is actually charged, because the schedule is what
-                      Melanite keeps and the card takes processing on top. Keoni reads this
-                      figure against a statement; the other one she never sees. */}
-                  <span className="text-ink-faint"> · {usd(e.charged)} charged</span>
-                </li>
-              ))}
-            </ul>
-            {effect.length > 8 && (
-              <p className="mt-2 text-xs text-ink-faint">
-                …and {effect.length - 8} more, every service on the schedule.
-              </p>
-            )}
-            <p className="mt-3 text-xs text-ink-secondary">
-              Nobody has to accept anything. Sessions already booked inside those dates get the
-              promotional price too — it is worked out on the day of the session, not the day it
-              was booked.
-            </p>
-          </section>
-        )}
-
-        {state.error && <Notice>{state.error}</Notice>}
-        {state.success && <Notice tone="success">{state.success}</Notice>}
-
-        <StartButton disabled={!typed || invalid !== null || effect.length === 0} />
-      </form>
+          IT IS NOT ONLY TIDINESS. The values that were just submitted are still a valid draft,
+          and the promotion they created is now in `running` — so a form left filled fails its
+          own overlap check and tells Keoni she clashes with the thing she made a second ago.
+          The leftover text is the smaller half of that; being accused by it is the rest. */}
+      <CreateForm
+        key={state.createdId ?? 'first'}
+        formAction={formAction}
+        state={state}
+        running={running}
+        entries={entries}
+        today={today}
+        processing={processing}
+      />
     </section>
+  )
+}
+
+/** The six fields, apart from the list above them so a success can discard them wholesale. */
+function CreateForm({
+  formAction,
+  state,
+  running,
+  entries,
+  today,
+  processing,
+}: {
+  formAction: (formData: FormData) => void
+  state: PricingState
+  running: Promotion[]
+  entries: EntryView[]
+  today: string
+  processing: { pct: number; fixedCents: number }
+}) {
+  const [kind, setKind] = useState<'percent' | 'amount'>('percent')
+  const [value, setValue] = useState('')
+  const [tierKey, setTierKey] = useState('')
+  const [startsOn, setStartsOn] = useState(today)
+  const [endsOn, setEndsOn] = useState('')
+  const [name, setName] = useState('')
+
+  const draft: DraftPromotion = useMemo(
+    () => ({
+      name,
+      tierKey: tierKey === '' ? null : tierKey,
+      kind,
+      // Dollars in the box, cents in the model — converted in one place, as the schedule form
+      // does, so the preview and the server cannot disagree about what was typed.
+      value: kind === 'percent' ? Math.round(Number(value)) : Math.round(Number(value) * 100),
+      startsOn,
+      endsOn,
+    }),
+    [name, tierKey, kind, value, startsOn, endsOn],
+  )
+
+  const typed = value.trim() !== '' && Number.isFinite(Number(value))
+
+  /** The same function the action runs. The form refuses before the round trip and the server
+   *  refuses again — one set of rules, checked twice, which is the only way they stay the
+   *  same rules. */
+  const invalid = useMemo(
+    () => (typed ? validatePromotion(draft, { today, tiers: entries, existing: running }) : null),
+    [draft, typed, today, entries, running],
+  )
+
+  /** What it does to every tier it touches, at the fee in force today. */
+  const effect = useMemo(() => {
+    if (!typed || invalid) return []
+    return entries
+      .filter((e) => covers({ ...draft, id: '' }, e.tierKey))
+      .map((e) => {
+        const now = discountedCents(e.singleCents, { ...draft, id: '' })
+        const up = (c: number) =>
+          grossUpForProcessing({ netCents: c, pct: processing.pct, fixedCents: processing.fixedCents })
+            .chargeCents
+        return { label: e.label, from: e.singleCents, to: now, charged: up(now) }
+      })
+  }, [draft, typed, invalid, entries, processing])
+
+  const span = startsOn && endsOn && endsOn >= startsOn ? daysLeft(endsOn, startsOn) : null
+
+  return (
+    <form action={formAction} className="space-y-4 rounded-card border border-line p-4">
+      {/* READS AS A SENTENCE rather than a grid of labelled boxes. Six fields in a form
+          layout is a thing to fill in; one line of English is a thing to check. */}
+      <div className="flex flex-wrap items-center gap-2 text-sm text-ink-secondary">
+        <span>Take</span>
+        <input
+          name="value"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          inputMode="decimal"
+          aria-label="How much off"
+          className="w-20 min-h-11 rounded-field border border-line bg-surface px-3 py-2 text-right text-sm tabular-nums text-ink"
+        />
+        <select
+          name="kind"
+          value={kind}
+          onChange={(e) => setKind(e.target.value as 'percent' | 'amount')}
+          aria-label="A percentage or an amount"
+          className="min-h-11 rounded-field border border-line bg-surface px-3 py-2 text-sm text-ink"
+        >
+          <option value="percent">% off</option>
+          <option value="amount">$ off</option>
+        </select>
+        <span>off</span>
+        <select
+          name="tierKey"
+          value={tierKey}
+          onChange={(e) => setTierKey(e.target.value)}
+          aria-label="Which service"
+          className="min-h-11 max-w-full rounded-field border border-line bg-surface px-3 py-2 text-sm text-ink"
+        >
+          <option value="">every service</option>
+          {entries.map((e) => (
+            <option key={e.tierKey} value={e.tierKey}>
+              {e.label}
+            </option>
+          ))}
+        </select>
+        <span>from</span>
+        <input
+          type="date"
+          name="startsOn"
+          value={startsOn}
+          min={today}
+          onChange={(e) => setStartsOn(e.target.value)}
+          aria-label="First day"
+          className="min-h-11 rounded-field border border-line bg-surface px-3 py-2 text-sm text-ink"
+        />
+        <span>to</span>
+        <input
+          type="date"
+          name="endsOn"
+          value={endsOn}
+          min={startsOn || today}
+          onChange={(e) => setEndsOn(e.target.value)}
+          aria-label="Last day, included"
+          className="min-h-11 rounded-field border border-line bg-surface px-3 py-2 text-sm text-ink"
+        />
+      </div>
+
+      <label className="block text-xs">
+        <span className="block text-ink-faint">
+          What is it called? Providers see this on their receipt.
+        </span>
+        <input
+          name="name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="e.g. October promotion"
+          className="mt-1 w-full min-h-11 rounded-field border border-line bg-surface px-3 py-2 text-sm text-ink"
+        />
+      </label>
+
+      {invalid && <Notice>{invalid}</Notice>}
+
+      {effect.length > 0 && (
+        // The same gold panel the schedule form uses to read a change back before publishing.
+        <section className="rounded-card border border-gold/40 bg-gold/5 p-5">
+          <h3 className="text-sm font-medium">
+            What this does
+            {span !== null && (
+              <span className="text-ink-faint">
+                {' '}
+                · {span} day{span === 1 ? '' : 's'}, {prettyDay(startsOn)} to {prettyDay(endsOn)}
+              </span>
+            )}
+          </h3>
+          <ul className="mt-3 space-y-1">
+            {effect.slice(0, 8).map((e) => (
+              <li key={e.label} className="text-xs tabular-nums text-ink-secondary">
+                <span className="text-ink">{e.label}</span>
+                <span className="text-ink-faint"> · </span>
+                {usd(e.from)} → <strong>{usd(e.to)}</strong>
+                {/* What the provider is actually charged, because the schedule is what
+                    Melanite keeps and the card takes processing on top. Keoni reads this
+                    figure against a statement; the other one she never sees. */}
+                <span className="text-ink-faint"> · {usd(e.charged)} charged</span>
+              </li>
+            ))}
+          </ul>
+          {effect.length > 8 && (
+            <p className="mt-2 text-xs text-ink-faint">
+              …and {effect.length - 8} more, every service on the schedule.
+            </p>
+          )}
+          <p className="mt-3 text-xs text-ink-secondary">
+            Nobody has to accept anything. Sessions already booked inside those dates get the
+            promotional price too — it is worked out on the day of the session, not the day it
+            was booked.
+          </p>
+        </section>
+      )}
+
+      {state.error && <Notice>{state.error}</Notice>}
+      {state.success && <Notice tone="success">{state.success}</Notice>}
+
+      <StartButton disabled={!typed || invalid !== null || effect.length === 0} />
+    </form>
   )
 }
