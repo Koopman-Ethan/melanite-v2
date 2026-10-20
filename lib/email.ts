@@ -574,6 +574,10 @@ export function rentalChargedEmail(input: {
    *  published schedule. Those three are told whose number it is, because "we charged you
    *  $77.55" with no account of where that came from invites a query already answerable. */
   setByMelanite?: boolean
+  /** A promotion reduced this one. Named because the only document a provider receives would
+   *  otherwise show a figure smaller than the schedule with no account of why — and an
+   *  unexplained discount prompts the same email an unexplained charge does. */
+  promotion?: { name: string; was: string } | null
   url: string
 }): Omit<EmailMessage, 'to'> {
   const card = input.cardLast4 ? ` to your card ending ${input.cardLast4}` : ''
@@ -581,6 +585,10 @@ export function rentalChargedEmail(input: {
   const basis = input.setByMelanite
     ? 'That is the equipment rental, worked out by Keoni from the receipt you sent.'
     : 'That is the equipment rental, including card processing.'
+
+  const saved = input.promotion
+    ? `${input.promotion.name}: normally ${input.promotion.was}.`
+    : null
 
   return {
     subject: `${input.charged} laser rental — ${input.serviceName}`,
@@ -591,6 +599,7 @@ export function rentalChargedEmail(input: {
       input.when,
       '',
       `Charged${card}: ${input.charged}`,
+      ...(saved ? ['', saved] : []),
       '',
       basis,
       'What you charged your own client is yours, and does not come through Melanite.',
@@ -610,6 +619,7 @@ export function rentalChargedEmail(input: {
             `<br>${esc(input.when)}`,
         ) +
         p(`Charged${esc(card)}: <strong>${esc(input.charged)}</strong>`) +
+        (saved ? p(`<span style="color:#b8965a">${esc(saved)}</span>`) : '') +
         p(
           `<span style="font-size:13px;color:#666">${esc(basis)} What you charged your own ` +
             'client is yours, and does not come through Melanite.</span>',

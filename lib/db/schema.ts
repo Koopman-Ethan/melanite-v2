@@ -1412,6 +1412,68 @@ export const rentalFeeEntries = pgTable('rental_fee_entries', {
   ),
 ])
 
+/** A temporary reduction on the rental fee — Keoni running a promotion.
+ *
+ *  NOT A SCHEDULE VERSION, and that is the whole reason this table exists. Publishing a
+ *  schedule blocks every provider from booking until they accept it
+ *  (`providersNeedingReacceptance`), so a week of 25% off run through the pricing editor would
+ *  lock everybody out twice — once starting, once ending. A promotion only ever REDUCES what a
+ *  provider pays, and nobody has to agree to being charged less than the ceiling they already
+ *  accepted, so it needs no acceptance and sits on top of the schedule rather than replacing
+ *  it.
+ *
+ *  ONE PER SERVICE AT A TIME. Enforced in `lib/validate/promotion.ts` rather than by an
+ *  exclusion constraint, which would need `btree_gist` for the date range and a second rule
+ *  for the null-tier case. `promotionFor` takes the first match, so a clash that slipped
+ *  through would be resolved rather than compounded.
+ *
+ *  ENDING EARLY moves `endsOn` to today and stamps `endedAt` — it does not add a second way of
+ *  asking whether a promotion is live. One date predicate answers it everywhere, and sessions
+ *  already run today keep the price they were quoted. */
+export const rentalPromotions = pgTable('rental_promotions', {
+  id: uuid().primaryKey().defaultRandom(),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  createdBy: uuid().references(() => providers.id, { onDelete: 'set null' }),
+  /** What Keoni called it. Shown to the provider on their receipt, so it is a name and not a
+   *  note to herself. */
+  name: text().notNull(),
+  /** A `RENTAL_TIERS` key, or NULL for every tier — "10% off everything in November". Not a
+   *  foreign key, for the same reason as `rentalFeeEntries.tierKey`. */
+  tierKey: text(),
+  /** Reuses the enum the client-side discount already uses. `'none'` is meaningless here and
+   *  the check below refuses it; the two live forms mean the same as they do there. */
+  kind: discountType().notNull(),
+  /** A percentage 1-99, or cents off. Which one `kind` decides.
+   *
+   *  CENTS as an integer for the amount form, matching `rentalFeeEntries` and
+   *  `feeOverrideCents` — every consumer wants cents and a numeric round trip is where penny
+   *  disagreements come from. */
+  value: integer().notNull(),
+  /** Denver calendar dates, both INCLUSIVE: "to 31 Oct" covers sessions on the 31st. A `date`
+   *  rather than a timestamp because a promotion runs over days and anything finer puts a
+   *  cliff edge in the middle of somebody's working day. */
+  startsOn: date().notNull(),
+  endsOn: date().notNull(),
+  /** Set when it was stopped early, alongside `endsOn` being moved to that day. Kept for the
+   *  audit: "it ran to the 31st" and "she stopped it on the 24th" are different facts. */
+  endedAt: timestamp({ withTimezone: true }),
+  endedBy: uuid().references(() => providers.id, { onDelete: 'set null' }),
+}, (t) => [
+  index().on(t.endsOn),
+  check('rental_promotions_kind', sql`${t.kind} <> 'none'`),
+  check('rental_promotions_named', sql`length(trim(${t.name})) > 0`),
+  // A promotion can only ever reduce a fee, and cannot reduce one to nothing: zero is a failed
+  // charge rather than a free session, because Stripe refuses anything under 50c. 100% is
+  // excluded here; whether a smaller percentage reaches zero depends on the fee and is checked
+  // against the live schedule when the promotion is created.
+  check(
+    'rental_promotions_percent_range',
+    sql`${t.kind} <> 'percent' OR (${t.value} >= 1 AND ${t.value} <= 99)`,
+  ),
+  check('rental_promotions_amount_positive', sql`${t.kind} <> 'amount' OR ${t.value} > 0`),
+  check('rental_promotions_dates_ordered', sql`${t.endsOn} >= ${t.startsOn}`),
+])
+
 // ---------------------------------------------------------------------------
 // Laser rental packs
 // ---------------------------------------------------------------------------

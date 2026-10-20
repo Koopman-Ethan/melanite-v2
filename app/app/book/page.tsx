@@ -12,7 +12,9 @@ import {
   getMonthAvailability,
 } from '@/lib/db/queries/availability'
 import { packBalancesFor } from '@/lib/rental/packs'
+import { describePromotion, discountedCents, promotionFor } from '@/lib/promotions'
 import { tierForService } from '@/lib/rental-fees'
+import { activePromotions } from '@/lib/rental/promotions'
 import { getLiveSchedule } from '@/lib/rental/schedule'
 import { getProcessingRate } from '@/lib/db/queries/admin-tools'
 import { grossUpForProcessing } from '@/lib/money'
@@ -84,11 +86,13 @@ export default async function BookPage({
   // and only falls back to the selected date's month.
   const month = /^\d{4}-\d{2}$/.test(params.month ?? '') ? params.month! : date.slice(0, 7)
 
-  const [{ slots, hours }, monthAvailability, packs, schedule, [provider]] = await Promise.all([
+  const [{ slots, hours }, monthAvailability, packs, schedule, promotions, [provider]] =
+    await Promise.all([
     getAvailability(date, durationMins),
     getMonthAvailability(month, durationMins),
     packBalancesFor(user.id),
     getLiveSchedule(),
+    activePromotions(),
     db
       .select({
         revenueModel: providers.revenueModel,
@@ -105,23 +109,44 @@ export default async function BookPage({
 
   /** The live fee for a service, read off the schedule already loaded above rather than
    *  queried per row — a provider with twenty services would otherwise be twenty round trips
-   *  to price one dropdown. */
-  const feeFromSchedule = (serviceName: string): number | null => {
+   *  to price one dropdown.
+   *
+   *  PRICED FOR THE SELECTED DAY, which is why this is computed here rather than in the
+   *  browser: the date lives in the URL and the server recomputes on every change, so a
+   *  provider browsing to a week after a promotion ends sees the price return to normal
+   *  without any discount arithmetic shipping to the client.
+   *
+   *  Returns what the card will take, and — only when a promotion is reducing it — what it
+   *  would have taken, so the form can show the saving rather than merely a smaller number. */
+  const feeFromSchedule = (
+    serviceName: string,
+  ): { chargeCents: number; wasCents: number | null; promotion: string | null } | null => {
     const tier = tierForService(serviceName)
     if (!tier) return null
-    const net = schedule.byTier.get(tier.key)?.singleCents ?? tier.singleCents
+    const listed = schedule.byTier.get(tier.key)?.singleCents ?? tier.singleCents
+    const promo = promotionFor(tier.key, date, promotions)
+    const net = discountedCents(listed, promo)
 
     // QUOTED WITH PROCESSING ON IT, because that is what the card is charged. The schedule is
     // what Melanite nets; a provider comparing the number here against their statement must
     // find the same figure, and "$60" against a $62.11 line is a support message every time.
     //
     // The same function the charge uses, from the same settings, so the two cannot drift —
-    // which is the shape of every money bug in this codebase so far.
-    return grossUpForProcessing({
-      netCents: net,
-      pct: processing.pct,
-      fixedCents: processing.fixedCents,
-    }).chargeCents
+    // which is the shape of every money bug in this codebase so far. The promotion is applied
+    // to the NET before the gross-up, for the same reason: discounting the grossed-up figure
+    // would quietly discount Melanite's processing recovery too.
+    const up = (cents: number) =>
+      grossUpForProcessing({
+        netCents: cents,
+        pct: processing.pct,
+        fixedCents: processing.fixedCents,
+      }).chargeCents
+
+    return {
+      chargeCents: up(net),
+      wasCents: promo ? up(listed) : null,
+      promotion: promo ? `${describePromotion(promo)} · ${promo.name}` : null,
+    }
   }
 
 
@@ -152,7 +177,9 @@ export default async function BookPage({
       </header>
 
       <BookPanel
-        services={services.map((s) => ({
+        services={services.map((s) => {
+          const quote = feeFromSchedule(s.name)
+          return {
           serviceId: s.serviceId,
           name: s.name,
           category: s.category,
@@ -167,9 +194,14 @@ export default async function BookPage({
           // after the session and sets the figure — so any number quoted here would be
           // invented. The form reads null as "no fee set" and lets them book anyway; see
           // `quotesNoFee` below, which is what keeps that from looking like a fault.
-          rentalFeeCents: payingRent ? (quotesNoFee ? null : feeFromSchedule(s.name)) : 0,
+          rentalFeeCents: payingRent ? (quotesNoFee ? null : (quote?.chargeCents ?? null)) : 0,
+          // What it would have cost without the promotion, and what the promotion is called.
+          // Both null unless one is running on this service for the selected day.
+          rentalWasCents: payingRent && !quotesNoFee ? (quote?.wasCents ?? null) : null,
+          promotion: payingRent && !quotesNoFee ? (quote?.promotion ?? null) : null,
           tierKey: tierForService(s.name)?.key ?? null,
-        }))}
+          }
+        })}
         packs={packs.map((p) => ({
           tierKey: p.tierKey,
           label: p.label,

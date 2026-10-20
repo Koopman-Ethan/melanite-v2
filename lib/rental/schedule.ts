@@ -9,7 +9,10 @@ import {
   rentalFeeEntries,
   rentalFeeSchedules,
 } from '@/lib/db/schema'
+import { denverYmd, discountedCents, promotionFor, type Promotion } from '@/lib/promotions'
 import { RENTAL_TIERS, tierForService, type RentalTier } from '@/lib/rental-fees'
+
+import { promotionsCovering } from './promotions'
 
 // What Melanite charges to use the laser, as it currently stands.
 //
@@ -129,12 +132,26 @@ export async function getLiveSchedule(): Promise<LiveSchedule> {
  * The function application code should call. NULL means the service has no fee — see `UNPRICED`
  * in `lib/rental-fees.ts` — and is a refusal, never a free session.
  */
-export async function feeForService(serviceName: string): Promise<number | null> {
+export async function feeForService(
+  serviceName: string,
+  on: Date = new Date(),
+): Promise<number | null> {
   const tier = tierForService(serviceName)
   if (!tier) return null
 
   const schedule = await getLiveSchedule()
-  return schedule.byTier.get(tier.key)?.singleCents ?? tier.singleCents
+  const listed = schedule.byTier.get(tier.key)?.singleCents ?? tier.singleCents
+
+  // A PROMOTION IS RESOLVED AGAINST THE SESSION'S DATE, NOT TODAY, and that is what the `on`
+  // parameter is for. Rent is charged about twelve hours after a session ends, so a Friday
+  // evening session is swept on Saturday morning — if a promotion finished on the Friday,
+  // asking "is one running now" would charge full price for a session that was quoted and
+  // worked at the promotional rate. Every promotion's last day would do this.
+  //
+  // It defaults to now because most callers are asking the present-tense question ("what does
+  // this cost"), and the three that know a real session date pass it.
+  const promos = await promotionsCovering(on)
+  return discountedCents(listed, promotionFor(tier.key, denverYmd(on), promos))
 }
 
 /**
@@ -160,6 +177,11 @@ export async function feeForService(serviceName: string): Promise<number | null>
  * Melanite has no way to see. Keoni decided she would rather read the receipt than track their
  * pricing. Returning null is the honest version of the same arrangement.
  *
+ * A PROMOTION REDUCES THE `tier` ANSWER AND NOTHING ELSE. The three on `keoni_sets` have no
+ * derived figure for one to reduce — Keoni reads their receipt and types what they owe, and if
+ * she means to charge them less during a promotion she types less. Applying one on top of a
+ * figure she set by hand would be overriding a decision with a rule.
+ *
  * CALLERS MUST NOT FALL BACK TO THE TIER FEE on null for a `keoni_sets` provider. That is the
  * mistake this shape is meant to make impossible — quoting or charging them the published
  * schedule is charging them somebody else's price.
@@ -167,6 +189,7 @@ export async function feeForService(serviceName: string): Promise<number | null>
 export async function feeForProviderService(
   providerId: string,
   serviceName: string,
+  on: Date = new Date(),
 ): Promise<number | null> {
   const [provider] = await db
     .select({ rentBasis: providers.rentBasis })
@@ -175,12 +198,40 @@ export async function feeForProviderService(
     .limit(1)
 
   if (!provider) return null
-  if (provider.rentBasis === 'tier') return feeForService(serviceName)
+  if (provider.rentBasis === 'tier') return feeForService(serviceName, on)
 
   // `keoni_sets`. Nothing to work out, and that is the whole arrangement.
   return null
 }
 
+
+/**
+ * The promotion reducing this service on this date, and what it would have cost without one.
+ *
+ * FOR SAYING SO, not for pricing — `feeForService` has already applied it. This exists because
+ * a receipt reading "$46.70 charged" with no account of why it is not the usual $62.12 invites
+ * exactly the query the receipt was meant to prevent, and the name is the only part of a
+ * promotion a provider ever sees.
+ *
+ * Null when nothing applies, which is the ordinary case and costs one indexed read.
+ */
+export async function promotionOnService(
+  serviceName: string,
+  on: Date,
+): Promise<{ promotion: Promotion; listedCents: number } | null> {
+  const tier = tierForService(serviceName)
+  if (!tier) return null
+
+  const promos = await promotionsCovering(on)
+  const promotion = promotionFor(tier.key, denverYmd(on), promos)
+  if (!promotion) return null
+
+  const schedule = await getLiveSchedule()
+  return {
+    promotion,
+    listedCents: schedule.byTier.get(tier.key)?.singleCents ?? tier.singleCents,
+  }
+}
 
 /** The version a provider has to have accepted. Null when nothing is published yet, which
  *  means there is nothing to accept and the gate is open. */

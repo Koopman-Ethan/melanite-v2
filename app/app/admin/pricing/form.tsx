@@ -6,6 +6,13 @@ import { useFormStatus } from 'react-dom'
 import { Button } from '@/components/ui/button'
 import { Notice } from '@/components/ui/field'
 import { cn } from '@/lib/cn'
+import {
+  describePromotion,
+  discountedCents,
+  prettyDay,
+  promotionFor,
+  type Promotion,
+} from '@/lib/promotions'
 
 import { publishPricing, type PricingState } from './actions'
 
@@ -52,12 +59,20 @@ export function PricingForm({
   note,
   entries,
   awaitingAcceptance,
+  promotions,
+  today,
 }: {
   version: number | null
   publishedAt: string | null
   note: string | null
   entries: EntryView[]
   awaitingAcceptance: number
+  /** Running or queued, so a tier can say what is actually being charged for it right now.
+   *  Without this the table is the published price and the statement is something else, and
+   *  the difference is invisible on the page that exists to explain prices. */
+  promotions: Promotion[]
+  /** Denver's today, from the server. */
+  today: string
 }) {
   const [state, formAction] = useActionState<PricingState, FormData>(publishPricing, {})
 
@@ -121,6 +136,17 @@ export function PricingForm({
         .map((e) => e.label),
     [draft, entries],
   )
+
+  /** The promotion reducing each tier TODAY, if any. Queued ones are listed in the section
+   *  below instead — on this table they would claim a price that is not being charged yet. */
+  const live = useMemo(() => {
+    const out = new Map<string, Promotion>()
+    for (const e of entries) {
+      const promo = promotionFor(e.tierKey, today, promotions)
+      if (promo) out.set(e.tierKey, promo)
+    }
+    return out
+  }, [entries, promotions, today])
 
   const seeded = entries.filter((e) => e.fromSeed)
 
@@ -195,6 +221,18 @@ export function PricingForm({
                         bad ? 'border-danger text-danger' : 'border-line text-ink',
                       )}
                     />
+                    {/* WHAT IS ACTUALLY BEING CHARGED, under the price that would be without a
+                        promotion. Not a strikethrough on the input, which is editable and
+                        would read as the value being wrong — this is a second fact about the
+                        tier, not a correction to the field. */}
+                    {live.get(e.tierKey) && (
+                      <p className="mt-1 text-[11px] text-gold tabular-nums">
+                        {describePromotion(live.get(e.tierKey)!)} → {usd(
+                          discountedCents(e.singleCents, live.get(e.tierKey)!),
+                        )}{' '}
+                        until {prettyDay(live.get(e.tierKey)!.endsOn)}
+                      </p>
+                    )}
                   </td>
                   <td className="p-3 text-right whitespace-nowrap">
                     <label className="sr-only" htmlFor={`low-${e.tierKey}`}>

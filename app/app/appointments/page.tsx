@@ -19,9 +19,11 @@ import { providers } from '@/lib/db/schema'
 
 import { AppointmentActions } from './appointment-actions'
 import { closeoutWindowOpen } from '@/lib/end-of-use'
+import { denverYmd, discountedCents, promotionFor } from '@/lib/promotions'
 import { tierForService } from '@/lib/rental-fees'
 import { sharesRevenue } from '@/lib/revenue-model'
 import { getCheckoutSettings } from '@/lib/db/queries/checkout'
+import { activePromotions } from '@/lib/rental/promotions'
 import { getLiveSchedule } from '@/lib/rental/schedule'
 
 import { SessionActions } from './session-actions'
@@ -306,9 +308,13 @@ async function AppointmentList({
   // The live schedule, loaded ONCE and mapped in code rather than queried per row — the same
   // trick `app/app/book/page.tsx` uses for its dropdown, and for the same reason: a provider
   // with a month of appointments would otherwise be a round trip each.
-  const [schedule, settings, [me]] = await Promise.all([
+  const [schedule, settings, promotions, [me]] = await Promise.all([
     getLiveSchedule(),
     getCheckoutSettings(),
+    // Everything not yet finished, mapped per row below. A promotion that ended yesterday
+    // cannot apply to an appointment shown here — this list is upcoming and recent work, and
+    // the sessions already charged show what was actually taken rather than a derived figure.
+    activePromotions(),
     // Once per list, not once per card. Which basis they are on decides whether every finished
     // session asks them for a receipt, and it is the same answer for every row.
     db
@@ -318,10 +324,15 @@ async function AppointmentList({
       .limit(1),
   ])
   const keoniSetsFee = me?.rentBasis === 'keoni_sets'
-  const feeFor = (serviceName: string): number | null => {
+  /** What this session will cost, on the day it happens.
+   *
+   *  ON ITS OWN DATE, not today: a provider looking at next month's bookings during a
+   *  promotion that ends this week must not be quoted this week's price for them. */
+  const feeFor = (serviceName: string, on: Date): number | null => {
     const tier = tierForService(serviceName)
     if (!tier) return null
-    return schedule.byTier.get(tier.key)?.singleCents ?? tier.singleCents
+    const listed = schedule.byTier.get(tier.key)?.singleCents ?? tier.singleCents
+    return discountedCents(listed, promotionFor(tier.key, denverYmd(on), promotions))
   }
 
   return (
@@ -331,7 +342,7 @@ async function AppointmentList({
           key={a.id}
           appointment={a}
           origin={origin}
-          dueCents={keoniSetsFee ? null : feeFor(a.serviceName)}
+          dueCents={keoniSetsFee ? null : feeFor(a.serviceName, a.startTime)}
           lateCancellationHours={settings.lateCancellationHours}
           keoniSetsFee={keoniSetsFee}
         />

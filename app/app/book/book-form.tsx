@@ -30,6 +30,12 @@ export interface ServiceView {
   /** What Melanite charges for the slot, in cents. Null means no published fee, which is a
    *  refusal rather than a free session — the form blocks it the same way the action does. */
   rentalFeeCents: number | null
+  /** What the slot would have cost without a promotion, in cents. Null when none is running
+   *  on this service for the selected day — so its presence IS "there is a promotion", and
+   *  the saving can be shown rather than only a smaller number. */
+  rentalWasCents: number | null
+  /** "25% off · October promotion", ready to print. Null alongside `rentalWasCents`. */
+  promotion: string | null
   /** Which rental tier it falls in, for matching against a pack the provider is holding. */
   tierKey: string | null
 }
@@ -177,10 +183,14 @@ export function BookForm({
             const options = group.items.map((s) => (
               <option key={s.serviceId} value={s.serviceId}>
                 {s.name}
+                {/* A bare "was" price cannot be struck through inside an <option> — the
+                    browser renders only text — so the saving is stated in words instead. */}
                 {quotesNoFee
                   ? ''
                   : s.rentalFeeCents !== null
-                    ? ` · ${usd(s.rentalFeeCents)} rental`
+                    ? s.rentalWasCents !== null
+                      ? ` · ${usd(s.rentalFeeCents)} rental (was ${usd(s.rentalWasCents)})`
+                      : ` · ${usd(s.rentalFeeCents)} rental`
                     : ' · no fee set'}
               </option>
             ))
@@ -380,6 +390,14 @@ export function BookForm({
                       : ''}{' '}
                     after your session
                   </strong>{' '}
+                  {/* THE PROMOTION, where the figure is, rather than as a banner at the top of
+                      the page. A reduction nobody notices changes nobody's mind about booking,
+                      and the moment it is worth knowing is while reading the price. */}
+                  {service?.rentalWasCents !== null && service?.rentalWasCents !== undefined && (
+                    <span className="text-gold">
+                      (was <s>{usd(service.rentalWasCents)}</s> — {service.promotion}){' '}
+                    </span>
+                  )}
                   — taken from{' '}
                   {cardLast4 ? `the card ending ${cardLast4}` : 'your payment method on file'} about
                   twelve hours after it ends, for the equipment and the room. That figure includes

@@ -3,7 +3,14 @@
 import { revalidatePath } from 'next/cache'
 
 import { requireAdmin } from '@/lib/auth/dal'
-import { publishSchedule, type PublishInput } from '@/lib/rental/schedule'
+import {
+  activePromotions,
+  createPromotion,
+  endPromotionNow,
+} from '@/lib/rental/promotions'
+import { getLiveSchedule, publishSchedule, type PublishInput } from '@/lib/rental/schedule'
+import { validatePromotion, type DraftPromotion } from '@/lib/validate/promotion'
+import { todayInDenver } from '@/lib/validation'
 
 export interface PricingState {
   error?: string
@@ -77,4 +84,87 @@ function dollarsToCents(raw: FormDataEntryValue | null): number | null {
   const value = Number(text)
   if (!Number.isFinite(value) || value < 0) return null
   return Math.round(value * 100)
+}
+
+/**
+ * Starts a promotion.
+ *
+ * SEPARATE FROM PUBLISHING, and the separation is the point. Publishing a schedule asks every
+ * provider to accept the new prices before they can book again; a promotion asks nobody,
+ * because it can only ever charge them LESS than the ceiling they already accepted. Running
+ * one through the pricing editor would lock everybody out twice — once starting, once ending.
+ *
+ * Every rule lives in `validatePromotion`, so the form can refuse before the round trip and
+ * this still refuses if somebody posts past it.
+ */
+export async function startPromotion(
+  _prev: PricingState,
+  formData: FormData,
+): Promise<PricingState> {
+  const admin = await requireAdmin()
+
+  const kind = String(formData.get('kind') ?? '')
+  if (kind !== 'percent' && kind !== 'amount') return { error: 'Pick a percentage or an amount.' }
+
+  // A percentage is a whole number; an amount is dollars, converted here exactly as the
+  // schedule's figures are, so there is one implementation of money crossing the wire.
+  const raw = String(formData.get('value') ?? '').trim()
+  const value = kind === 'percent' ? Number(raw) : dollarsToCents(raw)
+  if (value === null || !Number.isFinite(value)) return { error: 'That is not a number.' }
+
+  const tierKey = String(formData.get('tierKey') ?? '')
+
+  const draft: DraftPromotion = {
+    name: String(formData.get('name') ?? ''),
+    // The sentinel is the empty string because a <select> cannot carry null.
+    tierKey: tierKey === '' ? null : tierKey,
+    kind,
+    value: Math.round(value),
+    startsOn: String(formData.get('startsOn') ?? ''),
+    endsOn: String(formData.get('endsOn') ?? ''),
+  }
+
+  const [schedule, existing] = await Promise.all([getLiveSchedule(), activePromotions()])
+
+  const invalid = validatePromotion(draft, {
+    today: todayInDenver(),
+    tiers: schedule.entries,
+    existing,
+  })
+  if (invalid) return { error: invalid }
+
+  await createPromotion(draft, admin.id)
+
+  revalidateEverythingPriced()
+
+  return {
+    success: `“${draft.name.trim()}” is running from ${draft.startsOn} to ${draft.endsOn}. Nobody has to accept anything.`,
+  }
+}
+
+/** Stops one, or cancels one that had not started. See `endPromotionNow` for why those are
+ *  different operations rather than one with a flag. */
+export async function endPromotion(id: string): Promise<PricingState> {
+  const admin = await requireAdmin()
+
+  const result = await endPromotionNow(id, admin.id)
+  if (result === 'not_running') return { error: 'That promotion had already finished.' }
+
+  revalidateEverythingPriced()
+
+  return {
+    success:
+      result === 'cancelled'
+        ? 'Cancelled — it never started, so nothing was quoted at that price.'
+        : 'Ended. Sessions today keep the promotional price; tomorrow is back to the schedule.',
+  }
+}
+
+/** The surfaces that quote or charge a rental fee. The same four `publishPricing` clears,
+ *  because a promotion changes exactly the same numbers a price change does. */
+function revalidateEverythingPriced(): void {
+  revalidatePath('/app/admin/pricing')
+  revalidatePath('/app/book')
+  revalidatePath('/app/appointments')
+  revalidatePath('/app/account')
 }

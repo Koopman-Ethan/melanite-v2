@@ -1,8 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { discountedCents } from '@/lib/promotions'
 import { RENTAL_TIERS } from '@/lib/rental-fees'
 import { hasAcceptedRentalTerms, RENTAL_TERMS_VERSION } from '@/lib/rental-terms'
-import { feeForService, getLiveSchedule, publishSchedule } from '@/lib/rental/schedule'
+import {
+  feeForService,
+  getLiveSchedule,
+  promotionOnService,
+  publishSchedule,
+} from '@/lib/rental/schedule'
 
 // The fee schedule Keoni edits.
 //
@@ -222,7 +228,12 @@ describe('reading the live schedule', () => {
       [live],
     )) as { single_cents: number }[]
 
-    expect(fee).toBe(Number(row.single_cents))
+    // LESS WHATEVER PROMOTION IS RUNNING TODAY, read back the same way the application reads
+    // it. Pinning the bare row would make this test fail the moment Keoni runs a promotion —
+    // reporting her using the feature as a code defect, which is the same mistake the
+    // hardcoded Chin price made in October.
+    const promoted = await promotionOnService('Laser Hair Removal — Chin', new Date())
+    expect(fee).toBe(discountedCents(Number(row.single_cents), promoted?.promotion ?? null))
   })
 
   it('still returns null for a service with no tier', async () => {

@@ -365,6 +365,9 @@ export async function notifyProviderCharged(input: {
   serviceName: string
   when: Date
   amountCents: number
+  /** A promotion reduced this charge: its name, and what the card would otherwise have taken.
+   *  Null is the ordinary case. */
+  promotion?: { name: string; wasCents: number } | null
 }): Promise<void> {
   try {
     const [provider] = await db
@@ -393,6 +396,9 @@ export async function notifyProviderCharged(input: {
         // for everybody else it came off the published schedule. Saying which answers the
         // question the email would otherwise provoke.
         setByMelanite: provider.rentBasis === 'keoni_sets',
+        promotion: input.promotion
+          ? { name: input.promotion.name, was: `$${toMoney(input.promotion.wasCents)}` }
+          : null,
         url: `${await appOrigin()}/app/charges`,
       }),
     })

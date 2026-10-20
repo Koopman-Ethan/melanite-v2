@@ -330,6 +330,13 @@
       "when": 1792428808688,
       "tag": "0046_processing_fees",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1792500335860,
+      "tag": "0047_promotions",
+      "breakpoints": true
     }
   ]
 }

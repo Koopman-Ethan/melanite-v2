@@ -166,6 +166,32 @@ const CHECKS: Check[] = [
       ).length >= 1,
   },
   {
+    label: 'rental_promotions can only ever reduce a fee',
+    because:
+      'a promotion skips the acceptance gate ONLY because it cannot raise a price — without ' +
+      'these checks a 150% "discount" or a zeroing one is a charge nobody agreed to, or a card ' +
+      'decline on somebody who did nothing wrong',
+    run: async (q) => {
+      const want = [
+        'rental_promotions_kind',
+        'rental_promotions_percent_range',
+        'rental_promotions_amount_positive',
+        'rental_promotions_dates_ordered',
+      ]
+      const have = new Set(
+        (
+          await rows(
+            q,
+            `SELECT conname FROM pg_constraint WHERE contype = 'c'
+               AND conrelid = 'rental_promotions'::regclass`,
+          )
+        ).map((r) => String(r.conname)),
+      )
+      const missing = want.filter((c) => !have.has(c))
+      return missing.length === 0 ? true : `missing ${missing.join(', ')}`
+    },
+  },
+  {
     label: 'external payment CHECK on bookings',
     because:
       'without it a booking can be "paid outside the app" without saying how, which Keoni cannot invoice against',

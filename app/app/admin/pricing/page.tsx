@@ -2,9 +2,13 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 
 import { requireAdmin } from '@/lib/auth/dal'
+import { getProcessingRate } from '@/lib/db/queries/admin-tools'
+import { activePromotions } from '@/lib/rental/promotions'
 import { getLiveSchedule, providersNeedingReacceptance } from '@/lib/rental/schedule'
+import { todayInDenver } from '@/lib/validation'
 
 import { PricingForm } from './form'
+import { Promotions } from './promotions'
 
 export const metadata: Metadata = { title: 'Laser pricing · Melanite' }
 export const dynamic = 'force-dynamic'
@@ -18,9 +22,11 @@ export const dynamic = 'force-dynamic'
 export default async function PricingPage() {
   await requireAdmin()
 
-  const [schedule, awaiting] = await Promise.all([
+  const [schedule, awaiting, promotions, processing] = await Promise.all([
     getLiveSchedule(),
     providersNeedingReacceptance(),
+    activePromotions(),
+    getProcessingRate(),
   ])
 
   return (
@@ -62,6 +68,15 @@ export default async function PricingPage() {
         note={schedule.note}
         entries={schedule.entries}
         awaitingAcceptance={awaiting}
+        promotions={promotions}
+        today={todayInDenver()}
+      />
+
+      <Promotions
+        running={promotions}
+        entries={schedule.entries}
+        today={todayInDenver()}
+        processing={processing}
       />
     </main>
   )

@@ -8,7 +8,7 @@ import { bookings, ledgerEntries, providerServices, providers, services } from '
 import { grossUpForProcessing, toMoney } from '@/lib/money'
 import { getProcessingRate } from '@/lib/db/queries/admin-tools'
 import { notifyProviderCharged } from '@/lib/notify-melanite'
-import { feeForProviderService } from '@/lib/rental/schedule'
+import { feeForProviderService, promotionOnService } from '@/lib/rental/schedule'
 import { isHouse, paysRent } from '@/lib/revenue-model'
 import { StripeApiError, stripePost, stripeWritesEnabled } from '@/lib/stripe/client'
 
@@ -68,6 +68,7 @@ export async function rentalFeeForBooking(bookingId: string): Promise<number | n
       providerId: bookings.providerId,
       serviceName: services.name,
       feeOverrideCents: bookings.feeOverrideCents,
+      startTime: bookings.startTime,
     })
     .from(bookings)
     .innerJoin(providerServices, eq(bookings.providerServiceId, providerServices.id))
@@ -76,7 +77,10 @@ export async function rentalFeeForBooking(bookingId: string): Promise<number | n
     .limit(1)
 
   if (!row) return null
-  return row.feeOverrideCents ?? (await feeForProviderService(row.providerId, row.serviceName))
+  return (
+    row.feeOverrideCents ??
+    (await feeForProviderService(row.providerId, row.serviceName, row.startTime))
+  )
 }
 
 /**
@@ -174,7 +178,15 @@ export async function chargeRentalFee(bookingId: string): Promise<RentalChargeRe
   // Falls back to the derived fee, which is the published tier price for everybody else.
   //
   // THIS IS THE NET, NOT THE CHARGE. See the gross-up below.
-  const netCents = booking.feeOverrideCents ?? (await feeForProviderService(booking.providerId, booking.serviceName))
+  //
+  // PRICED ON THE DAY OF THE SESSION, not the day the sweep runs. Rent is taken about twelve
+  // hours after a session ends, so a Friday evening session is charged on Saturday morning —
+  // and a promotion that finished on the Friday still has to apply to it. `startTime` rather
+  // than `endTime` because a late session can end after midnight, and the day it started is
+  // both the day it belongs to and the day the provider was quoted against.
+  const netCents =
+    booking.feeOverrideCents ??
+    (await feeForProviderService(booking.providerId, booking.serviceName, booking.startTime))
 
   if (netCents === null) {
     // The loud gap. A service with no fee must not become a free session; it is a question for
@@ -343,6 +355,13 @@ export async function chargeRentalFee(bookingId: string): Promise<RentalChargeRe
   //
   // Best effort, and after the ledger row: a bounced email must never undo a charge that went
   // through.
+  // Only when Keoni did not set the figure herself: her number IS the fee for that session,
+  // and naming a promotion beside it would claim a derivation that did not happen.
+  const promoted =
+    booking.feeOverrideCents === null
+      ? await promotionOnService(booking.serviceName, booking.startTime)
+      : null
+
   await notifyProviderCharged({
     providerId: booking.providerId,
     serviceName: booking.serviceName,
@@ -350,6 +369,15 @@ export async function chargeRentalFee(bookingId: string): Promise<RentalChargeRe
     // What actually left their card, not what Melanite kept. A receipt that named the net
     // would not match their statement.
     amountCents: chargeCents,
+    // Why this one is cheaper than usual. Without it the only document a provider receives
+    // shows an unexplained figure, which is the query the receipt exists to prevent.
+    promotion: promoted
+      ? { name: promoted.promotion.name, wasCents: grossUpForProcessing({
+          netCents: promoted.listedCents,
+          pct: processing.pct,
+          fixedCents: processing.fixedCents,
+        }).chargeCents }
+      : null,
   })
 
   return { charged: { amountCents: chargeCents, ledgerEntryId: entry.id } }

@@ -131,7 +131,16 @@ describe('what a session costs', () => {
     // What is worth pinning is the WIRING: the fee for a booking is the fee for its service's
     // tier, read from the published schedule. `feeForService` is the one function that knows,
     // and the point is that the booking path reaches the same answer by a different route.
-    const expected = await feeForService('Laser Hair Removal — Chin')
+    //
+    // ASKED ON THE BOOKING'S OWN DAY, which is part of that wiring now. A promotion reduces
+    // the fee for the dates it covers, so "the same answer" is only the same question when
+    // both routes are asked about the same session — and the booking path is deliberately
+    // priced on the day of the session rather than the day the sweep runs.
+    const [when] = (await sql.query(`SELECT start_time FROM bookings WHERE id = $1`, [
+      priced.bookingId,
+    ])) as { start_time: string }[]
+
+    const expected = await feeForService('Laser Hair Removal — Chin', new Date(when.start_time))
     expect(expected, 'Chin must be priced for this fixture to mean anything').not.toBeNull()
     expect(await rentalFeeForBooking(priced.bookingId)).toBe(expected)
   })
