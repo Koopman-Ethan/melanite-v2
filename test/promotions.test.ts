@@ -8,9 +8,10 @@ import {
   discountedCents,
   overlaps,
   promotionFor,
+  type DraftPromotion,
   type Promotion,
 } from '@/lib/promotions'
-import { validatePromotion, type DraftPromotion } from '@/lib/validate/promotion'
+import { validatePromotion, validatePricesAgainstPromotions } from '@/lib/validate/promotion'
 
 // A temporary reduction on the rental fee, and the one bug it exists to not have.
 //
@@ -30,6 +31,7 @@ const promo = (over: Partial<Promotion> = {}): Promotion => ({
   value: 25,
   startsOn: '2026-10-21',
   endsOn: '2026-10-31',
+  endedAt: null,
   ...over,
 })
 
@@ -240,6 +242,88 @@ describe('what Keoni is allowed to create', () => {
         existing,
       }),
     ).toBeNull()
+  })
+})
+
+describe('ending a promotion early', () => {
+  // THE PROMISE. "End it now" stops the promotion being handed to anybody else; it does not
+  // reach forward and reprice work already agreed to. A provider who booked next Tuesday at
+  // $85.50 is charged $85.50, whatever Keoni does on Monday.
+  const endedOn25th = promo({ endedAt: new Date('2026-10-25T18:00:00Z') })
+
+  const bookedBefore = new Date('2026-10-22T16:00:00Z')
+  const bookedAfter = new Date('2026-10-27T16:00:00Z')
+
+  it('keeps its price for a session booked before it was ended', () => {
+    const got = promotionFor('lhr_small', '2026-10-28', [endedOn25th], bookedBefore)
+    expect(got, 'booked on the 22nd, ended on the 25th, session on the 28th').not.toBeNull()
+    expect(discountedCents(6000, got)).toBe(4500)
+  })
+
+  it('does not apply to a booking made after it was ended', () => {
+    expect(promotionFor('lhr_small', '2026-10-28', [endedOn25th], bookedAfter)).toBeNull()
+  })
+
+  it('is gone from a fresh quote, which is what ending it is for', () => {
+    // No `bookedAt` means "being promised right now". Relative to the clock rather than to a
+    // fixed date, because `endedAt` is stamped when the button is pressed — a hardcoded one
+    // would be in the suite's future today and its past next year, and the test would read as
+    // flaky when the only moving part was the calendar.
+    const justEnded = promo({ endedAt: new Date(Date.now() - 1000) })
+    expect(promotionFor('lhr_small', '2026-10-28', [justEnded])).toBeNull()
+  })
+
+  it('still stops at its own last day for a booking made before it ended', () => {
+    // Ending early cannot EXTEND it. The advertised window is still the outer limit.
+    expect(promotionFor('lhr_small', '2026-11-01', [endedOn25th], bookedBefore)).toBeNull()
+  })
+
+  it('hands a session to whichever promotion was in force when it was booked', () => {
+    // End one on the 25th, start another on the 26th, and the days they share belong to the
+    // one that was running when the booking was taken.
+    const replacement = promo({
+      id: 'p2',
+      name: 'Late October',
+      value: 10,
+      startsOn: '2026-10-26',
+      endsOn: '2026-10-31',
+    })
+    const all = [endedOn25th, replacement]
+
+    expect(promotionFor('lhr_small', '2026-10-28', all, bookedBefore)?.name).toBe(
+      'October promotion',
+    )
+    expect(promotionFor('lhr_small', '2026-10-28', all, bookedAfter)?.name).toBe('Late October')
+  })
+})
+
+describe('republishing prices under a running promotion', () => {
+  // The floor, kept from the other side. Creating a promotion refuses one that would take a fee
+  // under a dollar — which leaves the same floor walkable by repricing a tier low enough that a
+  // promotion already on the books reduces it below what Stripe will accept.
+  const thirtyOff = [promo({ kind: 'amount', value: 3000 })]
+
+  it('allows prices that stay above the floor', () => {
+    expect(validatePricesAgainstPromotions(TIERS, thirtyOff)).toBeNull()
+  })
+
+  it('refuses a price that a running promotion would reduce below a dollar', () => {
+    const lowered = [{ tierKey: 'lhr_xs', label: 'Hair removal — XS', singleCents: 3010 }]
+    const message = validatePricesAgainstPromotions(lowered, thirtyOff)
+    expect(message).toMatch(/too small to put on a card/)
+    expect(message, 'and names the promotion in the way').toMatch(/October promotion/)
+  })
+
+  it('ignores a promotion that does not cover the tier being lowered', () => {
+    const elsewhere = [promo({ kind: 'amount', value: 3000, tierKey: 'lhr_medium' })]
+    const lowered = [{ tierKey: 'lhr_xs', label: 'Hair removal — XS', singleCents: 3010 }]
+    expect(validatePricesAgainstPromotions(lowered, elsewhere)).toBeNull()
+  })
+
+  it('refuses a price a percentage promotion would reduce below a dollar', () => {
+    const ninetyNine = [promo({ kind: 'percent', value: 99 })]
+    const lowered = [{ tierKey: 'lhr_xs', label: 'Hair removal — XS', singleCents: 5000 }]
+    expect(validatePricesAgainstPromotions(lowered, ninetyNine)).toMatch(/too small/)
   })
 })
 

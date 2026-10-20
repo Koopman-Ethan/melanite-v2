@@ -1,4 +1,14 @@
-import { covers, describePromotion, discountedCents, overlaps, type Promotion } from '@/lib/promotions'
+import {
+  asPromotion,
+  covers,
+  describePromotion,
+  discountedCents,
+  overlaps,
+  type DraftPromotion,
+  type Promotion,
+} from '@/lib/promotions'
+
+export type { DraftPromotion }
 
 // Promotion rules. Out here for the same reason as the training course: a `'use server'` module
 // may only export async functions.
@@ -16,7 +26,7 @@ export const DATE = /^\d{4}-\d{2}-\d{2}$/
  *  42c charge and fails, surfacing as a card decline on a provider who did nothing wrong. A
  *  dollar is comfortably clear of that and is a figure a person can reason about, which "19
  *  cents, because of how the gross-up rounds" is not. */
-const MIN_FEE_CENTS = 100
+export const MIN_FEE_CENTS = 100
 
 /** A tier as this module needs to see it: a key, a name to put in a sentence, and the fee a
  *  promotion would reduce. */
@@ -25,9 +35,6 @@ export interface PricedTier {
   label: string
   singleCents: number
 }
-
-/** The promotion being created, before it has an id. */
-export type DraftPromotion = Omit<Promotion, 'id'>
 
 export function validatePromotion(
   draft: DraftPromotion,
@@ -64,7 +71,7 @@ export function validatePromotion(
     if (draft.value > 1_000_00) return 'That amount looks wrong — check the figure.'
   }
 
-  const affected = context.tiers.filter((t) => covers({ ...draft, id: '' }, t.tierKey))
+  const affected = context.tiers.filter((t) => covers(asPromotion(draft), t.tierKey))
   if (affected.length === 0) return 'That service is not on the schedule.'
 
   // A FEE REDUCED TO ALMOST NOTHING IS A FAILED CHARGE, NOT A GIFT. Zero stays zero through
@@ -73,14 +80,14 @@ export function validatePromotion(
   // than as a free session. Refused up front, pointing at the mechanism that DOES make a
   // session free.
   const tooSmall = affected
-    .map((t) => ({ ...t, after: discountedCents(t.singleCents, { ...draft, id: '' }) }))
+    .map((t) => ({ ...t, after: discountedCents(t.singleCents, asPromotion(draft)) }))
     .filter((t) => t.after < MIN_FEE_CENTS)
 
   if (tooSmall.length > 0) {
     const worst = tooSmall.reduce((a, b) => (a.after <= b.after ? a : b))
     const name = tooSmall.length === 1 ? worst.label : `${tooSmall.length} services`
     return (
-      `${describePromotion({ ...draft, id: '' })} would leave ${name} at ` +
+      `${describePromotion(asPromotion(draft))} would leave ${name} at ` +
       `$${(worst.after / 100).toFixed(2)}, which is too small to put on a card. ` +
       'Use “Don’t charge it” in the queue for a session you want to give away.'
     )
@@ -89,7 +96,7 @@ export function validatePromotion(
   // ONE PROMOTION PER SERVICE AT A TIME. Two running at once raises "which one applied" on
   // every charge, and the answer is not visible on the page. Refused by name so the way out is
   // obvious.
-  const clash = context.existing.find((p) => overlaps(p, { ...draft, id: '' }))
+  const clash = context.existing.find((p) => overlaps(p, asPromotion(draft)))
   if (clash) {
     const where = clash.tierKey === null ? 'Everything' : labelFor(context.tiers, clash.tierKey)
     return (
@@ -103,4 +110,41 @@ export function validatePromotion(
 
 function labelFor(tiers: readonly PricedTier[], tierKey: string): string {
   return tiers.find((t) => t.tierKey === tierKey)?.label ?? tierKey
+}
+
+/**
+ * Would publishing these prices leave a running promotion charging too little?
+ *
+ * THE OTHER END OF THE SAME RULE. `validatePromotion` refuses a promotion that would take any
+ * fee under a dollar, judged against the prices in force when it is created. Nothing judged the
+ * prices themselves, so the floor could be walked under from the other side: "$30 off
+ * everything" is fine against a $35 tier, and stays on the books while that tier is republished
+ * at $30.10 — leaving a 10c fee that grosses up to 42c and is REFUSED by Stripe, surfacing as a
+ * declined card on a provider who did nothing.
+ *
+ * Narrow, but it was a hole in a guarantee the create form already claims to make. Checked at
+ * the one place prices change, against every promotion still running rather than only the ones
+ * running today, because a queued promotion meets these prices too.
+ */
+export function validatePricesAgainstPromotions(
+  prices: readonly PricedTier[],
+  running: readonly Promotion[],
+): string | null {
+  for (const tier of prices) {
+    for (const promo of running) {
+      if (!covers(promo, tier.tierKey)) continue
+
+      const after = discountedCents(tier.singleCents, promo)
+      if (after >= MIN_FEE_CENTS) continue
+
+      return (
+        `${tier.label} at $${(tier.singleCents / 100).toFixed(2)} would leave ` +
+        `$${(after / 100).toFixed(2)} once “${promo.name}” (${describePromotion(promo)}) is ` +
+        'applied, which is too small to put on a card. End that promotion first, or price ' +
+        'this tier higher.'
+      )
+    }
+  }
+
+  return null
 }

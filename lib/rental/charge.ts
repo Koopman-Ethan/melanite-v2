@@ -69,6 +69,7 @@ export async function rentalFeeForBooking(bookingId: string): Promise<number | n
       serviceName: services.name,
       feeOverrideCents: bookings.feeOverrideCents,
       startTime: bookings.startTime,
+      createdAt: bookings.createdAt,
     })
     .from(bookings)
     .innerJoin(providerServices, eq(bookings.providerServiceId, providerServices.id))
@@ -79,7 +80,7 @@ export async function rentalFeeForBooking(bookingId: string): Promise<number | n
   if (!row) return null
   return (
     row.feeOverrideCents ??
-    (await feeForProviderService(row.providerId, row.serviceName, row.startTime))
+    (await feeForProviderService(row.providerId, row.serviceName, row.startTime, row.createdAt))
   )
 }
 
@@ -102,6 +103,9 @@ export async function chargeRentalFee(bookingId: string): Promise<RentalChargeRe
       providerId: bookings.providerId,
       status: bookings.status,
       startTime: bookings.startTime,
+      /** When the price was promised. A promotion Keoni ended early still owes it to every
+       *  session booked before she pressed the button. */
+      createdAt: bookings.createdAt,
       /** Keoni's figure, when she has set one. See the amount decision below. */
       feeOverrideCents: bookings.feeOverrideCents,
       serviceId: providerServices.serviceId,
@@ -184,9 +188,18 @@ export async function chargeRentalFee(bookingId: string): Promise<RentalChargeRe
   // and a promotion that finished on the Friday still has to apply to it. `startTime` rather
   // than `endTime` because a late session can end after midnight, and the day it started is
   // both the day it belongs to and the day the provider was quoted against.
+  //
+  // AND AGAINST THE DAY IT WAS BOOKED, which is the same promise from the other end. Ending a
+  // promotion early stops it applying to new bookings; it does not reach forward and reprice a
+  // session somebody already agreed to at the promotional figure.
   const netCents =
     booking.feeOverrideCents ??
-    (await feeForProviderService(booking.providerId, booking.serviceName, booking.startTime))
+    (await feeForProviderService(
+      booking.providerId,
+      booking.serviceName,
+      booking.startTime,
+      booking.createdAt,
+    ))
 
   if (netCents === null) {
     // The loud gap. A service with no fee must not become a free session; it is a question for
@@ -359,7 +372,7 @@ export async function chargeRentalFee(bookingId: string): Promise<RentalChargeRe
   // and naming a promotion beside it would claim a derivation that did not happen.
   const promoted =
     booking.feeOverrideCents === null
-      ? await promotionOnService(booking.serviceName, booking.startTime)
+      ? await promotionOnService(booking.serviceName, booking.startTime, booking.createdAt)
       : null
 
   await notifyProviderCharged({

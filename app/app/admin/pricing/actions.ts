@@ -165,7 +165,8 @@ export async function endPromotion(id: string): Promise<PricingState> {
     success:
       result === 'cancelled'
         ? 'Cancelled — it never started, so nothing was quoted at that price.'
-        : 'Ended. Sessions today keep the promotional price; tomorrow is back to the schedule.',
+        : 'Ended. Nothing booked from now on gets it; every session already on the calendar ' +
+          'keeps the price it was quoted.',
   }
 }
 

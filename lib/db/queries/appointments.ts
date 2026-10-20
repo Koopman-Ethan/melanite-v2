@@ -59,6 +59,9 @@ export interface Appointment {
   durationMins: number
   startTime: Date
   endTime: Date
+  /** When the booking was made. Decides whether a promotion Keoni ended early still owes this
+   *  session its price — see `promotionFor`. */
+  bookedAt: Date
   status: AppointmentStatus
   serviceName: string
   serviceColor: string | null
@@ -129,6 +132,7 @@ export async function getAppointments(
       durationMins: bookings.durationMins,
       startTime: bookings.startTime,
       endTime: bookings.endTime,
+      bookedAt: bookings.createdAt,
       status: bookings.status,
       serviceName: services.name,
       serviceColor: services.colorHex,
@@ -235,6 +239,7 @@ async function getAppointmentsById(providerId: string, bookingId: string): Promi
       durationMins: bookings.durationMins,
       startTime: bookings.startTime,
       endTime: bookings.endTime,
+      bookedAt: bookings.createdAt,
       status: bookings.status,
       serviceName: services.name,
       serviceColor: services.colorHex,

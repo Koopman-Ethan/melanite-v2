@@ -23,7 +23,7 @@ import { denverYmd, discountedCents, promotionFor } from '@/lib/promotions'
 import { tierForService } from '@/lib/rental-fees'
 import { sharesRevenue } from '@/lib/revenue-model'
 import { getCheckoutSettings } from '@/lib/db/queries/checkout'
-import { activePromotions } from '@/lib/rental/promotions'
+import { promotionsOwed } from '@/lib/rental/promotions'
 import { getLiveSchedule } from '@/lib/rental/schedule'
 
 import { SessionActions } from './session-actions'
@@ -311,10 +311,10 @@ async function AppointmentList({
   const [schedule, settings, promotions, [me]] = await Promise.all([
     getLiveSchedule(),
     getCheckoutSettings(),
-    // Everything not yet finished, mapped per row below. A promotion that ended yesterday
-    // cannot apply to an appointment shown here — this list is upcoming and recent work, and
-    // the sessions already charged show what was actually taken rather than a derived figure.
-    activePromotions(),
+    // Everything these sessions might still be OWED, which is not the same as everything
+    // running: one Keoni ended early still owes its price to every session booked before she
+    // ended it, and those are exactly the rows in this list. See `promotionsOwed`.
+    promotionsOwed(),
     // Once per list, not once per card. Which basis they are on decides whether every finished
     // session asks them for a receipt, and it is the same answer for every row.
     db
@@ -324,15 +324,19 @@ async function AppointmentList({
       .limit(1),
   ])
   const keoniSetsFee = me?.rentBasis === 'keoni_sets'
-  /** What this session will cost, on the day it happens.
+  /** What this session will cost, on the day it happens, at the price it was booked at.
    *
    *  ON ITS OWN DATE, not today: a provider looking at next month's bookings during a
-   *  promotion that ends this week must not be quoted this week's price for them. */
-  const feeFor = (serviceName: string, on: Date): number | null => {
+   *  promotion that ends this week must not be quoted this week's price for them.
+   *
+   *  AND AT ITS OWN BOOKING DATE, so this page agrees with the card. A promotion Keoni ended
+   *  early keeps applying to sessions booked before she ended it; showing the full fee here
+   *  would contradict the charge that is actually coming. */
+  const feeFor = (serviceName: string, on: Date, bookedAt: Date): number | null => {
     const tier = tierForService(serviceName)
     if (!tier) return null
     const listed = schedule.byTier.get(tier.key)?.singleCents ?? tier.singleCents
-    return discountedCents(listed, promotionFor(tier.key, denverYmd(on), promotions))
+    return discountedCents(listed, promotionFor(tier.key, denverYmd(on), promotions, bookedAt))
   }
 
   return (
@@ -342,7 +346,7 @@ async function AppointmentList({
           key={a.id}
           appointment={a}
           origin={origin}
-          dueCents={keoniSetsFee ? null : feeFor(a.serviceName, a.startTime)}
+          dueCents={keoniSetsFee ? null : feeFor(a.serviceName, a.startTime, a.bookedAt)}
           lateCancellationHours={settings.lateCancellationHours}
           keoniSetsFee={keoniSetsFee}
         />

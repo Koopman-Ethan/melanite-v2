@@ -40,6 +40,28 @@ export interface Promotion {
   /** `YYYY-MM-DD` in Denver, both inclusive. */
   startsOn: string
   endsOn: string
+  /**
+   * When Keoni stopped it early, or null if it is running to the end she advertised.
+   *
+   * IT DOES NOT SHORTEN THE WINDOW. Ending a promotion used to move `endsOn` to today, which
+   * read as tidy and quietly broke a promise: a provider who booked next Tuesday at the
+   * promotional price would have been charged the full one, because by the time the sweep ran
+   * the window no longer reached them. That is the same bug as resolving against `now()` —
+   * quoted one figure, charged another — wearing a different hat.
+   *
+   * So ending it stops it applying to anything booked FROM THAT MOMENT ON, and everything
+   * already on the calendar keeps what it was quoted. See `promotionFor`.
+   */
+  endedAt: Date | null
+}
+
+/** A promotion being composed, before it exists. Ending is something that happens to one
+ *  afterwards, so neither field is a thing anybody can type. */
+export type DraftPromotion = Omit<Promotion, 'id' | 'endedAt'>
+
+/** A draft seen as a promotion, for the pure helpers below that want the whole shape. */
+export function asPromotion(draft: DraftPromotion): Promotion {
+  return { ...draft, id: '', endedAt: null }
 }
 
 /**
@@ -69,25 +91,43 @@ export function overlaps(a: Promotion, b: Promotion): boolean {
 }
 
 /**
- * The promotion covering this tier on this date, or null.
+ * The promotion covering this tier, for a session on `onYmd`, committed to at `bookedAt`.
  *
- * ON THE SESSION'S DATE, NOT TODAY, at every call site. Rent is charged about twelve hours
- * after a session ends, so a session on a promotion's last day is swept the NEXT morning —
- * resolving against `now()` would quietly charge full price for a discounted session on every
- * promotion's final day, which is the one bug this signature exists to prevent.
+ * TWO DATES, BECAUSE A PROMOTION HAS TWO EDGES, and getting either wrong charges somebody a
+ * figure they were never quoted.
  *
- * Only one can apply: creating a promotion that overlaps an existing one on the same tier is
- * refused (see `lib/validate/promotion.ts`), so "the first match" is "the only match". Taking
- * the first rather than combining is also the safe direction if that rule is ever relaxed —
- * two stacked percentages quietly approach a free session.
+ * `onYmd` IS THE SESSION'S DATE, NOT TODAY, at every call site. Rent is charged about twelve
+ * hours after a session ends, so a session on a promotion's last day is swept the NEXT
+ * morning — resolving against `now()` would quietly charge full price for a discounted session
+ * on every promotion's final day.
+ *
+ * `bookedAt` IS WHEN THE PRICE WAS PROMISED. For a fresh quote that is now, which is why it
+ * defaults to it; for a session already on the calendar it is when that booking was made. It
+ * only ever matters for a promotion Keoni ENDED EARLY: that stops new bookings getting the
+ * price while leaving every booking already taken at the figure it was quoted. Without it,
+ * pressing "End it now" would reach forward and reprice work somebody has already agreed to.
+ *
+ * TWO CAN MATCH, since this one started. End a promotion on the 25th and start another on the
+ * 26th and they share the days between the 26th and the first one's advertised end — a booking
+ * made on the 22nd matches both. The first wins, and the rows arrive ordered by `startsOn`, so
+ * that is the one that was in force when the booking was made: the price that was promised.
+ * Taking the first rather than combining is also the safe direction generally — two stacked
+ * percentages quietly approach a free session.
  */
 export function promotionFor(
   tierKey: string,
   onYmd: string,
   all: readonly Promotion[],
+  bookedAt: Date = new Date(),
 ): Promotion | null {
   return (
-    all.find((p) => covers(p, tierKey) && p.startsOn <= onYmd && onYmd <= p.endsOn) ?? null
+    all.find(
+      (p) =>
+        covers(p, tierKey) &&
+        p.startsOn <= onYmd &&
+        onYmd <= p.endsOn &&
+        (p.endedAt === null || bookedAt < p.endedAt),
+    ) ?? null
   )
 }
 

@@ -11,8 +11,9 @@ import {
 } from '@/lib/db/schema'
 import { denverYmd, discountedCents, promotionFor, type Promotion } from '@/lib/promotions'
 import { RENTAL_TIERS, tierForService, type RentalTier } from '@/lib/rental-fees'
+import { validatePricesAgainstPromotions } from '@/lib/validate/promotion'
 
-import { promotionsCovering } from './promotions'
+import { activePromotions, promotionsCovering } from './promotions'
 
 // What Melanite charges to use the laser, as it currently stands.
 //
@@ -135,6 +136,7 @@ export async function getLiveSchedule(): Promise<LiveSchedule> {
 export async function feeForService(
   serviceName: string,
   on: Date = new Date(),
+  bookedAt: Date = new Date(),
 ): Promise<number | null> {
   const tier = tierForService(serviceName)
   if (!tier) return null
@@ -150,8 +152,13 @@ export async function feeForService(
   //
   // It defaults to now because most callers are asking the present-tense question ("what does
   // this cost"), and the three that know a real session date pass it.
+  //
+  // `bookedAt` IS THE OTHER EDGE: when the price was promised. It matters only for a promotion
+  // Keoni ended early, which stops applying to new bookings while every booking already taken
+  // keeps the figure it was quoted. A fresh quote is being promised now, so now is the default;
+  // anything pricing a session already on the calendar passes that booking's own date.
   const promos = await promotionsCovering(on)
-  return discountedCents(listed, promotionFor(tier.key, denverYmd(on), promos))
+  return discountedCents(listed, promotionFor(tier.key, denverYmd(on), promos, bookedAt))
 }
 
 /**
@@ -190,6 +197,7 @@ export async function feeForProviderService(
   providerId: string,
   serviceName: string,
   on: Date = new Date(),
+  bookedAt: Date = new Date(),
 ): Promise<number | null> {
   const [provider] = await db
     .select({ rentBasis: providers.rentBasis })
@@ -198,7 +206,7 @@ export async function feeForProviderService(
     .limit(1)
 
   if (!provider) return null
-  if (provider.rentBasis === 'tier') return feeForService(serviceName, on)
+  if (provider.rentBasis === 'tier') return feeForService(serviceName, on, bookedAt)
 
   // `keoni_sets`. Nothing to work out, and that is the whole arrangement.
   return null
@@ -218,12 +226,13 @@ export async function feeForProviderService(
 export async function promotionOnService(
   serviceName: string,
   on: Date,
+  bookedAt: Date = new Date(),
 ): Promise<{ promotion: Promotion; listedCents: number } | null> {
   const tier = tierForService(serviceName)
   if (!tier) return null
 
   const promos = await promotionsCovering(on)
-  const promotion = promotionFor(tier.key, denverYmd(on), promos)
+  const promotion = promotionFor(tier.key, denverYmd(on), promos, bookedAt)
   if (!promotion) return null
 
   const schedule = await getLiveSchedule()
@@ -292,6 +301,24 @@ export async function publishSchedule(
           'Lower the fee, or raise the suggested price if the market has moved.',
       }
     }
+  }
+
+  // THE PROMOTION FLOOR, FROM THE OTHER SIDE. Creating a promotion refuses one that would take
+  // any fee under a dollar, judged against the prices in force then — which leaves the same
+  // floor walkable from here, by republishing a tier low enough that a promotion already on the
+  // books reduces it to something Stripe will not accept. The create form claims that cannot
+  // happen, so this is where the claim is kept rather than a new rule.
+  const running = await activePromotions()
+  if (running.length > 0) {
+    const clash = validatePricesAgainstPromotions(
+      input.map((e) => ({
+        tierKey: e.tierKey,
+        label: RENTAL_TIERS.find((t) => t.key === e.tierKey)?.label ?? e.tierKey,
+        singleCents: e.singleCents,
+      })),
+      running,
+    )
+    if (clash) return { error: clash }
   }
 
   const missing = [...known].filter((k) => !byKey.has(k))

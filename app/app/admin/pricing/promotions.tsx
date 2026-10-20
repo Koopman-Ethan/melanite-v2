@@ -7,13 +7,15 @@ import { Button } from '@/components/ui/button'
 import { Notice } from '@/components/ui/field'
 import { grossUpForProcessing } from '@/lib/money'
 import {
+  asPromotion,
   covers,
   describePromotion,
   discountedCents,
   prettyDay,
+  type DraftPromotion,
   type Promotion,
 } from '@/lib/promotions'
-import { validatePromotion, type DraftPromotion } from '@/lib/validate/promotion'
+import { validatePromotion } from '@/lib/validate/promotion'
 
 import { endPromotion, startPromotion, type PricingState } from './actions'
 import type { EntryView } from './form'
@@ -196,9 +198,9 @@ function CreateForm({
   const effect = useMemo(() => {
     if (!typed || invalid) return []
     return entries
-      .filter((e) => covers({ ...draft, id: '' }, e.tierKey))
+      .filter((e) => covers(asPromotion(draft), e.tierKey))
       .map((e) => {
-        const now = discountedCents(e.singleCents, { ...draft, id: '' })
+        const now = discountedCents(e.singleCents, asPromotion(draft))
         const up = (c: number) =>
           grossUpForProcessing({ netCents: c, pct: processing.pct, fixedCents: processing.fixedCents })
             .chargeCents
@@ -317,7 +319,8 @@ function CreateForm({
           <p className="mt-3 text-xs text-ink-secondary">
             Nobody has to accept anything. Sessions already booked inside those dates get the
             promotional price too — it is worked out on the day of the session, not the day it
-            was booked.
+            was booked. Ending it early stops new bookings getting it and leaves everything
+            already on the calendar at the price it was quoted.
           </p>
         </section>
       )}
