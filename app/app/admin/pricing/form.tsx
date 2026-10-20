@@ -173,7 +173,13 @@ export function PricingForm({
 
       {note && <p className="text-xs text-ink-faint">Last change: {note}</p>}
 
-      {seeded.length > 0 && (
+      {/* ONLY ONCE SOMETHING HAS BEEN PUBLISHED. "Added after the last publish" means nothing
+          when there has been no publish — every tier is seeded, so this lists the entire
+          schedule back at the reader as a wall of names, under a line that has already said the
+          same thing in six words. The case it is for is the real one: a migration adds two tiers
+          to a schedule somebody published in March, and those two are priced by code until the
+          next publish. */}
+      {version !== null && seeded.length > 0 && (
         <Notice tone="warning">
           {seeded.length} tier{seeded.length === 1 ? ' is' : 's are'} priced from the code
           defaults because they were added after the last publish — {seeded.map((e) => e.label).join(', ')}.
