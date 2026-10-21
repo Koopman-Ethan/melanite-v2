@@ -18,6 +18,53 @@ on the morning rather than arranged beforehand, the calendar is shut until they 
 
 ---
 
+## Ordering
+
+**The section numbers below are reference, not sequence.** Three of §0's commands read columns and
+tables that §2's migrations create, so "before the day" cannot run before the day; §1's snapshot
+sits textually after three production writes; and §5 has to wait for the deploy in §7. Follow this
+instead:
+
+| | What | Section |
+|---|---|---|
+| 1 | Set `REVIEW_STARTED_AT` to the cutover date **and commit it** | §6 |
+| 2 | Local: `tsc`, `lint`, `vitest`, `build:check` | — |
+| 3 | Confirm the live webhook | §0.2 |
+| 4 | **Snapshot the production database** | §1 |
+| 5 | Close the stale payment links — the only settle-up step that needs no new schema | §0.4 |
+| 6 | `db:migrate`, then `db:verify` | §2 |
+| 7 | The catalogue | §3 |
+| 8 | **Publish the fee schedule.** Irreversible, and it must precede any acceptance | §4 |
+| 9 | Retire Nichole | §0.5 |
+| 10 | Grant Karly her nine sessions | §0.4 |
+| 11 | Mark the $604.50 rows paid | §0.6 |
+| 12 | `cutover:revenue-models` **dry run** — keep the output, it is your expectation for step 14 | §5 |
+| 13 | **Deploy** | §7 |
+| 14 | `cutover:revenue-models -- --apply` | §5 |
+| 15 | Add a card, accept the terms, then the canary | §8 |
+| 16 | Force one sweep from `/app/admin/revenue` → **Settle now** | §10 |
+| 17 | The other eight add cards and accept | §9 |
+| 18 | Smoke test | §10 |
+
+**Why step 8 cannot slip past step 13.** `acceptRentalTerms` stamps `rental_schedule_version` with
+whatever is live *at the moment of the click* (`app/app/account/billing-actions.ts:136-143`).
+Accept while nothing is published and the stamp is `NULL`; publish v1 afterwards and
+`hasAcceptedRentalTerms` fails for that provider, who is re-blocked and has to accept a second
+time. Publishing first makes the nine acceptances in step 17 stick.
+
+**Three lockouts, not one.** The roster's **Card** column is the visible half and the least of it.
+`RENTAL_TERMS_VERSION` is checked *first* (`lib/rental-terms.ts:191`), so the instant the deploy
+lands every rent-paying provider is blocked — **including the three on `keoni_sets`**, who are
+exempt from the price list (`:203`) but not from the prose. Publishing v1 blocks every `tier`
+provider. And smoke item 12 publishes a v2 and blocks them all again, which is why it is last.
+
+**Flags run opposite ways between the two families, which is worth a second look before pasting:**
+`etl:catalogue` and `etl:rental-fees` **write by default** and take `--check` to dry run.
+`cutover:*`, `close-stale-links` and `retire-provider` are **dry run by default** and take
+`--apply`.
+
+---
+
 ## What actually changes
 
 Providers bill their own clients, at their own prices, on their own systems. Melanite charges a
@@ -75,7 +122,7 @@ Confirm the live endpoint takes `payment_intent.succeeded`, `charge.refunded`,
 
 Saving a card needs SetupIntents read, PaymentMethods read **and** Customers write. Charging
 needs PaymentIntents write. The redirect back from Stripe looks identical whether or not the card
-actually saved, so this is proved in step 7 and nowhere else.
+actually saved, so this is proved in step 8, the canary, and nowhere else.
 
 ### 0.4 Settle what the old model left behind
 
@@ -86,9 +133,16 @@ they are unpayable today and closing them changes nothing. Keoni's account is th
 mostly settle over Venmo, so most were paid months ago outside the app.
 
 ```bash
-MELANITE_ENV_FILE=.env.migration npm run close-stale-links
+MELANITE_ENV_FILE=.env.migration npm run close-stale-links -- --i-know-this-is-production
 MELANITE_ENV_FILE=.env.migration npm run close-stale-links -- --apply --i-know-this-is-production
 ```
+
+> **The dry run needs the opt-in as well.** `requireProductionOptIn` fires on `MELANITE_ENV=prod`
+> before any apply/dry-run distinction (`scripts/close-stale-links.ts:61`), so without the flag the
+> first command dies with *Refusing to … against PRODUCTION* and looks like a broken script.
+>
+> The figures below are a count from 19 October. **Take the dry run as authoritative** — expiry is
+> evaluated against `now()`, and janea's live link falls due on the 22nd.
 
 It closes only the expired ones and names the live ones it is leaving alone. **It records no
 payment** — a figure that was assumed is worse than a gap that is visible. If Keoni wants a
@@ -102,6 +156,10 @@ MELANITE_ENV_FILE=.env.migration npm run cutover:grant-sessions
 MELANITE_ENV_FILE=.env.migration npm run cutover:grant-sessions -- --apply
 ```
 
+> **Run this AFTER step 2.** It reads `provider_packs` (`scripts/cutover-grant-sessions.ts:98`),
+> which migration `0033` creates. Before the schema is on, it fails with *relation does not
+> exist* — see **Ordering**, above.
+
 Expect `Karly Dettorre  lhr_small  9 sessions`. **The number is computed, never typed** — it was
 11 when first discussed and 9 now, because some got worked in between.
 
@@ -110,9 +168,19 @@ Expect `Karly Dettorre  lhr_small  9 sessions`. **The number is computed, never 
 She has left Melanite and is kept as the test account the Playwright suite signs in as.
 
 ```bash
-MELANITE_ENV_FILE=.env.migration npm run retire-provider -- --email nichole.mim@gmail.com
-MELANITE_ENV_FILE=.env.migration npm run retire-provider -- --email nichole.mim@gmail.com -- --apply --i-know-this-is-production
+MELANITE_ENV_FILE=.env.migration npm run retire-provider -- --email nichole.mim@gmail.com --i-know-this-is-production
+MELANITE_ENV_FILE=.env.migration npm run retire-provider -- --email nichole.mim@gmail.com --apply --i-know-this-is-production
 ```
+
+> Two corrections to what this used to say. The **dry run needs the opt-in too**
+> (`scripts/retire-provider.ts:55`, same reason as 0.4). And the apply line used to carry a second
+> `--` before `--apply`: npm forwards everything after the first one, so the extra arrived as a
+> literal argv entry. Harmless against the current parser, but it invites somebody to "fix" it by
+> moving the email, which breaks `--email`.
+>
+> **Run this AFTER step 2** (it selects `providers.rent_basis`, added in `0042`) and **BEFORE
+> step 5** — `cutover-revenue-models` filters `status = 'active'`, so retiring her first keeps her
+> off the list entirely. The other order moves her onto rent and then retires her.
 
 Inactive, booking off, room rental off. **Nothing is deleted** — appointments, ledger rows and
 end-of-use checklists all reference her id.
@@ -134,6 +202,18 @@ every one is the platform's own payout and `handlePayout` returns at its first l
 
 Confirm against the Stripe dashboard (Connect → those two accounts → payout history), then mark
 the rows paid. The ledger invariant test prints the figure on every run until it is cleared.
+
+```bash
+# Read them back first — this is the list you are agreeing to.
+MELANITE_ENV_FILE=.env.migration npx tsx --tsconfig scripts/tsconfig.json scripts/sql.ts   "select id, created_at, gross_amount, payout_status from ledger_entries
+    where payout_status = 'pending' order by created_at"
+
+MELANITE_ENV_FILE=.env.migration npx tsx --tsconfig scripts/tsconfig.json scripts/sql.ts   "update ledger_entries set payout_status = 'paid'
+    where payout_status = 'pending' returning id, gross_amount"
+```
+
+Expect 11 rows totalling $604.50. It is a status correction on rows whose money already moved, not
+a payment — which is why it is safe to do before the deploy and why nothing is sent to anybody.
 
 ---
 
@@ -158,7 +238,17 @@ MELANITE_ENV_FILE=.env.migration npm run db:migrate
 MELANITE_ENV_FILE=.env.migration npm run db:verify
 ```
 
-Expect `0032` through `0046` applied, then `Schema verified.`
+Expect `0032` through `0047` applied, then `Schema verified.`
+
+> **`0047_promotions` is not optional, and "additive" does not mean "skippable".** The booking
+> quote reaches for it on every single quote — `feeForService` calls `promotionsCovering(on)`
+> (`lib/rental/schedule.ts:160`), `publishSchedule` calls `activePromotions()` (`:311`), and
+> `app/app/admin/pricing/page.tsx:28` calls it too. Deploy with the table missing and `/app/book`
+> and `/app/admin/pricing` both 500 — the two screens the smoke test opens first. `db:verify`
+> catches it: one of its checks asserts the four `rental_promotions` constraints by name.
+>
+> The table ships **empty** and nothing seeds it. A promotion is something Keoni creates when she
+> wants one; there is no day-one step for it.
 
 > **0044 renames an enum value** (`half_own_price` → `keoni_sets`) with
 > `ALTER TYPE ... RENAME VALUE`. It rewrites the label in place, so every row carrying it moves
@@ -270,7 +360,8 @@ column shows `none on file — cannot book` until they have.
 
 ```bash
 MELANITE_ENV_FILE=.env.migration npx tsx --tsconfig scripts/tsconfig.json scripts/sql.ts \
-  "select first_name, rent_basis, booking_enabled, billing_card_last4, rental_terms_version
+  "select first_name, rent_basis, booking_enabled, billing_card_last4,
+          rental_terms_version, rental_schedule_version
      from providers where status='active' and revenue_model <> 'house' order by first_name"
 ```
 
@@ -281,24 +372,54 @@ correct — they are exempt from accepting a price list that governs nothing the
 
 ## 10. Smoke test, in this order
 
+> **Rent is swept about twelve hours after a session ENDS.** Items 2–5 used to assume it was taken
+> at booking, which is the premise the 19 October rewrite was supposed to delete. The consequence
+> for whoever is holding this page: `/app/charges` shows **nothing** for a session you just booked
+> for the future, and a fresh cancellation cannot show a fee "held" because nothing was taken. You
+> need a session that has **already ended**, and you need to force the sweep.
+>
+> There is also **no `settle-rent` cron** — both Hobby slots are the evening digest, so the sweep
+> rides the digest, the route, the admin button, and app page loads
+> (`app/api/cron/settle-rent/route.ts`). **You cannot finish the money half by waiting.**
+
 1. **Sign in as an ordinary provider.** Book something — the fee is on the button before it is
    pressed, and it is the **grossed-up** figure. Check it against `/app/admin/pricing`: the
    schedule says $60, the button says $62.11.
-2. `/app/charges` shows the charge against the right service, at the charged amount.
-3. **Cancel it inside 24 hours.** It asks **what happened** and will not proceed without an
-   answer. The fee is **held, not refunded**.
-4. `/app/admin/queue` — the session is there with what you typed. Press **Charge**. Check the
+2. **A promotion, which is the half nobody has exercised in production.** On
+   `/app/admin/pricing`, take 25% off one tier for today only. Reload `/app/book`: the quote drops
+   and names the promotion — and **nobody is asked to re-accept anything.** That exemption is the
+   entire reason the promotions layer exists instead of publishing a cheaper schedule. Press **End
+   it now**; the quote returns to $62.11.
+3. **The edge the layer was written around.** Book a session dated on a promotion's **last day**,
+   then end the promotion, then force the sweep. The charge must still come out at the
+   **promotional** figure: the fee resolves against the session's date and the booking's
+   `created_at`, never `now()` (`lib/rental/schedule.ts:147-161`). Get this wrong and it hides for
+   exactly one day per promotion, which is the worst possible duration.
+4. **A session that already ended more than twelve hours ago**, then `/app/admin/revenue` →
+   **Settle now**. This is the only item that proves money actually moves.
+5. `/app/charges` shows the charge against the right service, at the charged amount. The outcome
+   email names the promotion and the figure it replaced — "normally $62.11".
+6. **Cancel a session inside 24 hours.** It asks **what happened** and will not proceed without an
+   answer. Nothing was taken, so this is **still owed**, not refunded — the safer direction, and
+   the one that means Melanite never claws money back from somebody who has spent it.
+7. `/app/admin/queue` — the session is there with what you typed. Press **Charge**. Check the
    provider gets the outcome email, then do another and press **Don't charge it**: nothing moves,
    the item leaves the queue, and they are still emailed.
-5. **Mark a past session a no-show.** Same question, same hold.
-6. **Sign in as Leyla.** Book — there is **no price anywhere**, and the button says
+8. **Mark a past session a no-show.** Same question.
+9. **Sign in as Leyla.** Book — there is **no price anywhere**, and the button says
    "Book appointment". After the session, the card asks what she charged; send $150 with a photo.
-7. `/app/admin/queue` — the item says *"They charged their client $150.00"* with a **See the
-   receipt** link. Type a figure, charge it, and confirm the receipt link stops working
-   afterwards — it is deleted once the session is settled.
-8. `/app/admin/calendar` — block an hour, confirm it greys out for a provider.
-9. `/app/admin/pricing` — publish a change, confirm an ordinary provider is asked to accept it
-   and **Leyla is not**.
+10. `/app/admin/queue` — the item says *"They charged their client $150.00"* with a **See the
+    receipt** link. Type a figure, charge it, and confirm the receipt link stops working
+    afterwards — it is deleted once the session is settled.
+11. `/app/admin/calendar` — block an hour, confirm it greys out for a provider.
+12. **Last, and with one provider only.** `/app/admin/pricing` — publish a change, confirm an
+    ordinary provider is asked to accept it and **Leyla is not**. This writes a **v2** and
+    re-blocks every `tier` provider; versions are immutable and there is no unpublish. Doing it at
+    4pm, after eight people have just accepted, shuts the calendar a second time.
+
+> **Tell Keoni before she needs it:** a discount goes through **Promotions**, never through
+> **Publish**. Publishing a cheaper schedule to run a sale locks every `tier` provider out when it
+> starts and again when it ends. Avoiding exactly that is why the promotions layer was built.
 
 If any of these reports *"Melanite could not take the rental fee"* rather than a card problem, it
 is a scope on the restricted key, not the provider. The exact permission is in the Vercel function
@@ -343,9 +464,15 @@ from providers that Stripe did not charge, which is the direction worth watching
 
 ## Rollback
 
-**Before step 7**, free: the schema changes are additive and the deployed code ignores them. The
-enum rename in 0044 is the one exception, and reverting it is a one-line
+**Before step 7**, nothing is *broken*: the schema changes are additive and the deployed code
+ignores them. The enum rename in 0044 is the one exception, and reverting it is a one-line
 `ALTER TYPE ... RENAME VALUE` back.
+
+But "nothing breaks" is not "nothing happened", and the old wording here said *free*. Closing the
+stale links, the catalogue, the $604.50 status correction and **publishing the fee schedule** are
+all real production writes by then, and the schedule publish **cannot be undone at any point** —
+versions are immutable and you can only publish forward. The Neon branch from step 1 is the only
+thing that covers data.
 
 **After step 7**, revert the merge and push. The schema can stay — old code does not read the new
 columns.
