@@ -53,14 +53,15 @@ import { feeForService } from './schedule'
  *  an item that lingers after being resolved is worse than no queue at all.
  *
  *  Same shape and same reasoning as `END_OF_USE_STARTED_AT`, including the same limitation —
- *  one compiled-in date for every environment. SET THIS TO THE CUTOVER DATE before deploying;
- *  the runbook has it as a step.
+ *  one compiled-in date for every environment.
  *
- *  It sits a week back rather than today so that dev has something to look at — a date of
- *  "this morning" leaves every seeded session invisible and the queue permanently empty, which
- *  looks exactly like the feature being broken.
+ *  SET TO THE CUTOVER DATE on the morning of the deploy, 21 October 2026. It sat a week back
+ *  until then so that dev had something to look at — a date of "this morning" leaves every
+ *  seeded session invisible and the queue permanently empty, which looks exactly like the
+ *  feature being broken. That still holds on dev: `dev:past-booking` seeds sessions a few hours
+ *  old, which fall after this date and so still reach the queue.
  */
-export const REVIEW_STARTED_AT = new Date('2026-10-06T00:00:00-06:00')
+export const REVIEW_STARTED_AT = new Date('2026-10-21T00:00:00-06:00')
 
 /** Was this session called off late enough to be anybody's decision?
  *
