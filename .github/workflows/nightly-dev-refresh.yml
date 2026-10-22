@@ -105,6 +105,19 @@ jobs:
       - name: Copy production into dev, scrubbed
         run: npm run db:refresh-dev
 
+      # The copy brings PRODUCTION's catalogue and fee schedule, which is not the same thing as
+      # the one the code expects — `etl:catalogue` is a reconciliation script rather than a
+      # migration precisely because `etl:load` truncates `services`. Without these two,
+      # `rental-fee-coverage.test.ts` fails in both directions at once: the generic `IPL` is
+      # bookable and unpriced, and the six services split out by area do not exist for the fees
+      # in `lib/rental-fees.ts` to point at. Both read as somebody having broken the fee schedule.
+      - name: Reconcile the service catalogue
+        run: npm run etl:catalogue
+
+      # Only ever seeds, so this is a no-op on any night production already has a schedule.
+      - name: Seed the fee schedule if there is none
+        run: npm run etl:rental-fees
+
       # Outside the transaction on purpose: this talks to the Stripe API, which cannot be rolled
       # back. Production's LIVE Connect ids are invisible to a test-mode key, so until this runs
       # appdev can take no payments. That is broken, not unsafe.
@@ -127,6 +140,25 @@ jobs:
       # being able to demonstrate the feature at all. Same shape as the Connect repair above.
       - name: Restore the house provider
         run: npm run dev:house-provider
+
+      # THE TWO STEPS THIS WORKFLOW WENT LIVE WITHOUT, and `dev:usable` failed every night from
+      # 18 October until they were added on the 22nd. `dev:after-refresh` in package.json had
+      # them; this file was never brought alongside it.
+      #
+      # Safe in production by design and run here against dev, so the name is misleading in
+      # context: it moves every active non-house provider onto `rental`, which the copy reverts
+      # to `split` along with everything else. Without it `paysRent` is false for all of them and
+      # the booking form quotes no rental fee at all — the feature looks switched off rather than
+      # broken, which is worse.
+      - name: Put providers back on the rental model
+        run: npm run cutover:revenue-models -- --apply
+
+      # Gives each one a test-mode card and the current terms, and — the half that is not
+      # obvious — CLEARS the live `cus_` ids the copy brings across. A card setup against a live
+      # customer id under a test key fails with "No such customer", which reads as a permissions
+      # problem on the key and is not one. `dev:usable` asserts both halves.
+      - name: Give providers a card and the current terms
+        run: npm run dev:rental-ready
 
       - name: Confirm nothing identifying survived
         run: npm run db:scrub -- --check
