@@ -11,6 +11,18 @@ keeps no version history for those fields, so this directory is the only record.
 Save, then **Publish** — publishing is what makes custom code live, and the Designer preview does
 not run it.
 
+## What the header holds
+
+`site-header.html` carries **no comments**, because everything in it ships to every visitor's
+view-source. Until 2026-10-30 it opened with a long developer note — paste instructions, repo
+paths, the v1 removal history — that was public on every page. The explanations live here instead.
+
+- **The badge rule** hides the "Made in Webflow" badge. The site serves custom domains, which
+  suggests a paid Site plan; if so, the badge can be switched off in the site's settings and this
+  rule deleted.
+- **The Google tag** is GA4 (`G-DP91MV4CKT`), the public site's marketing analytics. It is the only
+  analytics on the site; see below for the attribution capture that once sat alongside it.
+
 ## Why the footer is empty
 
 Two things used to be there and both are gone.
