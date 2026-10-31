@@ -42,7 +42,8 @@ import { db } from './db'
 // silently move somebody onto rent who was promised a share, which is the one outcome worth
 // failing loudly over.
 
-/** The three billed half their own price, by email. Keoni's list of 9 October 2026.
+/** Those billed half their own price, by email. Keoni's list of 9 October 2026, less Brittany
+ *  Phillips (bmayesthetics@gmail.com), retired 30 October — she left, so she is not missing.
  *
  *  They used to KEEP half of what their client paid Melanite. From 14 October they bill the
  *  client directly and PAY Melanite the other half — the same split, from the opposite side. The
@@ -52,7 +53,6 @@ import { db } from './db'
  *  it survives a database restored from a different environment. */
 const GRANDFATHERED = [
   'leykonjuhovac@gmail.com', // Leyla Konjuhovac
-  'bmayesthetics@gmail.com', // Brittany Phillips
   'karlydettorre@gmail.com', // Karly Dettorre
 ] as const
 
@@ -167,7 +167,7 @@ async function main() {
   console.log('\nEverybody now pays Melanite rather than being paid by it. No client money, no')
   console.log('Connect account and no payout ever reaches a provider through Melanite again.')
   console.log('')
-  console.log('The three on keoni_sets are quoted NO fee when they book and are never swept.')
+  console.log('Those on keoni_sets are quoted NO fee when they book and are never swept.')
   console.log('They send Keoni what they charged their client, with a receipt; she sets what')
   console.log('they owe on /app/admin/queue, per appointment, and that is what the card takes.')
 }
