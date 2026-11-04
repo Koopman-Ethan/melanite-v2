@@ -275,11 +275,22 @@ BEGIN
 END $$;
 `
 
-/** Every public table, emptied. Written as a DO block so it does not need a hand-maintained
- *  list that would silently miss whatever the next migration adds. `drizzle.__drizzle_migrations`
- *  lives in its own schema and is therefore left alone, which is what we want — the schema
- *  version must survive the reload. */
-const TRUNCATE_ALL = `
+/** Every public table PRODUCTION HAS, emptied. Written as a DO block over the catalogue so it
+ *  does not need a hand-maintained list that would silently miss whatever the next migration
+ *  adds. `drizzle.__drizzle_migrations` lives in its own schema and is therefore left alone,
+ *  which is what we want — the schema version must survive the reload.
+ *
+ *  A table production does not have yet is LEFT AS IT IS. It used to be emptied with the rest,
+ *  which was fine for a table that starts empty and wrong for one a migration seeds: `rooms`
+ *  (0048) arrives with its six spaces, and every `room_bookings` row points at one. Emptied, with
+ *  no production rows to put back, the restored foreign key failed and took the whole refresh
+ *  with it — every night until the feature shipped. Production has no data for a table it has
+ *  never had, so dev's own rows are the only possible answer: the same reasoning that lets a
+ *  dev-only column keep its default (see `assertDevNotBehind`). */
+function truncateTablesIn(sourceTables: readonly string[]): string {
+  // Names come from production's catalogue; quoted as literals all the same.
+  const list = sourceTables.map((t) => `'${t.replaceAll("'", "''")}'`).join(', ')
+  return `
 DO $$
 DECLARE stmt text;
 BEGIN
@@ -287,11 +298,21 @@ BEGIN
        || ' RESTART IDENTITY CASCADE'
     INTO stmt
     FROM pg_tables
-   WHERE schemaname = 'public';
+   WHERE schemaname = 'public'
+     AND tablename IN (${list});
 
   IF stmt IS NOT NULL THEN EXECUTE stmt; END IF;
 END $$;
 `
+}
+
+/** The public tables production has, which are exactly the ones the dump refills. */
+async function sourceTables(sourceUrl: string): Promise<string[]> {
+  const rows = (await neon(sourceUrl)`
+    SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename
+  `) as { tablename: string }[]
+  return rows.map((r) => r.tablename)
+}
 
 async function main() {
   const targetUrl = process.env[TARGET_ENV_VAR]
@@ -333,13 +354,27 @@ async function main() {
   ])
   console.log(`  ${(dump.length / 1024 / 1024).toFixed(1)} MB\n`)
 
+  // CASCADE cannot reach a dev-only table through a foreign key: every one is dropped before the
+  // truncate runs, so this list is the whole of what gets emptied.
+  const tables = await sourceTables(sourceUrl)
+  const devOnly = (await neon(targetUrl)`
+    SELECT tablename FROM pg_tables
+     WHERE schemaname = 'public' AND NOT (tablename = ANY(${tables}))
+  `) as { tablename: string }[]
+  if (devOnly.length > 0) {
+    console.log(
+      `Kept as they are, because production does not have them yet: ` +
+        `${devOnly.map((r) => r.tablename).join(', ')}\n`,
+    )
+  }
+
   // One file, one transaction. psql --single-transaction wraps the whole thing, so the scrub
   // is not a separate step that could fail to happen — it is part of what "loaded" means.
   const script = [
     '-- Foreign keys come off so the restore does not depend on pg_dump ordering them, and go',
     '-- back on below. Both inside this transaction, so they are never absent to anybody else.',
     DROP_FOREIGN_KEYS,
-    TRUNCATE_ALL,
+    truncateTablesIn(tables),
     dump,
     '',
     "-- pg_dump writes `set_config('search_path', '', false)` and then schema-qualifies every",
