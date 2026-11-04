@@ -182,6 +182,31 @@ export async function getMonthlySeries(limit = 12): Promise<MonthlyRevenue[]> {
   return rows.reverse()
 }
 
+export interface MedicalDirectorMonth {
+  month: string
+  revenue: string
+  payments: number
+}
+
+/** Medical Director subscription revenue, month by month, newest first. Keoni asked on
+ *  4 November to see each month and the total; "By source" only ever gave her the lifetime sum.
+ *
+ *  One ledger row per paid invoice (`handleInvoicePaid`) and refunds as negative rows, so a
+ *  refunded month nets down rather than disappearing. `payments` counts only the charges, which
+ *  is the number of providers billed that month. */
+export async function getMedicalDirectorByMonth(): Promise<MedicalDirectorMonth[]> {
+  return db
+    .select({
+      month: MONTH,
+      revenue: sql<string>`coalesce(sum(${ledgerEntries.melaniteCut}), 0)`,
+      payments: sql<number>`(count(*) filter (where ${ledgerEntries.melaniteCut} > 0))::int`,
+    })
+    .from(ledgerEntries)
+    .where(eq(ledgerEntries.source, 'membership'))
+    .groupBy(MONTH)
+    .orderBy(desc(MONTH))
+}
+
 export interface ProviderRevenue {
   providerId: string | null
   providerName: string
@@ -469,18 +494,40 @@ export async function getRecentEntries(limit = 15): Promise<RecentEntry[]> {
 
 /** Everything the admin revenue page needs, in parallel. */
 export async function getAdminRevenue() {
-  const [totals, bySource, byMethod, byProvider, byService, series, recent, owed, laserUse] =
-    await Promise.all([
-      getRevenueTotals(),
-      getRevenueBySource(),
-      getRevenueByMethod(),
-      getRevenueByProvider(),
-      getRevenueByService(),
-      getMonthlySeries(),
-      getRecentEntries(),
-      getOwedByProvider(),
-      getLaserUse(),
-    ])
+  const [
+    totals,
+    bySource,
+    byMethod,
+    byProvider,
+    byService,
+    series,
+    recent,
+    owed,
+    laserUse,
+    medicalDirector,
+  ] = await Promise.all([
+    getRevenueTotals(),
+    getRevenueBySource(),
+    getRevenueByMethod(),
+    getRevenueByProvider(),
+    getRevenueByService(),
+    getMonthlySeries(),
+    getRecentEntries(),
+    getOwedByProvider(),
+    getLaserUse(),
+    getMedicalDirectorByMonth(),
+  ])
 
-  return { totals, bySource, byMethod, byProvider, byService, series, recent, owed, laserUse }
+  return {
+    totals,
+    bySource,
+    byMethod,
+    byProvider,
+    byService,
+    series,
+    recent,
+    owed,
+    laserUse,
+    medicalDirector,
+  }
 }
