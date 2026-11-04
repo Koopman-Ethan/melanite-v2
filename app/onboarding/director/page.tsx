@@ -50,7 +50,7 @@ export default async function DirectorStep({
             body="Even in a room you rent, a few procedures need a medical director overseeing them. Tell Melanite what you'll be doing and it works out whether that applies to you."
             aside={{
               title: 'Why this matters',
-              body: 'Melanite owns the room, so it carries the consequence of unsupervised work in it. This is the record of what you told us — nobody is checking up on you afterwards.',
+              body: 'Melanite owns the space, so it carries the consequence of unsupervised work in it. This is the record of what you told us — nobody is checking up on you afterwards.',
             }}
           />
         }

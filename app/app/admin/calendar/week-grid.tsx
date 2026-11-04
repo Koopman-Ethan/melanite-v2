@@ -3,11 +3,7 @@
 import { useEffect, useState } from 'react'
 
 import { cn } from '@/lib/cn'
-import type {
-  CalendarBooking,
-  CalendarRoomRental,
-  CalendarTraining,
-} from '@/lib/db/queries/admin-calendar'
+import type { CalendarBooking, CalendarTraining } from '@/lib/db/queries/admin-calendar'
 
 // Layout only. Every position on this grid was computed on the server in Denver wall-clock —
 // this component never touches a timestamp, which is what keeps an admin in another timezone
@@ -128,12 +124,6 @@ function BookingBlock({
   )
 }
 
-const SLOT_LABEL: Record<string, string> = {
-  full: 'Full day',
-  am: 'Morning',
-  pm: 'Afternoon',
-}
-
 /** Minutes since midnight in Denver. The grid is laid out in business-local minutes, so a
  *  block positioned from UTC would slide by an hour half the year. */
 function minutesInDenver(at: Date): number {
@@ -151,14 +141,12 @@ function minutesInDenver(at: Date): number {
 export function WeekGrid({
   days,
   bookings,
-  roomRentals,
   training,
   openTime,
   closeTime,
 }: {
   days: string[]
   bookings: CalendarBooking[]
-  roomRentals: CalendarRoomRental[]
   training: CalendarTraining[]
   openTime: string
   closeTime: string
@@ -201,9 +189,6 @@ export function WeekGrid({
         </label>
         <p className="text-xs text-ink-faint">
           {openTime}–{closeTime} Mountain · one laser, all providers
-          {roomRentals.length === 0
-            ? ' · nobody has the room this week'
-            : ` · ${roomRentals.length} room rental${roomRentals.length === 1 ? '' : 's'}`}
         </p>
       </div>
 
@@ -252,47 +237,8 @@ export function WeekGrid({
             })}
           </div>
 
-          {/* Room rentals.
-              A band rather than a block on the timeline: the room is sold by the day, morning
-              or afternoon, so a positioned rectangle would imply a precision it does not have
-              and would overlap laser appointments it has nothing to do with.
-
-              Always rendered, empty weeks included. The first version hid the row when there
-              was nothing in it, which saved a little space and made the feature impossible to
-              find: a row that disappears when there is no data looks exactly like a row that
-              was never built. */}
-          <div>
-            <div className="flex border-b border-line bg-raised/40">
-              <div className="flex w-12 shrink-0 items-center justify-end pr-1.5">
-                <span className="text-[9px] uppercase leading-tight text-ink-faint">Room</span>
-              </div>
-              {days.map((day) => {
-                const rentals = roomRentals.filter((l) => l.day === day)
-                return (
-                  <div key={day} className="min-h-11 flex-1 border-l border-line p-1">
-                    {rentals.map((rental) => (
-                      <div
-                        key={rental.id}
-                        className="mb-1 rounded-field border border-gold/40 bg-gold/10 px-1.5 py-1 last:mb-0"
-                      >
-                        <div className="truncate text-[10px] font-medium text-gold">
-                          {SLOT_LABEL[rental.slotType] ?? rental.slotType}
-                        </div>
-                        <div className="truncate text-[10px] text-ink-secondary">
-                          {rental.providerName}
-                        </div>
-                        {/* Said in words: a hold is not a confirmed let, and an admin looking at
-                            the week needs to know which is which. */}
-                        {rental.status === 'pending' && (
-                          <div className="text-[9px] text-warning">holding</div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )
-              })}
-            </div>
-          </div>
+          {/* Room rentals used to be a band here. They moved to /app/admin/rooms on 4 November,
+              when one room became six spaces that have nothing to do with the laser. */}
 
           {/* Timeline */}
           <div className="flex" style={{ height: gridHeight }}>

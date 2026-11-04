@@ -95,9 +95,12 @@ const ITEMS: NavItem[] = [
   // THE PAGE ITSELF STILL EXISTS and is reachable by URL. It is only unlinked, which is what
   // `/app/services` has survived twice before; deleting it is a separate decision from
   // deciding nobody needs it in their navigation today.
-  { label: 'Daily Room Rental', href: '/app/room-rental', providerOnly: true },
+  // "Daily" dropped on 4 November: the page now lists the monthly rooms and nail stations too.
+  { label: 'Room Rental', href: '/app/room-rental', providerOnly: true },
   { label: 'Membership', href: '/app/membership', providerOnly: true },
   { label: 'Calendar', href: '/app/admin/calendar', adminOnly: true },
+  // Rooms and nail stations, apart from the laser's calendar.
+  { label: 'Rooms', href: '/app/admin/rooms', adminOnly: true },
   { label: 'Equipment', href: '/app/admin/equipment', adminOnly: true },
   { label: 'Providers', href: '/app/admin/providers', adminOnly: true },
   { label: 'Training', href: '/app/admin/training', adminOnly: true },

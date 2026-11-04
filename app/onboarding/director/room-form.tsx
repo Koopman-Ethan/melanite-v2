@@ -107,13 +107,13 @@ export function RoomProceduresForm({ initial }: { initial: string[] }) {
       {needsDirector ? (
         <div className="rounded-field border border-warning/40 bg-warning/5 p-3 text-xs leading-relaxed text-ink-secondary">
           <strong className="text-warning">A medical director is required for this.</strong> You
-          can finish setting up now, but the room stays unavailable until Melanite has one on
+          can finish setting up now, but room rental stays unavailable until Melanite has one on
           file for you. Contact Melanite to arrange it.
         </div>
       ) : (
         answered && (
           <p className="rounded-field border border-line p-3 text-xs leading-relaxed text-ink-muted">
-            No medical director needed for those. You can book the room as soon as Melanite
+            No medical director needed for those. You can rent a room or station as soon as Melanite
             confirms your license.
           </p>
         )

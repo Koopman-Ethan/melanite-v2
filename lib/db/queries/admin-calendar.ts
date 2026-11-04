@@ -8,7 +8,6 @@ import {
   bookings,
   providerServices,
   providers,
-  roomBookings,
   services,
 } from '@/lib/db/schema'
 
@@ -85,22 +84,6 @@ export interface CalendarBooking {
   endLabel: string
 }
 
-/** A day the treatment room is let to a provider.
- *
- *  Deliberately NOT a positioned block like a booking. The room is sold by the day, morning or
- *  afternoon, so placing it on the laser timeline would imply a precision it does not have and
- *  would sit on top of appointments that are genuinely unrelated to it. It renders as a band
- *  across the day instead.
- *
- *  The medical director could already see these; the owner could not, which is backwards. */
-export interface CalendarRoomRental {
-  id: string
-  day: string
-  slotType: string
-  providerName: string
-  status: string
-}
-
 /** A training course, as it appears on the calendar. Derived from the course rather than
  *  stored: a course that moves takes its block with it, which duplicated blackout rows would
  *  not. */
@@ -117,7 +100,6 @@ export interface CalendarWeek {
   days: string[]
   hours: LaserHours
   bookings: CalendarBooking[]
-  roomRentals: CalendarRoomRental[]
   training: CalendarTraining[]
   stats: {
     booked: number
@@ -271,35 +253,6 @@ export async function getCalendarWeek(weekStart: string): Promise<CalendarWeek> 
     .where(and(gte(bookings.startTime, from), lt(bookings.startTime, to)))
     .orderBy(asc(bookings.startTime))
 
-  // Fetched by rental_date rather than by timestamp range: the room is sold as a named day
-  // slot, and its start/end are derived from platform settings that can change. The date is
-  // what was actually bought.
-  const rentals = await db
-    .select({
-      id: roomBookings.id,
-      day: roomBookings.rentalDate,
-      slotType: roomBookings.slotType,
-      status: roomBookings.status,
-      firstName: providers.firstName,
-      lastName: providers.lastName,
-    })
-    .from(roomBookings)
-    .innerJoin(providers, eq(roomBookings.providerId, providers.id))
-    .where(and(gte(roomBookings.rentalDate, weekStart), lt(roomBookings.rentalDate, addDays(weekStart, 7))))
-    .orderBy(asc(roomBookings.rentalDate))
-
-  const roomRentals: CalendarRoomRental[] = rentals
-    // A pending hold is someone mid-checkout, which is worth seeing — an abandoned one expires
-    // and disappears on its own. A cancelled rental is not.
-    .filter((l) => l.status !== 'cancelled' && l.status !== 'refunded')
-    .map((l) => ({
-      id: l.id,
-      day: l.day,
-      slotType: l.slotType,
-      status: l.status,
-      providerName: `${l.firstName} ${l.lastName}`,
-    }))
-
   // Training courses overlapping this week. Two rows per course at most — day one and day two
   // have their own hours — and only `scheduled` ones, matching the rule the availability grid
   // and every booking guard use. Three places agreeing on "when is the laser out of service" is
@@ -391,7 +344,6 @@ export async function getCalendarWeek(weekStart: string): Promise<CalendarWeek> 
     days,
     hours,
     bookings: entries,
-    roomRentals,
     training,
     stats: {
       booked: occupying.length,

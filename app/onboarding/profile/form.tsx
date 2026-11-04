@@ -112,9 +112,9 @@ export function ProfileForm({
             },
             {
               key: 'room_only' as const,
-              title: 'Renting the room only',
+              title: 'Renting a room or station',
               blurb:
-                'You rent the treatment room by the day and bring your own clients. You bill them yourself and pay for the room out of pocket.',
+                'You rent a treatment room or nail station — by the month, or the daily room by the day — and bring your own clients. You bill them yourself and pay for the space out of pocket.',
             },
           ]
         ).map((option) => (
