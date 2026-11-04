@@ -33,7 +33,7 @@ import {
 } from '@/lib/email'
 import { hasCurrentLicense } from '@/lib/auth/dal'
 import type { SessionUser } from '@/lib/auth/session'
-import { END_OF_USE_ITEMS, reportedLabelsFor } from '@/lib/end-of-use'
+import { END_OF_USE_ITEMS, raisesConcern, reportedLabelsFor } from '@/lib/end-of-use'
 import { toMoney } from '@/lib/money'
 import { appOrigin } from '@/lib/stripe/config'
 
@@ -488,6 +488,7 @@ export async function notifyCloseout(checklistId: string): Promise<void> {
         cameUpLabels: reportedLabelsFor(
           row.completedItems.filter((k) => CONDITIONAL_KEYS.has(k)),
         ),
+        concern: raisesConcern(row.completedItems),
         note: row.note,
         url: `${await appOrigin()}/app/admin/equipment`,
       }),
