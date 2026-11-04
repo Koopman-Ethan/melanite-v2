@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 
 import { requireProvider } from '@/lib/auth/dal'
-import { GROWTH_HUB } from '@/lib/product-names'
+import { MARKETING_MEMBERSHIP } from '@/lib/product-names'
 import { cn } from '@/lib/cn'
 import { getCharges } from '@/lib/db/queries/charges'
 import { packBalancesFor } from '@/lib/rental/packs'
@@ -26,7 +26,7 @@ const SOURCE_LABELS: Record<string, string> = {
   rental_fee: 'Laser rental',
   room_rental: 'Room rental',
   membership: 'Medical direction',
-  epicutis: GROWTH_HUB,
+  epicutis: MARKETING_MEMBERSHIP,
 }
 
 /** What a provider pays Melanite.
@@ -94,7 +94,7 @@ export default async function ChargesPage() {
           <div className="mt-2 text-3xl font-semibold tabular-nums">
             {usd(totals.recurringMonth)}
           </div>
-          <div className="mt-1 text-xs text-ink-faint">room, direction, {GROWTH_HUB}</div>
+          <div className="mt-1 text-xs text-ink-faint">room, direction, {MARKETING_MEMBERSHIP}</div>
         </div>
       </section>
 

@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 
 import { requireProvider } from '@/lib/auth/dal'
 import { cn } from '@/lib/cn'
-import { GROWTH_HUB, MEDICAL_DIRECTOR, MEMBERSHIP_STATUS } from '@/lib/product-names'
+import { MARKETING_MEMBERSHIP, MEDICAL_DIRECTOR, MEMBERSHIP_STATUS } from '@/lib/product-names'
 import { getEpicutis, getMembership, getMembershipCharges } from '@/lib/db/queries/membership'
 
 import { Epicutis } from './epicutis'
@@ -59,7 +59,7 @@ export default async function MembershipPage() {
         </p>
       </header>
 
-      {/* Same shape as the growth hub card below, with one deliberate difference: this one
+      {/* Same shape as the Marketing Membership card below, with one deliberate difference: this one
           takes a warning tint when it is not active. The two memberships look alike because
           they are billed alike, but only this one decides whether somebody can work. */}
       <section
@@ -122,7 +122,7 @@ export default async function MembershipPage() {
           </div>
         </div>
 
-        {/* Below the detail and left-aligned, the same place the growth hub puts its button.
+        {/* Below the detail and left-aligned, the same place the Marketing Membership puts its button.
             Two cards billed the same way should not put their one control in two places. */}
         <div className="mt-5">
           <MembershipActions
@@ -262,7 +262,7 @@ export default async function MembershipPage() {
                       {c.entryType === 'refund'
                         ? 'Refund'
                         : c.plan === 'epicutis'
-                          ? `${GROWTH_HUB} — monthly`
+                          ? `${MARKETING_MEMBERSHIP} — monthly`
                           : `${MEDICAL_DIRECTOR} — monthly`}
                     </td>
                     <td className="p-3 text-right tabular-nums">{usd(c.amount)}</td>

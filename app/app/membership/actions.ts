@@ -7,6 +7,7 @@ import { requireProvider } from '@/lib/auth/dal'
 import { db } from '@/lib/db'
 import { medicalDirectorCredentials, memberships, providers } from '@/lib/db/schema'
 import { notifyMedicalDirectorSubmitted } from '@/lib/notify-melanite'
+import { MARKETING_MEMBERSHIP } from '@/lib/product-names'
 import { friendlyStripeError, stripePost } from '@/lib/stripe/client'
 import {
   appOrigin,
@@ -221,7 +222,7 @@ export async function openBillingPortal(): Promise<StripeRedirect> {
 }
 
 /**
- * The Epicutis membership — $95/month for monthly content, client inquiries and wholesale
+ * The Marketing Membership (keyed `epicutis`) — $100/month for monthly content, client inquiries and wholesale
  * pricing.
  *
  * Unlocks NOTHING in this app, and that is the important part. It sits beside the medical
@@ -243,12 +244,12 @@ export async function startEpicutisSubscription(): Promise<StripeRedirect> {
     .limit(1)
 
   if (existing && (existing.status === 'active' || existing.status === 'past_due')) {
-    return { error: 'You already have an Epicutis membership.' }
+    return { error: `You already have the ${MARKETING_MEMBERSHIP}.` }
   }
 
   const priceId = await epicutisPriceId()
   if (!priceId) {
-    return { error: 'The Epicutis membership isn’t configured yet. Contact Melanite.' }
+    return { error: `The ${MARKETING_MEMBERSHIP} isn’t configured yet. Contact Melanite.` }
   }
 
   const mismatch = modeMismatch(priceId)

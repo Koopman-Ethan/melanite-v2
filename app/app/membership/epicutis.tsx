@@ -5,7 +5,11 @@ import { useState, useTransition } from 'react'
 import { Button } from '@/components/ui/button'
 import { Notice } from '@/components/ui/field'
 
-import { GROWTH_HUB, MEMBERSHIP_STATUS } from '@/lib/product-names'
+import {
+  MARKETING_MEMBERSHIP,
+  MARKETING_MEMBERSHIP_PRICE,
+  MEMBERSHIP_STATUS,
+} from '@/lib/product-names'
 
 import { startEpicutisSubscription } from './actions'
 
@@ -49,9 +53,9 @@ export function Epicutis({ epicutis }: { epicutis: EpicutisView }) {
     <section className="rounded-card border border-line bg-surface p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h2 className="text-lg font-semibold">{GROWTH_HUB}</h2>
+          <h2 className="text-lg font-semibold">{MARKETING_MEMBERSHIP}</h2>
           <p className="mt-1 text-sm text-ink-muted">
-            Optional. $95 / month, cancel anytime.
+            Optional. {MARKETING_MEMBERSHIP_PRICE} / month, cancel anytime.
           </p>
         </div>
         {/* Always rendered, including when they have not subscribed — a card with no badge
@@ -119,7 +123,7 @@ export function Epicutis({ epicutis }: { epicutis: EpicutisView }) {
                 })
               }
             >
-              {pending ? 'Opening Stripe…' : 'Subscribe — $95 / month'}
+              {pending ? 'Opening Stripe…' : `Subscribe — ${MARKETING_MEMBERSHIP_PRICE} / month`}
             </Button>
           ) : (
             // Better than a button that fails at Stripe with "No such price".

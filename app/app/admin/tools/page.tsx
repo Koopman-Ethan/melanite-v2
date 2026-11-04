@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 
 import { requireAdmin } from '@/lib/auth/dal'
-import { GROWTH_HUB } from '@/lib/product-names'
+import { MARKETING_MEMBERSHIP } from '@/lib/product-names'
 import {
   getActiveProviders,
   getCherryHandoffs,
@@ -33,7 +33,7 @@ const SOURCE_LABELS: Record<string, string> = {
   package: 'Package',
   room_rental: 'Room rental',
   membership: 'Medical director',
-  epicutis: GROWTH_HUB,
+  epicutis: MARKETING_MEMBERSHIP,
   training: 'Training',
 }
 
