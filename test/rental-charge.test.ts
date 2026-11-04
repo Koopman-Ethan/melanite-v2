@@ -91,9 +91,15 @@ beforeAll(async () => {
   //
   // Selected by the absence of a payment method rather than by booking gates, so the fixture
   // states its own requirement instead of depending on what the nightly copy happened to bring.
+  //
+  // And on the schedule, active. An unordered LIMIT 1 once returned Brittany — retired, on
+  // `keoni_sets`, so priced at nothing by design — and four tests reported her arrangement as a
+  // broken fee lookup (4 November, the first refresh after her retirement reshuffled the rows).
   const [prov] = (await sql.query(
     `SELECT id FROM providers
-      WHERE revenue_model = 'rental' AND billing_payment_method_id IS NULL
+      WHERE revenue_model = 'rental' AND rent_basis = 'tier' AND status = 'active'
+        AND billing_payment_method_id IS NULL
+      ORDER BY id
       LIMIT 1`,
   )) as { id: string }[]
   if (!prov) throw new Error('no card-less provider in dev — these tests need one')

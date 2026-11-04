@@ -109,9 +109,13 @@ async function wouldPick(): Promise<string[]> {
 }
 
 beforeAll(async () => {
+  // On the schedule and active, in a fixed order: see the same fixture in rental-charge.test.ts.
   const [prov] = (await sql.query(
     `SELECT id FROM providers
-      WHERE revenue_model = 'rental' AND billing_payment_method_id IS NULL LIMIT 1`,
+      WHERE revenue_model = 'rental' AND rent_basis = 'tier' AND status = 'active'
+        AND billing_payment_method_id IS NULL
+      ORDER BY id
+      LIMIT 1`,
   )) as { id: string }[]
   if (!prov) throw new Error('no card-less rental provider in dev — these tests need one')
   providerId = prov.id
