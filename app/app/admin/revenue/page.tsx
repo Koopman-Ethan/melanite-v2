@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 
 import { requireAdmin } from '@/lib/auth/dal'
 import { isProduction } from '@/lib/env-guard'
-import { GROWTH_HUB } from '@/lib/product-names'
+import { MARKETING_MEMBERSHIP } from '@/lib/product-names'
 import { getAdminRevenue } from '@/lib/db/queries/revenue'
 
 import { DigestButton } from './digest-button'
@@ -19,7 +19,7 @@ const SOURCE_LABELS: Record<string, string> = {
   package: 'Packages',
   room_rental: 'Room rental',
   membership: 'Medical director',
-  epicutis: GROWTH_HUB,
+  epicutis: MARKETING_MEMBERSHIP,
   training: 'Training',
 }
 
