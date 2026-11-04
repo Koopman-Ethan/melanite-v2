@@ -490,7 +490,8 @@ export async function notifyCloseout(checklistId: string): Promise<void> {
         ),
         concern: raisesConcern(row.completedItems),
         note: row.note,
-        url: `${await appOrigin()}/app/admin/equipment`,
+        // The close-out itself, not the list it sits in.
+        url: `${await appOrigin()}/app/admin/equipment/${checklistId}`,
       }),
     })
   } catch (err) {

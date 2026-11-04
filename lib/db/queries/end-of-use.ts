@@ -16,6 +16,7 @@ import {
   END_OF_USE_STARTED_AT,
   labelsFor,
   missingKeys,
+  missingRequired,
   reportedLabelsFor,
 } from '@/lib/end-of-use'
 
@@ -41,6 +42,12 @@ export interface CloseoutRecord {
   itemCount: number
   /** What was NOT ticked, in the wording that provider was shown. */
   missingLabels: string[]
+  /** The conditional items that WERE ticked, as findings — "Supply shortage reported". */
+  reportedLabels: string[]
+  /** REQUIRED items not ticked. Empty on anything signed against the current list; only a row
+   *  from an older checklist version can be missing one. Unlike `missingLabels`, never names a
+   *  conditional item, which not ticking is the ordinary case. */
+  requiredMissingLabels: string[]
   deviceIssue: boolean
   deviceIssueNote: string | null
   note: string | null
@@ -92,7 +99,50 @@ function asCloseout(row: RawCloseout): CloseoutRecord {
     // Resolved to labels here rather than in the page or the email, so the wording lives in one
     // place and no template needs to import policy.
     missingLabels: labelsFor(missingKeys(completedItems)),
+    reportedLabels: reportedLabelsFor(completedItems),
+    requiredMissingLabels: missingRequired(completedItems).map((i) => i.label),
   }
+}
+
+/** The four joins every close-out read needs, so a new query cannot quietly drop one. */
+function closeoutQuery() {
+  return db
+    .select(CLOSEOUT_COLUMNS)
+    .from(endOfUseChecklists)
+    .innerJoin(providers, eq(endOfUseChecklists.providerId, providers.id))
+    .innerJoin(bookings, eq(endOfUseChecklists.bookingId, bookings.id))
+    .innerJoin(providerServices, eq(bookings.providerServiceId, providerServices.id))
+    .innerJoin(services, eq(providerServices.serviceId, services.id))
+}
+
+/** One close-out, for its own page. Null for an id that is not one — the page 404s on it. */
+export async function getCloseout(id: string): Promise<CloseoutRecord | null> {
+  // A malformed id is a typed URL, not a database error. Postgres would throw on the uuid cast.
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return null
+  const [row] = await closeoutQuery().where(eq(endOfUseChecklists.id, id)).limit(1)
+  return row ? asCloseout(row) : null
+}
+
+/**
+ * The close-outs behind one line of "What came up", newest first.
+ *
+ * Keoni could see "Supply shortage reported — 3×" and not which three (4 November). Same window
+ * as the count, so clicking a number lists exactly that many rows.
+ */
+export async function getCloseoutsWithItem(
+  key: string,
+  sinceDays = 30,
+): Promise<CloseoutRecord[]> {
+  const since = new Date(Date.now() - sinceDays * 24 * 60 * 60_000)
+  const rows = await closeoutQuery()
+    .where(
+      and(
+        gte(endOfUseChecklists.recordedAt, since),
+        sql`${key} = any(${endOfUseChecklists.completedItems})`,
+      ),
+    )
+    .orderBy(desc(endOfUseChecklists.recordedAt))
+  return rows.map(asCloseout)
 }
 
 /**
@@ -105,13 +155,7 @@ function asCloseout(row: RawCloseout): CloseoutRecord {
 export async function getCloseoutIssues(sinceDays = 30): Promise<CloseoutRecord[]> {
   const since = new Date(Date.now() - sinceDays * 24 * 60 * 60_000)
 
-  const rows = await db
-    .select(CLOSEOUT_COLUMNS)
-    .from(endOfUseChecklists)
-    .innerJoin(providers, eq(endOfUseChecklists.providerId, providers.id))
-    .innerJoin(bookings, eq(endOfUseChecklists.bookingId, bookings.id))
-    .innerJoin(providerServices, eq(bookings.providerServiceId, providerServices.id))
-    .innerJoin(services, eq(providerServices.serviceId, services.id))
+  const rows = await closeoutQuery()
     .where(and(eq(endOfUseChecklists.deviceIssue, true), gte(endOfUseChecklists.recordedAt, since)))
     .orderBy(desc(endOfUseChecklists.recordedAt))
 
@@ -228,13 +272,7 @@ export async function getConditionalItemCounts(sinceDays = 30): Promise<Conditio
 
 /** The close-out log, newest first. The counterpart to `getRecentChecks`. */
 export async function getRecentCloseouts(limit = 20): Promise<CloseoutRecord[]> {
-  const rows = await db
-    .select(CLOSEOUT_COLUMNS)
-    .from(endOfUseChecklists)
-    .innerJoin(providers, eq(endOfUseChecklists.providerId, providers.id))
-    .innerJoin(bookings, eq(endOfUseChecklists.bookingId, bookings.id))
-    .innerJoin(providerServices, eq(bookings.providerServiceId, providerServices.id))
-    .innerJoin(services, eq(providerServices.serviceId, services.id))
+  const rows = await closeoutQuery()
     .orderBy(desc(endOfUseChecklists.recordedAt))
     .limit(limit)
 

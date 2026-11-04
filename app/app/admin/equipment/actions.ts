@@ -67,7 +67,8 @@ export async function removeEquipmentPhoto(input: {
     })
     .where(eq(endOfUseChecklists.id, input.checklistId))
 
-  revalidatePath('/app/admin/equipment')
+  // 'layout' so a close-out's own page refreshes too, not only the list.
+  revalidatePath('/app/admin/equipment', 'layout')
   revalidatePath('/app/appointments')
 
   return { success: 'Photo removed. The record that it was taken stays.' }
