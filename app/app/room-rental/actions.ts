@@ -14,6 +14,7 @@ import {
   type SlotType,
 } from '@/lib/db/queries/room-rental'
 import { providers, roomBookings } from '@/lib/db/schema'
+import { DAILY_ROOM_ID } from '@/lib/db/queries/rooms'
 import { ROOM_SLOT_LABELS } from '@/lib/email'
 import { notifyMelaniteRoomRental } from '@/lib/notify-melanite'
 import { friendlyStripeError, stripePost, stripeWritesEnabled } from '@/lib/stripe/client'
@@ -95,6 +96,8 @@ export async function startRoomRental(input: {
       .insert(roomBookings)
       .values({
         providerId: user.id,
+        // Said, not left to the column default: this flow only ever rents the daily room.
+        roomId: DAILY_ROOM_ID,
         rentalDate: input.rentalDate,
         slotType: input.slotType,
         price,

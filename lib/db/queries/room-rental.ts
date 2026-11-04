@@ -4,6 +4,7 @@ import { and, asc, desc, eq, gte, inArray, lte, or, sql } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
 import { platformSettings, roomBookings } from '@/lib/db/schema'
+import { DAILY_ROOM_ID } from '@/lib/db/queries/rooms'
 
 import { denverInstant } from './availability'
 
@@ -120,6 +121,9 @@ export async function getMonthOccupancy(
     .from(roomBookings)
     .where(
       and(
+        // The per-day calendar is the daily room's. A monthly space is let by the month and
+        // never appears here.
+        eq(roomBookings.roomId, DAILY_ROOM_ID),
         gte(roomBookings.rentalDate, dates[0]),
         lte(roomBookings.rentalDate, dates[dayCount - 1]),
         inArray(roomBookings.status, [...HOLDING_STATUSES]),

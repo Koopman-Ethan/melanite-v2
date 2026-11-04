@@ -154,6 +154,53 @@ describe('room_bookings_no_overlap', () => {
 
     expect(Number(n)).toBe(1)
   })
+
+  it('lets two different rooms be let for the same hours', async () => {
+    // Since 0048 the rule is per room. With one room, "nothing overlaps" meant the room; with six
+    // spaces it would let a booking in one refuse a booking in another.
+    await db.execute(sql`
+      INSERT INTO room_bookings (provider_id, room_id, rental_date, slot_type, price, status, start_at, end_at)
+      VALUES (${providerId}::uuid, 'daily', '2099-03-02', 'full', '100.00', 'confirmed',
+              '2099-03-02 15:00:00+00', '2099-03-03 01:00:00+00')
+    `)
+    await db.execute(sql`
+      INSERT INTO room_bookings (provider_id, room_id, rental_date, slot_type, price, status, start_at, end_at)
+      VALUES (${providerId}::uuid, 'nail-1', '2099-03-02', 'full', '0.00', 'confirmed',
+              '2099-03-02 15:00:00+00', '2099-03-03 01:00:00+00')
+    `)
+
+    // And the same room is still refused.
+    await rejects(
+      sql`
+        INSERT INTO room_bookings (provider_id, room_id, rental_date, slot_type, price, status, start_at, end_at)
+        VALUES (${providerId}::uuid, 'nail-1', '2099-03-02', 'am', '0.00', 'confirmed',
+                '2099-03-02 15:00:00+00', '2099-03-02 20:00:00+00')
+      `,
+      'room_bookings_no_overlap',
+    )
+  })
+
+  it('files a booking that names no room against the daily room', async () => {
+    // The default is what kept every booking before 0048, and every insert that does not say
+    // which room, meaning the room it always meant.
+    const [{ room_id }] = (
+      await db.execute<{ room_id: string }>(sql`
+        SELECT room_id FROM room_bookings WHERE rental_date = '2099-01-05' LIMIT 1
+      `)
+    ).rows
+    expect(room_id).toBe('daily')
+  })
+
+  it('refuses a room that does not exist', async () => {
+    await rejects(
+      sql`
+        INSERT INTO room_bookings (provider_id, room_id, rental_date, slot_type, price, status, start_at, end_at)
+        VALUES (${providerId}::uuid, 'no-such-room', '2099-03-09', 'full', '0.00', 'confirmed',
+                '2099-03-09 15:00:00+00', '2099-03-10 01:00:00+00')
+      `,
+      'room_bookings_room_id_rooms_id_fk',
+    )
+  })
 })
 
 describe('ledger check constraints', () => {

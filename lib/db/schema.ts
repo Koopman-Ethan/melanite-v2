@@ -1600,12 +1600,40 @@ export const memberships = pgTable('memberships', {
  *  happily lets `full` be sold on a day that already has one. The room is a physical space
  *  with a start and an end, so overlap is the actual rule, and the ranges already exist in
  *  `startAt`/`endAt`. */
+export const roomKind = pgEnum('room_kind', ['daily', 'monthly'])
+
+/** The rentable spaces. Until November 2026 there was exactly one room, rented by the day, and
+ *  nothing named it; Keoni then opened two more rooms and two nail stations by the month.
+ *
+ *  Keyed by a readable slug, not a uuid. `room_bookings.room_id` defaults to `'daily'`, which is
+ *  what keeps every booking written before this — and every code path that still does not say
+ *  which room — pointing at the room it always meant. A uuid default would have to be looked up.
+ *
+ *  `name` and `monthly_price_cents` are Keoni's to change; the slug is not. The daily room's
+ *  prices stay in `platform_settings`, where the half-day/full-day pair has always lived. */
+export const rooms = pgTable('rooms', {
+  id: text().primaryKey(),
+  name: text().notNull(),
+  kind: roomKind().notNull(),
+  /** Monthly spaces only. Null for the daily room, whose prices are per slot. */
+  monthlyPriceCents: integer(),
+  active: boolean().notNull().default(true),
+  sort: integer().notNull().default(0),
+}, (t) => [
+  check('rooms_monthly_priced', sql`${t.kind} <> 'monthly' OR ${t.monthlyPriceCents} > 0`),
+])
+
 export const roomBookings = pgTable('room_bookings', {
   id: uuid().primaryKey().defaultRandom(),
   createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   providerId: uuid()
     .notNull()
     .references(() => providers.id, { onDelete: 'restrict' }),
+  /** Which space. Defaults to the daily room — see `rooms`. */
+  roomId: text()
+    .notNull()
+    .default('daily')
+    .references(() => rooms.id, { onDelete: 'restrict' }),
   rentalDate: date().notNull(),
   slotType: roomSlotType().notNull().default('full'),
   price: money().notNull().default('0.00'),
@@ -1623,6 +1651,7 @@ export const roomBookings = pgTable('room_bookings', {
   holdExpiresAt: timestamp({ withTimezone: true }),
 }, (t) => [
   index().on(t.providerId),
+  index().on(t.roomId),
   index().on(t.rentalDate),
   index().on(t.status),
   index().on(t.stripePaymentIntentId),
