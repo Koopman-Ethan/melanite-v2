@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { desc, eq, sql } from 'drizzle-orm'
+import { and, desc, eq, sql } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
 import { inviteLinks, providers } from '@/lib/db/schema'
@@ -25,6 +25,8 @@ export interface InviteRow {
   expiresAt: Date
   acceptedAt: Date | null
   invitedBy: string | null
+  /** What they were invited as; null on invites from before that was asked. */
+  practiceType: 'laser' | 'room_only' | null
   /** True once the deadline has passed, regardless of what `status` says. */
   isExpired: boolean
 }
@@ -38,6 +40,7 @@ export async function getInvites(limit = 30): Promise<InviteRow[]> {
       sentAt: inviteLinks.sentAt,
       expiresAt: inviteLinks.expiresAt,
       acceptedAt: inviteLinks.acceptedAt,
+      practiceType: inviteLinks.practiceType,
       invitedBy: sql<
         string | null
       >`(select p.first_name || ' ' || p.last_name from providers p where p.id = ${inviteLinks.invitedByAdminId})`,
@@ -97,4 +100,19 @@ export async function providerExists(email: string): Promise<boolean> {
     .limit(1)
 
   return Boolean(row)
+}
+
+/** What this person was invited as, if the invite said. Null for an invite from before that was
+ *  asked — those invitees still choose for themselves on the profile step.
+ *
+ *  Read from the accepted invite rather than copied onto the provider, so there is one record of
+ *  it: the invite Keoni sent. */
+export async function invitedAs(email: string): Promise<'laser' | 'room_only' | null> {
+  const [row] = await db
+    .select({ practiceType: inviteLinks.practiceType })
+    .from(inviteLinks)
+    .where(and(eq(inviteLinks.email, email.toLowerCase()), eq(inviteLinks.status, 'accepted')))
+    .orderBy(desc(inviteLinks.acceptedAt))
+    .limit(1)
+  return row?.practiceType ?? null
 }

@@ -37,6 +37,7 @@ export async function activateAccount(input: {
       email: inviteLinks.email,
       status: inviteLinks.status,
       expiresAt: inviteLinks.expiresAt,
+      practiceType: inviteLinks.practiceType,
     })
     .from(inviteLinks)
     .where(eq(inviteLinks.token, input.token))
@@ -82,6 +83,9 @@ export async function activateAccount(input: {
       status: 'pending',
       onboardingStep: 1,
       bookingEnabled: false,
+      // What Keoni invited them as, when the invite said. A room tenant starts as one and is not
+      // asked again; an older invite leaves the default and the profile step asks.
+      ...(invite.practiceType ? { practiceType: invite.practiceType } : {}),
     })
     .returning({ id: providers.id })
 

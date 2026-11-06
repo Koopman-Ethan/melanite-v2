@@ -388,9 +388,14 @@ export async function createManualBooking(input: {
  *  a provider is someone Keoni has met, usually at a training course. The `invite_links` table
  *  has existed since the first migration with nothing driving it; this is what drives it.
  */
-export async function inviteProvider(email: string): Promise<ToolState & { url?: string }> {
+export async function inviteProvider(
+  email: string,
+  /** What they are invited as. A room tenant is fixed as one and never offered the laser. */
+  kind: 'laser' | 'room_only' = 'laser',
+): Promise<ToolState & { url?: string }> {
   const admin = await requireAdmin()
   const address = email.trim().toLowerCase()
+  if (kind !== 'laser' && kind !== 'room_only') return { error: 'Choose what they are invited as.' }
 
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(address)) {
     return { error: 'Enter a valid email address.' }
@@ -418,6 +423,7 @@ export async function inviteProvider(email: string): Promise<ToolState & { url?:
     invitedByAdminId: admin.id,
     token,
     status: 'pending',
+    practiceType: kind,
     expiresAt,
   })
 
@@ -429,6 +435,7 @@ export async function inviteProvider(email: string): Promise<ToolState & { url?:
       invitedBy: `${admin.firstName} ${admin.lastName}`,
       url,
       expiresInDays: INVITE_TTL_DAYS,
+      kind,
     }),
   })
 
@@ -505,6 +512,7 @@ export async function resendInvite(inviteId: string): Promise<ToolState & { url?
       token: inviteLinks.token,
       status: inviteLinks.status,
       expiresAt: inviteLinks.expiresAt,
+      practiceType: inviteLinks.practiceType,
     })
     .from(inviteLinks)
     .where(eq(inviteLinks.id, inviteId))
@@ -531,6 +539,7 @@ export async function resendInvite(inviteId: string): Promise<ToolState & { url?
       url,
       // What is actually left, not the full seven days — the original clock is still running.
       expiresInDays: daysLeft,
+      kind: invite.practiceType,
     }),
   })
 

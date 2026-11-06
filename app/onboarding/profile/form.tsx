@@ -10,7 +10,10 @@ import { saveProfile } from '../actions'
 
 export function ProfileForm({
   initial,
+  practiceFixed = false,
 }: {
+  /** Keoni's invite already said what they are. The choice is not offered again. */
+  practiceFixed?: boolean
   initial: {
     firstName: string
     lastName: string
@@ -94,60 +97,62 @@ export function ProfileForm({
           
           The old wording said "no Connect account and no laser service menu". Neither exists
           any more: Connect went with the rental model, and the services step with it. */}
-      <fieldset className="space-y-2">
-        <legend className="text-sm font-medium text-ink-secondary">
-          How will you be working at Melanite?{' '}
-          <span className="text-gold" aria-hidden>
-            *
-          </span>
-        </legend>
+      {!practiceFixed && (
+        <fieldset className="space-y-2">
+          <legend className="text-sm font-medium text-ink-secondary">
+            How will you be working at Melanite?{' '}
+            <span className="text-gold" aria-hidden>
+              *
+            </span>
+          </legend>
 
-        {(
-          [
-            {
-              key: 'laser' as const,
-              title: 'Using the laser',
-              blurb:
-                'You book laser time and pay Melanite a rental fee for each session. You bill your own clients, at your own prices — that side never comes through Melanite.',
-            },
-            {
-              key: 'room_only' as const,
-              title: 'Renting a room or station',
-              blurb:
-                'You rent a treatment room or nail station — by the month, or the daily room by the day — and bring your own clients. You bill them yourself and pay for the space out of pocket.',
-            },
-          ]
-        ).map((option) => (
-          <button
-            key={option.key}
-            type="button"
-            onClick={() => setPracticeType(option.key)}
-            aria-pressed={practiceType === option.key}
-            className={
-              'block w-full rounded-field border px-4 py-3 text-left transition-colors ' +
-              (practiceType === option.key
-                ? 'border-gold bg-gold/10'
-                : 'border-line-control hover:border-line-strong')
-            }
-          >
-            <span
+          {(
+            [
+              {
+                key: 'laser' as const,
+                title: 'Using the laser',
+                blurb:
+                  'You book laser time and pay Melanite a rental fee for each session. You bill your own clients, at your own prices — that side never comes through Melanite.',
+              },
+              {
+                key: 'room_only' as const,
+                title: 'Renting a room or station',
+                blurb:
+                  'You rent a treatment room or nail station — by the month, or the daily room by the day — and bring your own clients. You bill them yourself and pay for the space out of pocket.',
+              },
+            ]
+          ).map((option) => (
+            <button
+              key={option.key}
+              type="button"
+              onClick={() => setPracticeType(option.key)}
+              aria-pressed={practiceType === option.key}
               className={
-                'block text-sm font-medium ' +
-                (practiceType === option.key ? 'text-gold' : 'text-ink')
+                'block w-full rounded-field border px-4 py-3 text-left transition-colors ' +
+                (practiceType === option.key
+                  ? 'border-gold bg-gold/10'
+                  : 'border-line-control hover:border-line-strong')
               }
             >
-              {option.title}
-            </span>
-            <span className="mt-1 block text-xs leading-relaxed text-ink-muted">
-              {option.blurb}
-            </span>
-          </button>
-        ))}
+              <span
+                className={
+                  'block text-sm font-medium ' +
+                  (practiceType === option.key ? 'text-gold' : 'text-ink')
+                }
+              >
+                {option.title}
+              </span>
+              <span className="mt-1 block text-xs leading-relaxed text-ink-muted">
+                {option.blurb}
+              </span>
+            </button>
+          ))}
 
-        <p className="text-xs text-ink-faint">
-          Melanite can change this later if what you do here changes.
-        </p>
-      </fieldset>
+          <p className="text-xs text-ink-faint">
+            Melanite can change this later if what you do here changes.
+          </p>
+        </fieldset>
+      )}
 
       {error && <Notice>{error}</Notice>}
 

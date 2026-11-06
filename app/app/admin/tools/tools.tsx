@@ -614,6 +614,7 @@ export interface InviteView {
   sentAt: string
   expiresAt: string
   invitedBy: string | null
+  practiceType: 'laser' | 'room_only' | null
   isExpired: boolean
 }
 
@@ -623,6 +624,9 @@ export interface InviteView {
  *  course — so this is the only door into the system. */
 function InviteTool({ invites }: { invites: InviteView[] }) {
   const [email, setEmail] = useState('')
+  // Asked on every invite, not defaulted silently: a room tenant is on a contract separate from
+  // the laser, and the invite is what keeps them from being offered it.
+  const [kind, setKind] = useState<'laser' | 'room_only'>('laser')
   const [state, setState] = useState<(ToolState & { url?: string }) | null>(null)
   const [pending, start] = useTransition()
 
@@ -637,6 +641,27 @@ function InviteTool({ invites }: { invites: InviteView[] }) {
         rather than sending a second invite: two live links for one person means whichever they
         happen to click decides their account.
       </p>
+
+      <fieldset className="flex flex-wrap gap-2">
+        <legend className="mb-1.5 text-xs text-ink-faint">Inviting them as</legend>
+        {(
+          [
+            ['laser', 'Laser provider', 'Books laser time and pays a fee per session.'],
+            ['room_only', 'Room tenant', 'Rents a room or nail station by the month. Never sees the laser.'],
+          ] as const
+        ).map(([value, label, blurb]) => (
+          <button
+            key={value}
+            type="button"
+            aria-pressed={kind === value}
+            onClick={() => setKind(value)}
+            className={`rounded-field border px-3 py-2 text-left ${kind === value ? 'border-gold bg-gold/10' : 'border-line hover:border-line-strong'}`}
+          >
+            <span className="block text-sm">{label}</span>
+            <span className="block text-xs text-ink-faint">{blurb}</span>
+          </button>
+        ))}
+      </fieldset>
 
       <div className="flex flex-wrap items-end gap-3">
         <div className="min-w-64 flex-1">
@@ -653,7 +678,7 @@ function InviteTool({ invites }: { invites: InviteView[] }) {
           disabled={pending || !email.trim()}
           onClick={() =>
             start(async () => {
-              const result = await inviteProvider(email)
+              const result = await inviteProvider(email, kind)
               setState(result)
               if (result.success) setEmail('')
             })
@@ -690,6 +715,9 @@ function InviteTool({ invites }: { invites: InviteView[] }) {
               >
                 <div className="min-w-0">
                   <span className="text-sm">{invite.email}</span>
+                  {invite.practiceType === 'room_only' && (
+                    <span className="ml-2 text-xs text-gold">room tenant</span>
+                  )}
                   <span className="ml-2 text-xs text-ink-faint">
                     expires{' '}
                     {new Date(invite.expiresAt).toLocaleDateString('en-US', {

@@ -7,6 +7,7 @@ import { requireProvider } from '@/lib/auth/dal'
 import { db } from '@/lib/db'
 import { SUPERVISED_PROCEDURES, requiresMedicalDirection } from '@/lib/room-procedures'
 import { providers } from '@/lib/db/schema'
+import { invitedAs } from '@/lib/db/queries/invites'
 import { nextStepSlug } from '@/lib/onboarding'
 import { hasAcceptedRentalTerms } from '@/lib/rental-terms'
 import { liveScheduleVersion } from '@/lib/rental/schedule'
@@ -62,7 +63,11 @@ export async function saveProfile(input: {
     return { error: 'Enter your professional credentials — clients see them at checkout.' }
   }
 
-  if (input.practiceType !== 'laser' && input.practiceType !== 'room_only') {
+  // The invite's answer wins over the form's. The choice is hidden when the invite settled it,
+  // and this is what makes that more than cosmetic: a room tenant cannot become a laser provider
+  // by posting the form by hand.
+  const practiceType = (await invitedAs(user.email)) ?? input.practiceType
+  if (practiceType !== 'laser' && practiceType !== 'room_only') {
     return { error: 'Choose how you will be working at Melanite.' }
   }
 
@@ -71,7 +76,7 @@ export async function saveProfile(input: {
     lastName,
     phone,
     credentials,
-    practiceType: input.practiceType,
+    practiceType,
   })
 
   redirect('/onboarding/license')

@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
 import { providers } from '@/lib/db/schema'
+import { invitedAs } from '@/lib/db/queries/invites'
 
 import { requireOnboardingStep } from '../guard'
 import { ProgressRail, StepShell } from '../steps'
@@ -13,6 +14,7 @@ export const dynamic = 'force-dynamic'
 
 export default async function ProfileStep() {
   const user = await requireOnboardingStep('profile')
+  const fixedBy = await invitedAs(user.email)
 
   const [row] = await db
     .select({
@@ -56,6 +58,7 @@ export default async function ProfileStep() {
           credentials: row?.credentials ?? '',
           practiceType: row?.practiceType ?? 'laser',
         }}
+        practiceFixed={fixedBy !== null}
       />
     </StepShell>
   )
