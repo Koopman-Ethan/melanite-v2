@@ -344,6 +344,13 @@
       "when": 1793823512930,
       "tag": "0048_rooms",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1793906955704,
+      "tag": "0049_room_leases",
+      "breakpoints": true
     }
   ]
 }

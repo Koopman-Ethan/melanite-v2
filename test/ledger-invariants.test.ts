@@ -138,6 +138,9 @@ describe('ledger invariants', () => {
               UNION ALL
               SELECT 1 FROM prepaid_balances p
                WHERE l.subject_type = 'prepaid_balance' AND p.id = l.subject_id
+              UNION ALL
+              SELECT 1 FROM room_leases rl
+               WHERE l.subject_type = 'room_lease' AND rl.id = l.subject_id
              )
     `)
 

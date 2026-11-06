@@ -3,9 +3,16 @@ import Link from 'next/link'
 
 import { requireAdmin } from '@/lib/auth/dal'
 import { addDays, denverToday, weekStartOf } from '@/lib/db/queries/admin-calendar'
-import { getRoomWeek } from '@/lib/db/queries/rooms'
+import {
+  getDepositsToDecide,
+  getLiveLeases,
+  getRoomWeek,
+  getTenantOptions,
+} from '@/lib/db/queries/rooms'
 import { ROOM_SLOT_LABELS } from '@/lib/email'
 import { cn } from '@/lib/cn'
+
+import { DepositDecision, RunningLease, StartLease } from './lease-panel'
 
 export const metadata: Metadata = { title: 'Rooms · Melanite Admin' }
 export const dynamic = 'force-dynamic'
@@ -17,8 +24,8 @@ export const dynamic = 'force-dynamic'
 // Rows are spaces and columns are days — the question asked of this page is "who has what", not
 // "what happens at 2pm".
 //
-// Monthly spaces are listed but cannot be let yet. How a monthly let starts, renews and ends is
-// waiting on Keoni, and saying so in the row beats a grid that is silently empty.
+// A monthly space's row is its lease: who has it, and what Keoni can do about it. Leases are hers
+// to start — monthly rooms are a contract separate from the laser, and nobody applies for one.
 
 const usd = (cents: number) =>
   (cents / 100).toLocaleString('en-US', {
@@ -53,7 +60,15 @@ export default async function AdminRoomsPage({
   const weekStart = weekStartOf(requested)
   const isCurrentWeek = weekStart === weekStartOf(today)
 
-  const { days, rooms, rentals } = await getRoomWeek(weekStart)
+  const [{ days, rooms, rentals }, leases, deposits, tenants] = await Promise.all([
+    getRoomWeek(weekStart),
+    getLiveLeases(),
+    getDepositsToDecide(),
+    getTenantOptions(),
+  ])
+  // Somebody already on a running lease is not offered a second space.
+  const leased = new Set(leases.map((l) => l.providerId))
+  const available = tenants.filter((t) => !leased.has(t.id))
 
   return (
     <main className="mx-auto w-full max-w-6xl px-6 py-10 space-y-6">
@@ -130,9 +145,22 @@ export default async function AdminRoomsPage({
                 {room.kind === 'monthly' ? (
                   // One cell across the week: a monthly let is not a per-day fact.
                   <td colSpan={7} className="border-l border-line p-3 align-middle">
-                    <span className="text-xs text-ink-faint">
-                      Open. Monthly lets start once the rental terms are settled.
-                    </span>
+                    {(() => {
+                      const lease = leases.find((l) => l.roomId === room.id)
+                      return lease ? (
+                        <RunningLease lease={lease} today={today} />
+                      ) : (
+                        <div className="space-y-1">
+                          <span className="block text-xs text-ink-faint">Open</span>
+                          <StartLease
+                            roomId={room.id}
+                            monthlyCents={room.monthlyPriceCents ?? 0}
+                            tenants={available}
+                            today={today}
+                          />
+                        </div>
+                      )
+                    })()}
                   </td>
                 ) : (
                   days.map((day) => (
@@ -170,6 +198,19 @@ export default async function AdminRoomsPage({
           </tbody>
         </table>
       </div>
+
+      {deposits.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">
+            Deposits to decide
+          </h2>
+          <ul className="space-y-2">
+            {deposits.map((lease) => (
+              <DepositDecision key={lease.id} lease={lease} />
+            ))}
+          </ul>
+        </section>
+      )}
     </main>
   )
 }

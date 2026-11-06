@@ -25,6 +25,7 @@ const monthLabel = (ym: string) => {
 const SOURCE_LABELS: Record<string, string> = {
   rental_fee: 'Laser rental',
   room_rental: 'Room rental',
+  room_lease: 'Monthly rent',
   membership: 'Medical direction',
   epicutis: MARKETING_MEMBERSHIP,
 }

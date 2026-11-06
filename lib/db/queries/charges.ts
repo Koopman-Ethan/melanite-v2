@@ -46,7 +46,7 @@ export interface ChargeTotals {
 
 export async function getChargeTotals(providerId: string): Promise<ChargeTotals> {
   const RENTAL = sql`${ledgerEntries.source} = 'rental_fee'`
-  const RECURRING = sql`${ledgerEntries.source} in ('room_rental', 'membership', 'epicutis')`
+  const RECURRING = sql`${ledgerEntries.source} in ('room_rental', 'room_lease', 'membership', 'epicutis')`
 
   const [row] = await db
     .select({
@@ -80,7 +80,7 @@ export async function getChargeSeries(providerId: string, limit = 12): Promise<C
     .select({
       month: MONTH,
       rental: sql<string>`coalesce(sum(${ledgerEntries.grossAmount}) filter (where ${ledgerEntries.source} = 'rental_fee'), 0)`,
-      recurring: sql<string>`coalesce(sum(${ledgerEntries.grossAmount}) filter (where ${ledgerEntries.source} in ('room_rental', 'membership', 'epicutis')), 0)`,
+      recurring: sql<string>`coalesce(sum(${ledgerEntries.grossAmount}) filter (where ${ledgerEntries.source} in ('room_rental', 'room_lease', 'membership', 'epicutis')), 0)`,
     })
     .from(ledgerEntries)
     .where(and(eq(ledgerEntries.providerId, providerId), PROVIDER_PAID))

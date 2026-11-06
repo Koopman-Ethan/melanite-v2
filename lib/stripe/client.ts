@@ -148,6 +148,31 @@ export async function stripeGet<T>(
   return body
 }
 
+/** Deletes an object in Stripe. Only cancelling a subscription at once needs it — Stripe has no
+ *  POST for that; `cancel_at` can only name a moment still to come. */
+export async function stripeDelete<T>(path: string): Promise<T> {
+  const key = writeKey()
+  if (!key) throw new StripeNotConfiguredError()
+
+  const res = await fetch(`${API}${path}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${key}` },
+  })
+  const body = (await res.json()) as {
+    error?: { message?: string; code?: string; type?: string }
+  } & T
+
+  if (!res.ok) {
+    throw new StripeApiError(
+      res.status,
+      body.error?.code,
+      body.error?.message ?? `Stripe returned ${res.status}`,
+    )
+  }
+
+  return body
+}
+
 /** Turns a Stripe failure into something safe to show a provider.
  *
  *  Stripe's own messages are written for developers and occasionally leak account details, so

@@ -1,10 +1,11 @@
 import 'server-only'
 
-import { and, asc, eq, gte, lt } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, inArray, lt, ne } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
 import { addDays } from '@/lib/db/queries/admin-calendar'
-import { providers, roomBookings, rooms } from '@/lib/db/schema'
+import { providers, roomBookings, roomLeases, rooms } from '@/lib/db/schema'
+import { completedTerm } from '@/lib/rooms/lease-schedule'
 
 // The rentable spaces (migration 0048).
 //
@@ -97,4 +98,107 @@ export async function getRoomWeek(
     }))
 
   return { days, rooms: spaces, rentals }
+}
+
+export interface LeaseView {
+  id: string
+  roomId: string
+  roomName: string
+  providerId: string
+  tenantName: string
+  status: 'pending' | 'active' | 'past_due' | 'ended'
+  startsOn: string
+  termMonths: number
+  monthlyCents: number
+  depositCents: number
+  depositStatus: 'held_outside' | 'charged' | 'refunded' | 'kept'
+  noticeGivenOn: string | null
+  endsOn: string | null
+  pastDueSince: Date | null
+  /** Keoni's rule as a suggestion: refund after a completed term with notice, else keep. */
+  suggestRefund: boolean
+}
+
+const LEASE_COLUMNS = {
+  id: roomLeases.id,
+  roomId: roomLeases.roomId,
+  roomName: rooms.name,
+  providerId: roomLeases.providerId,
+  firstName: providers.firstName,
+  lastName: providers.lastName,
+  status: roomLeases.status,
+  startsOn: roomLeases.startsOn,
+  termMonths: roomLeases.termMonths,
+  monthlyCents: roomLeases.monthlyCents,
+  depositCents: roomLeases.depositCents,
+  depositStatus: roomLeases.depositStatus,
+  noticeGivenOn: roomLeases.noticeGivenOn,
+  endsOn: roomLeases.endsOn,
+  pastDueSince: roomLeases.pastDueSince,
+}
+
+function leaseQuery() {
+  return db
+    .select(LEASE_COLUMNS)
+    .from(roomLeases)
+    .innerJoin(rooms, eq(rooms.id, roomLeases.roomId))
+    .innerJoin(providers, eq(providers.id, roomLeases.providerId))
+}
+
+function asLease(r: Awaited<ReturnType<typeof leaseQuery>>[number]): LeaseView {
+  const { firstName, lastName, ...rest } = r
+  return { ...rest, tenantName: `${firstName} ${lastName}`, suggestRefund: completedTerm(r) }
+}
+
+/** Leases still running, one per space at most. */
+export async function getLiveLeases(): Promise<LeaseView[]> {
+  return (await leaseQuery().where(ne(roomLeases.status, 'ended'))).map(asLease)
+}
+
+/** Ended leases whose deposit Keoni has not yet refunded or kept. */
+export async function getDepositsToDecide(): Promise<LeaseView[]> {
+  return (
+    await leaseQuery()
+      .where(and(eq(roomLeases.status, 'ended'), inArray(roomLeases.depositStatus, ['charged', 'held_outside'])))
+      .orderBy(desc(roomLeases.endedAt))
+  )
+    .map(asLease)
+    .filter((l) => l.depositCents > 0)
+}
+
+/** A tenant's own lease, if they have one running — what their Room Rental page leads with. */
+export async function getMyLease(providerId: string): Promise<LeaseView | null> {
+  const [row] = await leaseQuery()
+    .where(and(eq(roomLeases.providerId, providerId), ne(roomLeases.status, 'ended')))
+    .orderBy(desc(roomLeases.createdAt))
+    .limit(1)
+  return row ? asLease(row) : null
+}
+
+export interface TenantOption {
+  id: string
+  name: string
+  hasCard: boolean
+}
+
+/** Who a lease can be started for: room tenants Keoni has invited, laser providers excluded —
+ *  monthly rooms are a contract separate from the laser. */
+export async function getTenantOptions(): Promise<TenantOption[]> {
+  const rows = await db
+    .select({
+      id: providers.id,
+      firstName: providers.firstName,
+      lastName: providers.lastName,
+      email: providers.email,
+      paymentMethodId: providers.billingPaymentMethodId,
+    })
+    .from(providers)
+    .where(and(eq(providers.practiceType, 'room_only'), ne(providers.status, 'inactive')))
+    .orderBy(asc(providers.firstName))
+  return rows.map((r) => ({
+    id: r.id,
+    // Someone still in setup has no name yet; their email is how Keoni knows them.
+    name: `${r.firstName} ${r.lastName}`.trim() || r.email,
+    hasCard: Boolean(r.paymentMethodId),
+  }))
 }

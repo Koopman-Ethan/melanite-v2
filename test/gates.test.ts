@@ -32,6 +32,7 @@ const base: SessionUser = {
   requiresPasswordReset: false,
   revenueModel: 'rental',
   rentBasis: 'tier',
+  practiceType: 'laser',
   // Not a booking gate — the equipment policy is asked for before taking NEW laser time, and
   // deliberately does not join the three clinical gates. Set here so the fixture is a complete
   // SessionUser, not because canBook looks at it.

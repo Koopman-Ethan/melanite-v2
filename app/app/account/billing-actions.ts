@@ -33,7 +33,11 @@ export interface BillingRedirect {
  * The card is recorded by the webhook, not on the way back — a provider who closes the tab after
  * paying attention to the Stripe page still ends up with a card on file.
  */
-export async function startRentalCardSetup(): Promise<BillingRedirect> {
+export async function startRentalCardSetup(
+  /** Where to come back to. A room tenant adds their card on Room Rental, which is their whole
+   *  app, and is sent back there rather than to an account page about laser terms. */
+  from: 'account' | 'room-rental' = 'account',
+): Promise<BillingRedirect> {
   const user = await requireProvider()
 
   if (!stripeWritesEnabled()) {
@@ -52,7 +56,11 @@ export async function startRentalCardSetup(): Promise<BillingRedirect> {
   const base = await appOrigin()
   // A provider still in setup comes back to the step they left, not to the account page — their
   // remaining steps are there and the account page would strand them mid-flow.
-  const back = isOnboarding(user) ? '/onboarding/billing' : '/app/account'
+  const back = isOnboarding(user)
+    ? '/onboarding/billing'
+    : from === 'room-rental'
+      ? '/app/room-rental'
+      : '/app/account'
 
   // NOT keyed on the provider alone. A card setup is something somebody may legitimately do
   // twice — a declined card, then a different one — and a 24-hour idempotent replay would hand

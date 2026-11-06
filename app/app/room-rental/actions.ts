@@ -15,6 +15,7 @@ import {
 } from '@/lib/db/queries/room-rental'
 import { providers, roomBookings } from '@/lib/db/schema'
 import { DAILY_ROOM_ID } from '@/lib/db/queries/rooms'
+import { clearedForRoom } from '@/lib/rooms/access'
 import { ROOM_SLOT_LABELS } from '@/lib/email'
 import { notifyMelaniteRoomRental } from '@/lib/notify-melanite'
 import { friendlyStripeError, stripePost, stripeWritesEnabled } from '@/lib/stripe/client'
@@ -62,7 +63,7 @@ export async function startRoomRental(input: {
 
   // Deliberately NOT the full booking gate. Renting the room is a space rental; the medical
   // director and license gates govern treating on the laser, and v1 drew the same line.
-  if (!user.bookingEnabled) {
+  if (!clearedForRoom(user)) {
     return { error: 'Your account is not yet cleared. Melanite will enable it once your documents are confirmed.' }
   }
   if (!user.roomRentalEnabled) {

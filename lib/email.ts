@@ -715,32 +715,44 @@ export function rentalDecisionEmail(input: {
   }
 }
 
+/** The invite, worded for what the person is being invited AS.
+ *
+ *  Two versions since 4 November 2026. A room tenant rents a room or nail station on a contract
+ *  separate from the laser, and an email about laser rental would describe something they will
+ *  never do. The laser version said "connect your bank account for payouts" until then — true
+ *  before the rental model, when Melanite paid providers, and not since. */
 export function providerInviteEmail(input: {
   invitedBy: string
   url: string
   expiresInDays: number
+  kind?: 'laser' | 'room_only' | null
 }): Omit<EmailMessage, 'to'> {
+  const tenant = input.kind === 'room_only'
+  const setup = tenant
+    ? 'Setup takes a few minutes: create a password, add your details, and put a card on file for your monthly rent.'
+    : 'Setup takes about 10 minutes: create a password, add your license details, and put a card on file for laser rental.'
+  const intro = tenant
+    ? `${input.invitedBy} has set up your account for renting a space at Melanite.`
+    : `${input.invitedBy} has invited you to join Melanite Laser Suite.`
+
   return {
-    subject: "You're invited to join Melanite Laser Suite",
+    subject: tenant ? 'Your Melanite room rental account' : "You're invited to join Melanite Laser Suite",
     text: [
       'Hi,',
       '',
-      `${input.invitedBy} has invited you to join the Melanite provider network.`,
+      intro,
       '',
       'Set up your account here:',
       input.url,
       '',
       `This link expires in ${input.expiresInDays} days and can only be used once.`,
       '',
-      'Setup takes about 10 minutes: create a password, add your license details, connect',
-      'your bank account for payouts, and choose the services you offer.',
+      setup,
     ].join('\n'),
     html: wrap(
-      'Join the Melanite provider network',
-      p(`${input.invitedBy} has invited you to join Melanite Laser Suite.`) +
-        p(
-          'Setup takes about 10 minutes: create a password, add your license details, connect your bank account for payouts, and choose the services you offer.',
-        ) +
+      tenant ? 'Set up your room rental account' : 'Join the Melanite provider network',
+      p(intro) +
+        p(setup) +
         p(
           `<strong>This link expires in ${input.expiresInDays} days</strong> and can only be used once.`,
         ),
@@ -1727,5 +1739,49 @@ export function deskMedicalDirectorEmail(input: {
         p(consequence),
       { label: 'Open the provider roster', url: input.url },
     ),
+  }
+}
+
+/** Tells Keoni a tenant's monthly rent was declined.
+ *
+ *  Sent at the moment the lease goes past due and not again while it stays there — she asked to
+ *  hear so she can reach out, and her three days' notice runs from here. Stripe keeps retrying the
+ *  card on its own, so the email says so rather than implying nothing more will happen. */
+export function deskLeaseDeclinedEmail(input: {
+  tenantName: string
+  roomName: string
+  amount: string
+  url: string
+}): Omit<EmailMessage, 'to'> {
+  const line = `${input.tenantName}'s rent for ${input.roomName} (${input.amount}) was declined.`
+  const next =
+    'Stripe will retry the card over the next few days, and they have been emailed to update it. If you cannot reach them, your three days’ notice starts now — you can end the lease from the Rooms page.'
+  return {
+    subject: `Rent declined: ${input.tenantName}, ${input.roomName}`,
+    text: [line, '', next, '', 'Rooms:', input.url].join('\n'),
+    html: wrap('A rent payment was declined', p(esc(line)) + p(next), {
+      label: 'Open Rooms',
+      url: input.url,
+    }),
+  }
+}
+
+/** Tells a tenant their monthly rent did not go through. */
+export function leaseDeclinedEmail(input: {
+  firstName: string
+  roomName: string
+  amount: string
+  url: string
+}): Omit<EmailMessage, 'to'> {
+  const line = `Hi ${input.firstName}, your rent for ${input.roomName} (${input.amount}) didn’t go through — your card was declined.`
+  const next =
+    'Please add a working card on your Room Rental page. The payment will be retried automatically once it can be. Melanite has been told and may reach out.'
+  return {
+    subject: `Your rent for ${input.roomName} was declined`,
+    text: [line, '', next, '', input.url].join('\n'),
+    html: wrap('Your rent payment was declined', p(esc(line)) + p(next), {
+      label: 'Update your card',
+      url: input.url,
+    }),
   }
 }

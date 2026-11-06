@@ -9,9 +9,16 @@ import {
   getRoomSettings,
   releaseExpiredHolds,
 } from '@/lib/db/queries/room-rental'
-import { getRooms } from '@/lib/db/queries/rooms'
+import { eq } from 'drizzle-orm'
+
+import { db } from '@/lib/db'
+import { getMyLease } from '@/lib/db/queries/rooms'
+import { providers } from '@/lib/db/schema'
+import { clearedForRoom } from '@/lib/rooms/access'
+import { firstOfNextMonth } from '@/lib/rooms/lease-schedule'
 
 import { RentalShell } from './rental-shell'
+import { TenantCard } from './tenant-card'
 
 export const metadata: Metadata = { title: 'Room rental · Melanite' }
 export const dynamic = 'force-dynamic'
@@ -20,7 +27,7 @@ export const dynamic = 'force-dynamic'
 export default async function RoomRentalPage({
   searchParams,
 }: {
-  searchParams: Promise<{ month?: string; paid?: string; cancelled?: string }>
+  searchParams: Promise<{ month?: string; paid?: string; cancelled?: string; card?: string }>
 }) {
   const user = await requireProvider()
   const params = await searchParams
@@ -33,16 +40,29 @@ export default async function RoomRentalPage({
   // someone looks at the page is still cleared before it can affect them.
   await releaseExpiredHolds()
 
-  const [days, rentals, spaces] = await Promise.all([
+  const [days, rentals, lease, [card]] = await Promise.all([
     getMonthOccupancy(month, user.id, settings),
     getMyRentals(user.id),
-    getRooms(),
+    getMyLease(user.id),
+    db
+      .select({
+        paymentMethodId: providers.billingPaymentMethodId,
+        brand: providers.billingCardBrand,
+        last4: providers.billingCardLast4,
+      })
+      .from(providers)
+      .where(eq(providers.id, user.id))
+      .limit(1),
   ])
-  const monthly = spaces.filter((r) => r.kind === 'monthly')
+
+  const tenant = user.practiceType === 'room_only'
+  // A tenant who cannot use the daily room is not shown it at all — their page is their room. A
+  // laser provider still sees why it is closed, as before.
+  const showDaily = !tenant || (settings.enabled && user.roomRentalEnabled) || rentals.length > 0
 
   const blocked = !settings.enabled
     ? 'Room rental is not currently available. Melanite will announce it when it opens.'
-    : !user.bookingEnabled
+    : !clearedForRoom(user)
       ? 'Your account is not yet cleared. Melanite will enable it once your required documents are confirmed.'
       : !user.roomRentalEnabled
         ? 'Room rental is not available on your account. Contact Melanite.'
@@ -53,40 +73,82 @@ export default async function RoomRentalPage({
       <header>
         <h1 className="text-2xl font-semibold">Room rental</h1>
         <p className="mt-1 text-sm text-ink-muted">
-          Rent a treatment room or nail station by the month, or the daily room by the day or half
-          day. This is space only — it does not book the laser.
+          {tenant
+            ? 'Your space at Melanite, and the card your rent is taken from.'
+            : 'Rent the daily room by the day or half day. This is space only — it does not book the laser.'}
         </p>
       </header>
 
-      {/* Listed before they can be booked, deliberately. A provider asking "do you have a room
-          by the month?" should find the answer here rather than a page that only knows about the
-          daily room. How a monthly let starts and ends is waiting on Keoni (4 November); until
-          then the honest instruction is to ask. */}
-      {monthly.length > 0 && (
-        <section className="space-y-3">
-          <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">By the month</h2>
-          <ul className="divide-y divide-line rounded-card border border-line">
-            {monthly.map((room) => (
-              <li key={room.id} className="flex items-baseline justify-between gap-4 px-4 py-3">
-                <span className="text-sm font-medium">{room.name}</span>
-                <span className="text-sm tabular-nums text-ink-secondary">
-                  {((room.monthlyPriceCents ?? 0) / 100).toLocaleString('en-US', {
-                    style: 'currency',
-                    currency: 'USD',
-                    minimumFractionDigits: 0,
-                  })}{' '}
-                  / month
-                </span>
-              </li>
-            ))}
-          </ul>
+      {params.card === 'saved' && (
+        <Notice tone="success">Card saved. It can take a moment to show here.</Notice>
+      )}
+
+      {/* Only ever their own lease. Monthly rooms are a contract Keoni sets up, so nobody is shown
+          spaces or prices they have not been offered (4 November). */}
+      {lease && (
+        <section className="space-y-3 rounded-card border border-line p-5">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-lg font-semibold">{lease.roomName}</h2>
+            <span className="text-sm tabular-nums">
+              {(lease.monthlyCents / 100).toLocaleString('en-US', {
+                style: 'currency',
+                currency: 'USD',
+              })}{' '}
+              / month <span className="text-xs text-ink-faint">plus card processing</span>
+            </span>
+          </div>
+          {lease.status === 'past_due' && (
+            <Notice>
+              Your last rent payment was declined. Add a working card below — it will be retried
+              automatically, and Melanite has been told.
+            </Notice>
+          )}
+          <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+            <div>
+              <dt className="text-xs text-ink-faint">
+                {lease.startsOn > today ? 'Starts' : 'Since'}
+              </dt>
+              <dd>{lease.startsOn}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-ink-faint">Next rent</dt>
+              <dd>
+                {lease.endsOn && lease.endsOn <= firstOfNextMonth(today)
+                  ? 'None — your lease ends first'
+                  : lease.startsOn > today
+                    ? lease.startsOn
+                    : firstOfNextMonth(today)}
+              </dd>
+            </div>
+            {lease.endsOn && (
+              <div>
+                <dt className="text-xs text-ink-faint">Ends</dt>
+                <dd>{lease.endsOn}</dd>
+              </div>
+            )}
+            <div>
+              <dt className="text-xs text-ink-faint">Deposit</dt>
+              <dd>
+                {(lease.depositCents / 100).toLocaleString('en-US', {
+                  style: 'currency',
+                  currency: 'USD',
+                })}
+              </dd>
+            </div>
+          </dl>
           <p className="text-xs text-ink-faint">
-            Monthly rentals can&rsquo;t be booked here yet. To reserve one, contact Melanite.
+            Rent comes out on the 1st of each month. To give notice, contact Melanite — 30
+            days&rsquo; notice is required.
           </p>
         </section>
       )}
 
-      <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">The daily room</h2>
+      {(tenant || lease) && (
+        <TenantCard
+          card={card?.paymentMethodId ? { brand: card.brand, last4: card.last4 } : null}
+          waitingForLease={!lease}
+        />
+      )}
 
       {params.paid === '1' && (
         <Notice tone="success">
@@ -100,31 +162,41 @@ export default async function RoomRentalPage({
         </Notice>
       )}
 
-      {/* Shown rather than redirected. A provider sent away with no explanation learns nothing,
-          and two of these three are things only Melanite can change. Past rentals stay visible
-          regardless, since a revoked flag must not hide history. */}
-      {blocked && <Notice tone="warning">{blocked}</Notice>}
+      {showDaily && (
+        <>
+          {tenant && (
+            <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">
+              The daily room
+            </h2>
+          )}
 
-      <RentalShell
-        month={month}
-        days={days}
-        today={today}
-        canBook={!blocked}
-        rentals={rentals.map((r) => ({
-          id: r.id,
-          rentalDate: r.rentalDate,
-          slotType: r.slotType,
-          price: r.price,
-          status: r.status,
-          startAt: r.startAt.toISOString(),
-          hoursOut: r.hoursOut,
-        }))}
-        fullDayPrice={settings.fullDayPrice}
-        halfDayPrice={settings.halfDayPrice}
-        amStart={settings.amStart}
-        amEnd={settings.amEnd}
-        pmEnd={settings.pmEnd}
-      />
+          {/* Shown rather than redirected. A provider sent away with no explanation learns
+              nothing, and two of these three are things only Melanite can change. Past rentals
+              stay visible regardless, since a revoked flag must not hide history. */}
+          {blocked && <Notice tone="warning">{blocked}</Notice>}
+
+          <RentalShell
+            month={month}
+            days={days}
+            today={today}
+            canBook={!blocked}
+            rentals={rentals.map((r) => ({
+              id: r.id,
+              rentalDate: r.rentalDate,
+              slotType: r.slotType,
+              price: r.price,
+              status: r.status,
+              startAt: r.startAt.toISOString(),
+              hoursOut: r.hoursOut,
+            }))}
+            fullDayPrice={settings.fullDayPrice}
+            halfDayPrice={settings.halfDayPrice}
+            amStart={settings.amStart}
+            amEnd={settings.amEnd}
+            pmEnd={settings.pmEnd}
+          />
+        </>
+      )}
     </main>
   )
 }

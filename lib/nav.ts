@@ -35,6 +35,9 @@ export interface NavItem {
   /** Shown only to a provider who pays rent. Charges is empty and misleading for anybody else:
    *  a 50/50 provider is never charged a rental fee, so the page would list nothing for ever. */
   rentalOnly?: boolean
+  /** The laser half of the app. Hidden from somebody who only rents a room or nail station —
+   *  a separate contract, and Keoni asked that it stay separate (4 November). */
+  laserOnly?: boolean
 }
 
 /** Roles that see the platform rather than their own practice. Matches v1's "admin-view
@@ -71,13 +74,15 @@ export function practises(user: SessionUser): boolean {
  *  could not sign in at all — the browser gave up after ~70 redirects. */
 export function dashboardHref(user: SessionUser): string {
   if (isMedicalDirector(user.role)) return '/app/oversight'
-  return isAdminView(user) ? '/app/admin' : '/app/dashboard'
+  if (isAdminView(user)) return '/app/admin'
+  // A room tenant's home is their room. The dashboard is about laser sessions they never book.
+  return user.practiceType === 'room_only' ? '/app/room-rental' : '/app/dashboard'
 }
 
 const ITEMS: NavItem[] = [
-  { label: 'Book Laser Time', href: '/app/book', providerOnly: true },
-  { label: 'Dashboard', href: '/app/dashboard' },
-  { label: 'Appointments', href: '/app/appointments', providerOnly: true },
+  { label: 'Book Laser Time', href: '/app/book', providerOnly: true, laserOnly: true },
+  { label: 'Dashboard', href: '/app/dashboard', laserOnly: true },
+  { label: 'Appointments', href: '/app/appointments', providerOnly: true, laserOnly: true },
   { label: 'Charges', href: '/app/charges', providerOnly: true, rentalOnly: true },
   // ALL FOUR OF THE 12 OCTOBER RESTORATIONS ARE NOW GONE.
   //
@@ -97,7 +102,7 @@ const ITEMS: NavItem[] = [
   // deciding nobody needs it in their navigation today.
   // "Daily" dropped on 4 November: the page now lists the monthly rooms and nail stations too.
   { label: 'Room Rental', href: '/app/room-rental', providerOnly: true },
-  { label: 'Membership', href: '/app/membership', providerOnly: true },
+  { label: 'Membership', href: '/app/membership', providerOnly: true, laserOnly: true },
   { label: 'Calendar', href: '/app/admin/calendar', adminOnly: true },
   // Rooms and nail stations, apart from the laser's calendar.
   { label: 'Rooms', href: '/app/admin/rooms', adminOnly: true },
@@ -126,6 +131,8 @@ export function navFor(user: SessionUser): NavItem[] {
       // asked of every role, including the house account: Melanite's own appointments are not
       // rented, so it gets neither set.
       !(item.rentalOnly && !paysRent(user.revenueModel)) &&
+      // An admin is never room-only, so this only ever narrows a tenant's menu.
+      !(item.laserOnly && user.practiceType === 'room_only' && !adminView) &&
       // Dashboard is the director's Oversight page, so listing both is one link too many.
       !(item.label === 'Dashboard' && director),
   ).map((item) => (item.label === 'Dashboard' ? { ...item, href: dashboardHref(user) } : item))

@@ -235,6 +235,11 @@ export const ledgerSource = pgEnum('ledger_source', [
    *  treatment room at a flat rate. This is one use of one machine, priced per service, and
    *  folding them together would make "what does the laser earn" unanswerable. */
   'rental_fee',
+  /** Monthly rent for a room or nail station on a lease (`room_leases`), and a deposit Keoni
+   *  keeps. Its own source rather than `room_rental`, which is the daily room by the slot: one is
+   *  a recurring contract and the other a one-off, and "what do the leases bring in" should be
+   *  answerable on its own. */
+  'room_lease',
 ])
 
 /** Who handed over the money. This is what makes `SUM(melanite_cut)` mean the same thing
@@ -261,6 +266,8 @@ export const ledgerSubjectType = pgEnum('ledger_subject_type', [
   /** A block of laser sessions a provider pre-bought. The subject is the pack, not any one
    *  booking, because the money moves once and the sessions are spent later. */
   'provider_pack',
+  /** A monthly lease. The subject is the lease, whose rent recurs against it. */
+  'room_lease',
 ])
 
 export const payoutStatus = pgEnum('payout_status', ['pending', 'paid', 'failed'])
@@ -571,6 +578,10 @@ export const inviteLinks = pgTable('invite_links', {
     .references(() => providers.id, { onDelete: 'restrict' }),
   token: text().notNull(),
   status: inviteStatus().notNull().default('pending'),
+  /** What Keoni invited them AS. Set, it is applied to the account and the choice is not offered
+   *  again: a room tenant is on a contract separate from the laser and must not be able to pick
+   *  laser by mistake. Null on invites from before 4 November 2026, whose invitee still chooses. */
+  practiceType: practiceType(),
   sentAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   expiresAt: timestamp({ withTimezone: true }).notNull(),
   acceptedAt: timestamp({ withTimezone: true }),
@@ -1619,6 +1630,10 @@ export const rooms = pgTable('rooms', {
   monthlyPriceCents: integer(),
   active: boolean().notNull().default(true),
   sort: integer().notNull().default(0),
+  /** The Stripe product a lease's rent is billed under. Created the first time a lease is
+   *  started on this room, and recreated if the key in use cannot see it — a dev copy of
+   *  production carries live ids a test key has never heard of. */
+  stripeProductId: text(),
 }, (t) => [
   check('rooms_monthly_priced', sql`${t.kind} <> 'monthly' OR ${t.monthlyPriceCents} > 0`),
 ])
@@ -1655,6 +1670,66 @@ export const roomBookings = pgTable('room_bookings', {
   index().on(t.rentalDate),
   index().on(t.status),
   index().on(t.stripePaymentIntentId),
+])
+
+export const roomLeaseStatus = pgEnum('room_lease_status', ['pending', 'active', 'past_due', 'ended'])
+
+/** Where a lease's deposit is. Refunded after a completed term with 30 days' notice, kept if the
+ *  tenant leaves early — Keoni's rule, and her decision each time. */
+export const roomDepositStatus = pgEnum('room_deposit_status', [
+  /** Keoni already holds it — the tenants who were renting before the app knew about them. */
+  'held_outside',
+  'charged',
+  'refunded',
+  'kept',
+])
+
+/** A monthly let of one room or nail station to one tenant (4 November 2026).
+ *
+ *  Billed as a Stripe subscription on the tenant's saved card: a part-month is prorated, and rent
+ *  then comes out on the 1st. Stripe's processing fee is passed to the tenant, so the subscription
+ *  price is the rent GROSSED UP and `monthlyCents` is what Melanite means to keep.
+ *
+ *  A lease is set up by Keoni, never applied for. Monthly rooms are a six-month contract separate
+ *  from the laser, and nobody sees one unless she has put them in it. */
+export const roomLeases = pgTable('room_leases', {
+  id: uuid().primaryKey().defaultRandom(),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  createdBy: uuid().references(() => providers.id, { onDelete: 'set null' }),
+  providerId: uuid()
+    .notNull()
+    .references(() => providers.id, { onDelete: 'restrict' }),
+  roomId: text()
+    .notNull()
+    .references(() => rooms.id, { onDelete: 'restrict' }),
+  status: roomLeaseStatus().notNull().default('pending'),
+  startsOn: date().notNull(),
+  termMonths: integer().notNull().default(6),
+  /** Rent Melanite keeps, before processing is added on top. */
+  monthlyCents: integer().notNull(),
+  depositCents: integer().notNull().default(0),
+  depositStatus: roomDepositStatus().notNull(),
+  depositPaymentIntentId: text(),
+  depositDecidedAt: timestamp({ withTimezone: true }),
+  /** Notice given, and the day the lease ends: 30 days later. Rent is prorated to that day. */
+  noticeGivenOn: date(),
+  endsOn: date(),
+  endedAt: timestamp({ withTimezone: true }),
+  /** First declined rent since it was last paid. Keoni is emailed at the transition; her three
+   *  days' notice runs from here. */
+  pastDueSince: timestamp({ withTimezone: true }),
+  stripeSubscriptionId: text(),
+}, (t) => [
+  index().on(t.providerId),
+  index().on(t.roomId),
+  uniqueIndex().on(t.stripeSubscriptionId),
+  // One live lease per space. An ended lease frees it.
+  uniqueIndex('room_leases_one_live_per_room')
+    .on(t.roomId)
+    .where(sql`${t.status} <> 'ended'`),
+  check('room_leases_rent_positive', sql`${t.monthlyCents} > 0`),
+  check('room_leases_deposit_nonnegative', sql`${t.depositCents} >= 0`),
+  check('room_leases_term_positive', sql`${t.termMonths} > 0`),
 ])
 
 // ---------------------------------------------------------------------------

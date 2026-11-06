@@ -95,6 +95,10 @@ export interface SessionUser {
    *  list is the input to what Melanite charges them. For everybody else the fee comes from the
    *  published schedule and that page would be a menu of numbers that decide nothing. */
   rentBasis: (typeof providers.$inferSelect)['rentBasis']
+  /** Laser provider, or somebody who only rents a room or nail station. On the session because
+   *  the navigation decides from it which half of the app exists for them: a room tenant is on a
+   *  contract separate from the laser and is shown none of it (4 November 2026). */
+  practiceType: (typeof providers.$inferSelect)['practiceType']
 }
 
 /** Resolves the cookie to a live provider, or null. Reads the provider row every time on
@@ -124,6 +128,7 @@ export async function getSessionUser(): Promise<SessionUser | null> {
       requiresPasswordReset: providers.requiresPasswordReset,
       revenueModel: providers.revenueModel,
       rentBasis: providers.rentBasis,
+      practiceType: providers.practiceType,
     })
     .from(sessions)
     .innerJoin(providers, eq(sessions.providerId, providers.id))

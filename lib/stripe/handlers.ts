@@ -31,6 +31,7 @@ import {
 } from '@/lib/email'
 
 import { splitClientPayment, splitHouse, toCents, toMoney } from '@/lib/money'
+import { leaseInvoiceFailed, leaseInvoicePaid, leaseSubscriptionEnded } from '@/lib/rooms/lease'
 import {
   notifyBookingAccessChanged,
   notifyMelanitePaid,
@@ -186,6 +187,10 @@ export async function handlePaymentIntentSucceeded(
     case 'no_show_fee':
     case 'late_cancellation_fee':
       return { handled: true, detail: `${kind} recorded at charge time` }
+    // A lease deposit is the tenant's money until Keoni decides to keep it, so it has no ledger
+    // row now; `decideDeposit` writes one if she keeps it.
+    case 'room_deposit':
+      return { handled: true, detail: 'room deposit held against its lease' }
     default:
       // Never guess. An unrecognised intent is logged and left alone rather than being
       // shoehorned into a source, which would put money against the wrong stream.
@@ -761,6 +766,13 @@ export async function handleInvoicePaid(invoice: StripeInvoiceObject): Promise<H
   const metadata =
     invoice.parent?.subscription_details?.metadata ?? invoice.lines?.data?.[0]?.metadata ?? null
 
+  // Room rent first, before anything below reads `plan`: `planFromMetadata` calls anything it does
+  // not recognise medical direction, and a tenant's rent must never open a booking gate.
+  if (metadata?.plan === 'room_lease') {
+    if (!metadata.lease_id) return { handled: false, detail: 'rent invoice with no lease_id' }
+    return { handled: true, detail: await leaseInvoicePaid(invoice, metadata.lease_id, estimateProcessingFee) }
+  }
+
   const providerId = metadata?.provider_id ?? null
   if (!providerId) return { handled: false, detail: 'invoice with no provider_id in metadata' }
 
@@ -856,6 +868,12 @@ export async function handleInvoicePaymentFailed(
   const metadata =
     invoice.parent?.subscription_details?.metadata ?? invoice.lines?.data?.[0]?.metadata ?? null
 
+  // Room rent: see `handleInvoicePaid`. A declined rent must not close anybody's booking gate.
+  if (metadata?.plan === 'room_lease') {
+    if (!metadata.lease_id) return { handled: false, detail: 'rent invoice with no lease_id' }
+    return { handled: true, detail: await leaseInvoiceFailed(invoice, metadata.lease_id) }
+  }
+
   const providerId = metadata?.provider_id ?? null
   if (!providerId) return { handled: false, detail: 'invoice with no provider_id in metadata' }
 
@@ -899,6 +917,18 @@ export async function handleSubscriptionChanged(
   sub: StripeSubscriptionObject,
   eventType: string,
 ): Promise<HandlerResult> {
+  // A lease's subscription has no membership row and must not be given one. Only its end matters
+  // here; rent and declines arrive as invoices.
+  if (sub.metadata?.plan === 'room_lease') {
+    const leaseId = sub.metadata.lease_id
+    if (!leaseId) return { handled: false, detail: 'lease subscription with no lease_id' }
+    const ended = eventType === 'customer.subscription.deleted' || sub.status === 'canceled'
+    return {
+      handled: true,
+      detail: ended ? await leaseSubscriptionEnded(leaseId) : `lease ${leaseId} subscription ${sub.status}`,
+    }
+  }
+
   const providerId = sub.metadata?.provider_id ?? null
   if (!providerId) return { handled: false, detail: 'subscription with no provider_id' }
 
