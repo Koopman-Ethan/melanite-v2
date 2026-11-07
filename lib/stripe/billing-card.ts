@@ -4,6 +4,7 @@ import { and, eq, isNotNull, isNull } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
 import { bookings, providers } from '@/lib/db/schema'
+import { hasLiveLease, moveLeasesToCard } from '@/lib/rooms/lease'
 
 import { stripeGet, stripePost } from './client'
 
@@ -123,6 +124,10 @@ export async function saveRentalCard(
       ),
     )
 
+  // Rent follows the card too. A lease's subscription names the card it started with, which
+  // outranks the customer default set above, so without this a replaced card is never charged.
+  await moveLeasesToCard(providerId, intent.payment_method)
+
   return { saved: true }
 }
 
@@ -137,6 +142,12 @@ export async function saveRentalCard(
  * intended consequence and the screen offering this says so.
  */
 export async function forgetRentalCard(providerId: string): Promise<{ error?: string }> {
+  // A tenant's rent is taken from this card on the 1st. Removing it would decline next month's
+  // rent and email Keoni about a card nobody meant to lose — replace it instead.
+  if (await hasLiveLease(providerId)) {
+    return { error: 'Your monthly rent is taken from this card. Add a different card instead of removing it.' }
+  }
+
   const [provider] = await db
     .select({ paymentMethodId: providers.billingPaymentMethodId })
     .from(providers)

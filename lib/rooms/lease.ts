@@ -9,7 +9,7 @@ import { getProcessingRate } from '@/lib/db/queries/admin-tools'
 import { ledgerEntries, providers, roomLeases, rooms } from '@/lib/db/schema'
 import { MELANITE_NOTIFY_EMAIL, deskLeaseDeclinedEmail, leaseDeclinedEmail, sendEmail } from '@/lib/email'
 import { grossUpForProcessing, toMoney } from '@/lib/money'
-import { StripeApiError, stripeDelete, stripePost } from '@/lib/stripe/client'
+import { StripeApiError, stripeDelete, stripeGet, stripePost } from '@/lib/stripe/client'
 import { appOrigin, isMissingCustomerError } from '@/lib/stripe/config'
 
 import { endsAfterNotice, leaseSchedule } from './lease-schedule'
@@ -498,4 +498,58 @@ export async function leaseSubscriptionEnded(leaseId: string): Promise<string> {
     })
     .where(and(eq(roomLeases.id, leaseId), ne(roomLeases.status, 'ended')))
   return `lease ${leaseId} ended`
+}
+
+/**
+ * Points a tenant's running leases at the card they have just saved.
+ *
+ * A lease's subscription names its card (`default_payment_method`) when it starts, and that
+ * outranks the customer's default. Without this a tenant who replaces a card — usually because
+ * rent was declined, and the page tells them to — has every retry go to the dead one.
+ *
+ * A lease already past due also has its open rent tried on the new card straight away, rather than
+ * waiting days for Stripe's next retry. If it pays, `invoice.paid` puts the lease back in good
+ * standing as usual; if it declines, the lease simply stays past due.
+ *
+ * Called from the card-saved webhook, so it must be safe to replay, and it never throws: the card
+ * is saved either way, and a lease that could not be moved is logged for Ethan to look at.
+ */
+export async function moveLeasesToCard(providerId: string, paymentMethodId: string): Promise<void> {
+  const live = await db
+    .select({ id: roomLeases.id, status: roomLeases.status, sub: roomLeases.stripeSubscriptionId })
+    .from(roomLeases)
+    .where(and(eq(roomLeases.providerId, providerId), ne(roomLeases.status, 'ended')))
+
+  for (const lease of live) {
+    if (!lease.sub) continue
+    try {
+      await stripePost(`/subscriptions/${lease.sub}`, { default_payment_method: paymentMethodId })
+    } catch (err) {
+      console.error('[lease] could not move lease', lease.id, 'to the new card', err)
+      continue
+    }
+
+    if (lease.status !== 'past_due') continue
+    try {
+      const open = await stripeGet<{ data: { id: string }[] }>(
+        `/invoices?subscription=${lease.sub}&status=open`,
+      )
+      for (const invoice of open.data) {
+        await stripePost(`/invoices/${invoice.id}/pay`, { payment_method: paymentMethodId })
+      }
+    } catch (err) {
+      // A decline lands here. The lease stays past due and Stripe keeps retrying, now on this card.
+      console.warn('[lease] retry on the new card did not pay for lease', lease.id, err)
+    }
+  }
+}
+
+/** Whether somebody's rent depends on the card on file — and so it must not simply be removed. */
+export async function hasLiveLease(providerId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ id: roomLeases.id })
+    .from(roomLeases)
+    .where(and(eq(roomLeases.providerId, providerId), ne(roomLeases.status, 'ended')))
+    .limit(1)
+  return Boolean(row)
 }
