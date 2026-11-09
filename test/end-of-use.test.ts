@@ -6,12 +6,14 @@ import {
   END_OF_USE_ITEM_COUNT,
   END_OF_USE_SECTIONS,
   REQUIRED_ITEM_COUNT,
+  CONCERN_KEYS,
   canSignOff,
   deviceIssueError,
   isComplete,
   labelsFor,
   missingKeys,
   missingRequired,
+  raisesConcern,
   sanitiseItems,
 } from '@/lib/end-of-use'
 
@@ -264,5 +266,24 @@ describe('deviceIssueError', () => {
     expect(deviceIssueError(false, '')).toBeNull()
     expect(deviceIssueError(true, 'Handpiece window is chipped')).toBeNull()
     expect(deviceIssueError(true, 'x'.repeat(DEVICE_ISSUE_NOTE_MAX))).toBeNull()
+  })
+})
+
+describe('raisesConcern', () => {
+  it('only names conditional items, so a typo cannot silently stop an email', () => {
+    // A key here that is not a real conditional item would never be ticked, and the email it was
+    // meant to send would simply never arrive.
+    const conditional = new Set(END_OF_USE_ITEMS.filter((i) => !i.required).map((i) => i.key))
+    for (const key of CONCERN_KEYS) expect(conditional.has(key)).toBe(true)
+  })
+
+  it('is true for a ticked problem and false for routine record-keeping', () => {
+    expect(raisesConcern(['supplies_notify_shortage'])).toBe(true)
+    expect(raisesConcern(['eyewear_report_damage'])).toBe(true)
+    expect(raisesConcern(['docs_adverse_events'])).toBe(true)
+    expect(raisesConcern(['docs_device_concerns'])).toBe(true)
+    // Before-and-after photos are routine: no email for those alone.
+    expect(raisesConcern(['docs_photos'])).toBe(false)
+    expect(raisesConcern([])).toBe(false)
   })
 })

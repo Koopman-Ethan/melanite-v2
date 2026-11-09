@@ -21,15 +21,15 @@ const NEXT = [
   },
   {
     title: 'Book your first laser slot',
-    body: 'Head to Book Laser Time to reserve the room and generate a checkout link for your client.',
+    body: 'Head to Book Laser Time to reserve the laser. The rental fee for the session is shown before you confirm.',
   },
   {
-    title: 'Send the link to your client',
-    body: 'Copy the payment link or let us email it. Most providers text it.',
+    title: 'Bill your client yourself',
+    body: 'Your clients pay you directly, at your prices, by whatever method you take. You keep all of it, tips included.',
   },
   {
-    title: 'Get paid the moment they pay',
-    body: 'Your share lands in your bank automatically. Tips go to you in full.',
+    title: 'Rent is charged after the session',
+    body: 'The rental fee goes on the card you added during setup, after your appointment ends.',
   },
 ]
 

@@ -22,7 +22,6 @@ export interface ProviderServiceRow {
    *  history references it — but it cannot be booked, and no toggle of theirs will change
    *  that, so the UI has to say so rather than showing an enabled switch that does nothing. */
   offeredPlatformWide: boolean
-  packageEligible: boolean
   advancedTierRequired: boolean
   /** Upcoming bookings against this configuration. Deactivating with appointments already on
    *  the calendar does not cancel them, and the provider should know that before they do it. */
@@ -44,7 +43,6 @@ export async function getProviderServices(providerId: string): Promise<ProviderS
       suggestedDurationMins: services.suggestedDurationMins,
       colorHex: services.colorHex,
       offeredPlatformWide: services.active,
-      packageEligible: services.packageEligible,
       advancedTierRequired: services.advancedTierRequired,
       // Columns written out. Interpolated, `${providerServices.id}` renders as a bare `"id"`
       // inside this subquery and binds to `bookings` instead — so it counted bookings whose

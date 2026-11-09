@@ -442,6 +442,25 @@ export function reportedLabelsFor(keys: readonly string[]): string[] {
 }
 
 /**
+ * The conditional items that mean something went wrong, as opposed to something was done.
+ *
+ * Keoni asked on 4 November to be emailed when one of these is ticked, even with nothing typed.
+ * "Before-and-after photos saved" is conditional too but is not here: it is routine record-keeping,
+ * and an email for it would be the noise she asked to stop on 17 September.
+ */
+export const CONCERN_KEYS: ReadonlySet<string> = new Set([
+  'eyewear_report_damage',
+  'supplies_notify_shortage',
+  'docs_adverse_events',
+  'docs_device_concerns',
+])
+
+/** Did this close-out tick any of the concerns? */
+export function raisesConcern(keys: readonly string[]): boolean {
+  return keys.some((k) => CONCERN_KEYS.has(k))
+}
+
+/**
  * Is this session still one somebody may sign off?
  *
  * Opens an hour before the appointment and closes twelve hours after it ends. Generous on both

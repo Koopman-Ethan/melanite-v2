@@ -2,7 +2,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { isUniqueViolation } from '@/lib/db/errors'
 import {
+  getCloseout,
   getCloseoutIssues,
+  getCloseoutsWithItem,
   getConditionalItemCounts,
   getSessionsWithoutCloseout,
 } from '@/lib/db/queries/end-of-use'
@@ -248,6 +250,39 @@ describe('what came up', () => {
     const label = after.find((c) => c.key === conditional[0].key)?.label
     expect(label).toBe(conditional[0].reportedAs)
     expect(label).not.toBe(conditional[0].label)
+  })
+
+  it('opens a count onto exactly the close-outs behind it', async () => {
+    // Keoni could see "2×" and not which two (4 November). The drill-down uses the same window as
+    // the count, so pressing a number lists that many rows — one more or fewer and the page
+    // contradicts itself.
+    const conditional = END_OF_USE_ITEMS.filter((i) => !i.required)
+    const counted = (await getConditionalItemCounts(SINCE_DAYS)).find(
+      (c) => c.key === conditional[0].key,
+    )
+    const behind = await getCloseoutsWithItem(conditional[0].key, SINCE_DAYS)
+    expect(behind).toHaveLength(counted?.times ?? 0)
+    expect(behind.some((c) => c.bookingId === countedBookingId)).toBe(true)
+
+    // And an item nobody ticked on that row does not pull it in.
+    const other = await getCloseoutsWithItem(conditional[1].key, SINCE_DAYS)
+    expect(other.some((c) => c.bookingId === countedBookingId)).toBe(false)
+  })
+
+  it('reads one close-out whole, and names only the required items as missable', async () => {
+    const [row] = (await sql.query(
+      `SELECT id FROM end_of_use_checklists WHERE booking_id = $1`,
+      [countedBookingId],
+    )) as { id: string }[]
+    const one = await getCloseout(row.id)
+    expect(one?.reportedLabels).toEqual([END_OF_USE_ITEMS.filter((i) => !i.required)[0].reportedAs])
+    // Every required item ticked, so nothing missed — the four unticked conditionals are not
+    // "missing", they simply did not come up.
+    expect(one?.requiredMissingLabels).toEqual([])
+
+    // A typed URL is a 404, not a database error on the uuid cast.
+    expect(await getCloseout('not-a-uuid')).toBeNull()
+    expect(await getCloseout('00000000-0000-0000-0000-000000000000')).toBeNull()
   })
 })
 

@@ -18,7 +18,6 @@ export interface ServiceRowData {
   maxDurationMins: number
   suggestedDurationMins: number
   offeredPlatformWide: boolean
-  packageEligible: boolean
   advancedTierRequired: boolean
   upcomingBookings: number
 }
@@ -76,11 +75,6 @@ export function ServiceRow({ service }: { service: ServiceRowData }) {
             {service.advancedTierRequired && (
               <span className="rounded border border-warning/40 bg-warning/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-warning">
                 advanced training
-              </span>
-            )}
-            {service.packageEligible && (
-              <span className="rounded border border-gold/40 bg-gold/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-gold">
-                package eligible
               </span>
             )}
           </div>

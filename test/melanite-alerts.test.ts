@@ -362,6 +362,7 @@ describe('the close-out alert', () => {
     deviceIssue: false,
     deviceIssueNote: null,
     cameUpLabels: [],
+    concern: false,
     note: null,
     url: 'https://app.melanitesuite.com/app/admin/equipment',
   }
@@ -428,6 +429,27 @@ describe('the close-out alert', () => {
     expect(out.text).not.toContain('(if applicable)')
     // Still an ordinary close-out — a shortage is not a device fault.
     expect(out.subject).toContain('Closed out')
+  })
+
+  it('names a ticked concern in the subject', () => {
+    // Since 4 November a ticked concern sends on its own. The subject is what gets triaged, so a
+    // shortage must not arrive looking like a routine close-out.
+    const out = deskCloseoutEmail({
+      ...base,
+      cameUpLabels: ['Supply shortage reported'],
+      concern: true,
+    })
+    expect(out.subject).toBe('Concern reported — Nichole Mim, Monday 14 September, 2:00pm')
+  })
+
+  it('still leads with a device fault when there is also a concern', () => {
+    const out = deskCloseoutEmail({
+      ...base,
+      deviceIssue: true,
+      deviceIssueNote: 'Cracked',
+      concern: true,
+    })
+    expect(out.subject).toContain('Device issue')
   })
 
   it('escapes what a provider typed', () => {

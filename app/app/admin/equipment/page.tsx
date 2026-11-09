@@ -1,12 +1,14 @@
 import type { Metadata } from 'next'
+import Link from 'next/link'
 
 import { requireAdmin } from '@/lib/auth/dal'
 import { REQUIRED_ITEM_COUNT } from '@/lib/end-of-use'
-import { equipmentPhotoUrl } from '@/lib/blob'
 
 import { RemovePhoto } from './remove-photo'
+import { CloseoutRow, Photo, closeoutHref, when } from './shared'
 import {
   getCloseoutIssues,
+  getCloseoutsWithItem,
   getConditionalItemCounts,
   getRecentCloseouts,
   getSessionsWithoutCloseout,
@@ -29,16 +31,6 @@ export const dynamic = 'force-dynamic'
 // Everything here is derived from the bookings and close-outs themselves, never a stored work
 // list, so nothing can linger after it has been dealt with — the rule the review queue follows.
 
-const when = (d: Date) =>
-  d.toLocaleString('en-US', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    timeZone: 'America/Denver',
-  })
-
 /** "today" / "yesterday" / "3 days ago", never "0d ago".
  *
  *  Follows `admin/queue`, which already says "since today" rather than a zero. A session from
@@ -51,45 +43,11 @@ function agoLabel(d: Date): string {
   return `${days} days ago`
 }
 
-function Photo({
-  checkId,
-  alt,
-  deletedAt,
+export default async function EquipmentPage({
+  searchParams,
 }: {
-  checkId: string
-  alt: string
-  deletedAt?: Date | null
+  searchParams: Promise<{ item?: string }>
 }) {
-  // A removed photograph is shown as removed rather than omitted. An empty space where an image
-  // used to be reads as a bug; saying it was deleted, and that the check still counts, is the
-  // whole reason the row outlives the file.
-  if (deletedAt) {
-    return (
-      <div className="flex size-24 shrink-0 flex-col items-center justify-center gap-1 rounded-field border border-dashed border-line px-2 text-center">
-        <span className="text-[10px] leading-tight text-ink-faint">Photo removed</span>
-        <span className="text-[10px] leading-tight text-ink-disabled">{when(deletedAt)}</span>
-      </div>
-    )
-  }
-
-  // A plain <img>, not next/image. Running these through the optimiser would mean adding a
-  // remote pattern for the blob host and caching optimised copies of operational photographs in
-  // a second place — more surface for images whose whole point is that they live in exactly one
-  // known location. They are thumbnails of a machine; the LCP argument does not apply.
-  return (
-    <a href={equipmentPhotoUrl(checkId)} target="_blank" rel="noreferrer" className="shrink-0">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={equipmentPhotoUrl(checkId)}
-        alt={alt}
-        loading="lazy"
-        className="size-24 rounded-field border border-line object-cover"
-      />
-    </a>
-  )
-}
-
-export default async function EquipmentPage() {
   await requireAdmin()
 
   const [closeoutIssues, unclosed, cameUp, recentCloseouts] = await Promise.all([
@@ -98,6 +56,12 @@ export default async function EquipmentPage() {
     getConditionalItemCounts(),
     getRecentCloseouts(),
   ])
+
+  // Which "What came up" line is open. Only a key that is actually listed — anything else in the
+  // URL is ignored rather than queried.
+  const { item } = await searchParams
+  const openItem = cameUp.find((c) => c.key === item)?.key ?? null
+  const openCloseouts = openItem ? await getCloseoutsWithItem(openItem) : []
 
   return (
     <main className="mx-auto w-full max-w-4xl px-6 py-10 space-y-6">
@@ -129,7 +93,12 @@ export default async function EquipmentPage() {
                   deletedAt={c.photoDeletedAt}
                 />
                 <div className="min-w-0">
-                <p className="text-sm font-medium">{c.providerName}</p>
+                <Link
+                  href={closeoutHref(c.id)}
+                  className="text-sm font-medium underline-offset-2 hover:underline"
+                >
+                  {c.providerName}
+                </Link>
                 <p className="mt-0.5 text-xs text-ink-muted">
                   {c.serviceName} · {when(c.startTime)}
                 </p>
@@ -194,22 +163,41 @@ export default async function EquipmentPage() {
           a shortage, damage, an adverse event. That is a fact about the month rather than about a
           person, and it is what the paper form could never add up. */}
       {cameUp.length > 0 && (
-        <section className="space-y-2">
+        <section id="came-up" className="space-y-2">
           <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">
             What came up
           </h2>
+          {/* Each count opens the close-outs behind it. Keoni could see "3×" and not which three
+              (4 November). Open in place rather than on another page, so the other counts stay
+              in view; pressing the open one again closes it. */}
           <ul className="space-y-1">
-            {cameUp.slice(0, 5).map((item) => (
-              <li
-                key={item.key}
-                className="flex flex-wrap items-baseline justify-between gap-x-4 rounded-card border border-line px-3 py-2"
-              >
-                <span className="text-xs text-ink-secondary">{item.label}</span>
-                <span className="text-xs text-ink-faint tabular-nums">
-                  {item.times}&times;
-                </span>
-              </li>
-            ))}
+            {cameUp.slice(0, 5).map((row) => {
+              const open = row.key === openItem
+              return (
+                <li key={row.key} className="space-y-1">
+                  <Link
+                    href={open ? '/app/admin/equipment#came-up' : `/app/admin/equipment?item=${row.key}#came-up`}
+                    aria-expanded={open}
+                    className={`flex flex-wrap items-baseline justify-between gap-x-4 rounded-card border px-3 py-2 hover:border-line-strong ${open ? 'border-line-strong bg-overlay' : 'border-line'}`}
+                  >
+                    <span className="text-xs text-ink-secondary">
+                      <span aria-hidden className="mr-1.5 inline-block w-2 text-ink-faint">
+                        {open ? '▾' : '▸'}
+                      </span>
+                      {row.label}
+                    </span>
+                    <span className="text-xs text-ink-faint tabular-nums">{row.times}&times;</span>
+                  </Link>
+                  {open && (
+                    <ul className="space-y-1 pl-4">
+                      {openCloseouts.map((c) => (
+                        <CloseoutRow key={c.id} closeout={c} />
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              )
+            })}
           </ul>
         </section>
       )}
@@ -226,19 +214,7 @@ export default async function EquipmentPage() {
         ) : (
           <ul className="space-y-2">
             {recentCloseouts.map((c) => (
-              <li
-                key={c.id}
-                className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-card border border-line bg-surface px-3 py-2"
-              >
-                <span className="text-sm">{c.providerName}</span>
-                <span className="text-xs text-ink-muted">
-                  {c.serviceName} · {when(c.startTime)}
-                </span>
-                <span className="text-xs text-ink-faint tabular-nums">
-                  {c.itemsDone} of {c.itemCount}
-                  {c.deviceIssue && ' · issue reported'}
-                </span>
-              </li>
+              <CloseoutRow key={c.id} closeout={c} />
             ))}
           </ul>
         )}

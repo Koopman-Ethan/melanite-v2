@@ -1521,6 +1521,8 @@ export function deskCloseoutEmail(input: {
    *  `reportedLabelsFor`, because a checklist imperative printed as a finding reads as an
    *  instruction to whoever opened the email. */
   cameUpLabels: string[]
+  /** One of the ticked items is a problem (`CONCERN_KEYS`), not just a record of work done. */
+  concern: boolean
   note: string | null
   url: string
 }): Omit<EmailMessage, 'to'> {
@@ -1531,13 +1533,16 @@ export function deskCloseoutEmail(input: {
     deviceIssue,
     deviceIssueNote,
     cameUpLabels,
+    concern,
     note,
     url,
   } = input
 
   const subject = deviceIssue
     ? `Device issue — ${providerName}, ${when}`
-    : `Closed out — ${providerName}, ${when}`
+    : concern
+      ? `Concern reported — ${providerName}, ${when}`
+      : `Closed out — ${providerName}, ${when}`
 
   const opening = `${providerName} has closed out their ${serviceName} appointment from ${when}.`
 

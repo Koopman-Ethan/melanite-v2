@@ -18,6 +18,7 @@ import {
   closeoutWindowOpen,
   deviceIssueError,
   missingRequired,
+  raisesConcern,
   sanitiseItems,
 } from '@/lib/end-of-use'
 import { notifyCloseout } from '@/lib/notify-melanite'
@@ -201,20 +202,20 @@ export async function recordEndOfUseChecklist(
   revalidatePath('/app/appointments')
   revalidatePath('/app/dashboard')
 
-  // ONLY when somebody actually wrote something. Keoni asked to hear about every close-out, then
-  // saw what that meant in her inbox and asked on 2026-09-17 for the quiet ones to stop — a mail
-  // per session saying nothing happened is a mail she learns to delete unread, and the one
-  // reporting a chipped handpiece goes with it.
+  // ONLY when something came up. Keoni asked to hear about every close-out, then saw what that
+  // meant in her inbox and asked on 2026-09-17 for the quiet ones to stop — a mail per session
+  // saying nothing happened is a mail she learns to delete unread, and the one reporting a
+  // chipped handpiece goes with it.
   //
-  // The test is the two free-text boxes, not the tick count. A fault description and a note are
-  // the only things a provider writes in their own words, and they are the only parts nobody can
-  // reconstruct from the admin page. The conditional items are deliberately NOT a trigger on
-  // their own: ticking "supply shortage" and typing nothing leaves her a notification she cannot
-  // act on, and the form already asks for the detail in the notes box.
+  // So: a device issue, a note in the provider's own words, or a ticked concern. The concerns
+  // were deliberately NOT a trigger until 2026-11-04, on the theory that "supply shortage" with
+  // nothing typed was a notification she could not act on. She asked for them anyway — knowing
+  // the shortage happened is the action, and the detail is one click away on the close-out page.
+  // `CONCERN_KEYS` leaves out "before-and-after photos saved", which is routine, not a problem.
   //
   // Everything still lands on /app/admin/equipment and in the evening digest either way — this
   // decides what is worth interrupting her for, not what is recorded.
-  const worthSending = deviceIssue || note !== null
+  const worthSending = deviceIssue || note !== null || raisesConcern(items)
   if (worthSending) await notifyCloseout(checklistId)
 
   // Everything required is ticked or we would not be here, so there is no shortfall to report

@@ -13,10 +13,13 @@ export const metadata: Metadata = { title: 'Revenue · Melanite Admin' }
 // Money figures must never be served stale.
 export const dynamic = 'force-dynamic'
 
+// `booking` and `package` are history: client money that ran through Melanite before the rental
+// model. Named as such because "Laser bookings" beside "Laser rental" read as the same thing
+// twice (Keoni, 4 November) — one is what clients paid, the other what providers pay now.
 const SOURCE_LABELS: Record<string, string> = {
   rental_fee: 'Laser rental',
-  booking: 'Laser bookings',
-  package: 'Packages',
+  booking: 'Client bookings (before rental)',
+  package: 'Packages (retired)',
   room_rental: 'Room rental',
   membership: 'Medical director',
   epicutis: MARKETING_MEMBERSHIP,
@@ -67,10 +70,21 @@ const METHOD_LABELS: Record<string, string> = {
 export default async function AdminRevenuePage() {
   // Authorization happens here, not in proxy.ts — the DAL is the boundary.
   await requireAdmin()
-  const { totals, bySource, byMethod, byProvider, byService, series, recent, owed, laserUse } =
-    await getAdminRevenue()
+  const {
+    totals,
+    bySource,
+    byMethod,
+    byProvider,
+    byService,
+    series,
+    recent,
+    owed,
+    laserUse,
+    medicalDirector,
+  } = await getAdminRevenue()
 
   const lifetime = Number(totals.lifetimeRevenue)
+  const medicalDirectorTotal = medicalDirector.reduce((sum, m) => sum + Number(m.revenue), 0)
   const peakMonth = Math.max(...series.map((s) => Number(s.revenue)), 1)
 
   return (
@@ -232,6 +246,43 @@ export default async function AdminRevenuePage() {
                 </div>
               ))}
             </div>
+          </div>
+        </section>
+      )}
+
+      {medicalDirector.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">
+            Medical Director
+          </h2>
+          <div className="overflow-x-auto rounded-card border border-line">
+            <table className="w-full text-sm">
+              <thead className="text-xs uppercase tracking-wide text-ink-muted">
+                <tr className="border-b border-line">
+                  <th className="p-3 text-left font-medium">Month</th>
+                  <th className="p-3 text-right font-medium">Payments</th>
+                  <th className="p-3 text-right font-medium">Amount</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-line">
+                {medicalDirector.map((m) => (
+                  <tr key={m.month}>
+                    <td className="p-3">{monthLabel(m.month)}</td>
+                    <td className="p-3 text-right tabular-nums">{m.payments}</td>
+                    <td className="p-3 text-right tabular-nums">{usd(m.revenue)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot className="border-t border-line font-semibold">
+                <tr>
+                  <td className="p-3">Total</td>
+                  <td className="p-3 text-right tabular-nums">
+                    {medicalDirector.reduce((sum, m) => sum + m.payments, 0)}
+                  </td>
+                  <td className="p-3 text-right tabular-nums">{usd(medicalDirectorTotal)}</td>
+                </tr>
+              </tfoot>
+            </table>
           </div>
         </section>
       )}
