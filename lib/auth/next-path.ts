@@ -55,7 +55,12 @@ export const APP_DESTINATIONS: readonly string[] = [
 ] as const
 
 /** Routes with a dynamic segment, matched by prefix rather than exactly. */
-const DYNAMIC_PREFIXES: readonly string[] = ['/app/admin/training/']
+const DYNAMIC_PREFIXES: readonly string[] = [
+  // A close-out's own page, which the close-out email links to. Signed out, Keoni must land back
+  // on the close-out she opened, not on her dashboard.
+  '/app/admin/equipment/',
+  '/app/admin/training/',
+]
 
 /**
  * The path to send somebody to after signing in, given whatever arrived as `next`.

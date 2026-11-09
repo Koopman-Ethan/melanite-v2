@@ -61,6 +61,10 @@ describe('a path that does exist', () => {
 
   it('accepts a dynamic route', () => {
     expect(safeNextPath('/app/admin/training/abc-123')).toBe('/app/admin/training/abc-123')
+    // The close-out email links here, and a signed-out click must come back to it.
+    expect(safeNextPath('/app/admin/equipment/0b6f5e3a-1111-4c1d-9a6e-2f0d8c7b5a41')).toBe(
+      '/app/admin/equipment/0b6f5e3a-1111-4c1d-9a6e-2f0d8c7b5a41',
+    )
     // The prefix alone is a real page and is listed; the bare prefix with a trailing slash is
     // the same page, not a course.
     expect(safeNextPath('/app/admin/training/')).toBe('/app/admin/training')
