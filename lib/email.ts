@@ -732,14 +732,14 @@ export function providerInviteEmail(input: {
       '',
       `This link expires in ${input.expiresInDays} days and can only be used once.`,
       '',
-      'Setup takes about 10 minutes: create a password, add your license details, connect',
-      'your bank account for payouts, and choose the services you offer.',
+      'Setup takes about 10 minutes: create a password, add your license details, and put a card',
+      'on file for laser rental.',
     ].join('\n'),
     html: wrap(
       'Join the Melanite provider network',
       p(`${input.invitedBy} has invited you to join Melanite Laser Suite.`) +
         p(
-          'Setup takes about 10 minutes: create a password, add your license details, connect your bank account for payouts, and choose the services you offer.',
+          'Setup takes about 10 minutes: create a password, add your license details, and put a card on file for laser rental.',
         ) +
         p(
           `<strong>This link expires in ${input.expiresInDays} days</strong> and can only be used once.`,
