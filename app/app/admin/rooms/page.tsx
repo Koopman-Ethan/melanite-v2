@@ -11,6 +11,7 @@ import {
 } from '@/lib/db/queries/rooms'
 import { ROOM_SLOT_LABELS } from '@/lib/email'
 import { cn } from '@/lib/cn'
+import { getContractStates } from '@/lib/rooms/contracts'
 
 import { DepositDecision, RunningLease, StartLease } from './lease-panel'
 
@@ -69,6 +70,7 @@ export default async function AdminRoomsPage({
   // Somebody already on a running lease is not offered a second space.
   const leased = new Set(leases.map((l) => l.providerId))
   const available = tenants.filter((t) => !leased.has(t.id))
+  const contracts = await getContractStates([...leased])
 
   return (
     <main className="mx-auto w-full max-w-6xl px-6 py-10 space-y-6">
@@ -148,7 +150,11 @@ export default async function AdminRoomsPage({
                     {(() => {
                       const lease = leases.find((l) => l.roomId === room.id)
                       return lease ? (
-                        <RunningLease lease={lease} today={today} />
+                        <RunningLease
+                          lease={lease}
+                          contract={contracts.get(lease.providerId) ?? { waiting: null, current: null }}
+                          today={today}
+                        />
                       ) : (
                         <div className="space-y-1">
                           <span className="block text-xs text-ink-faint">Open</span>

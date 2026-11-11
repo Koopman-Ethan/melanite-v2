@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest'
 import {
   addMonthsYmd,
   completedTerm,
+  contractEndsOn,
+  daysUntil,
   endsAfterNotice,
   firstOfNextMonth,
   leaseSchedule,
@@ -64,18 +66,47 @@ describe('dates', () => {
   })
 })
 
+// A lease runs on a signed contract and ends when it does (11 November 2026).
+describe('the contract term', () => {
+  const lease = { startsOn: '2026-11-10', termMonths: 6 }
+
+  it('ends six months after the lease starts', () => {
+    expect(contractEndsOn(lease)).toBe('2027-05-10')
+  })
+
+  it('ends a further six months on once renewed, from the old end and not from today', () => {
+    expect(contractEndsOn({ ...lease, termMonths: 12 })).toBe('2027-11-10')
+  })
+
+  it('does not let notice run a lease past its contract', () => {
+    // Notice given ten days before the contract ends: the contract's end wins.
+    expect(endsAfterNotice('2027-04-30', '2027-05-10')).toBe('2027-05-10')
+    // Notice given early: thirty days, as before.
+    expect(endsAfterNotice('2027-02-01', '2027-05-10')).toBe('2027-03-03')
+  })
+
+  it('counts the days left, and goes negative once it has run out', () => {
+    expect(daysUntil('2027-05-10', '2027-04-10')).toBe(30)
+    expect(daysUntil('2027-05-10', '2027-05-11')).toBe(-1)
+  })
+})
+
 describe('completedTerm', () => {
   const lease = { startsOn: '2026-11-10', termMonths: 6 }
 
-  it('is true when notice runs the lease to six months or beyond', () => {
-    expect(completedTerm({ ...lease, noticeGivenOn: '2027-04-10', endsOn: '2027-05-10' })).toBe(true)
+  it('is true when the lease ran to the end of its contract, with or without notice', () => {
+    expect(completedTerm({ ...lease, endsOn: '2027-05-10' })).toBe(true)
   })
 
-  it('is false when the lease ends before six months', () => {
-    expect(completedTerm({ ...lease, noticeGivenOn: '2027-02-01', endsOn: '2027-03-03' })).toBe(false)
+  it('is false when notice ended it before six months', () => {
+    expect(completedTerm({ ...lease, endsOn: '2027-03-03' })).toBe(false)
   })
 
-  it('is false when it ended without notice — ended by Keoni, for not paying', () => {
-    expect(completedTerm({ ...lease, noticeGivenOn: null, endsOn: '2027-06-01' })).toBe(false)
+  it('is false when Keoni ended it early, for not paying', () => {
+    expect(completedTerm({ ...lease, endsOn: '2027-01-15' })).toBe(false)
+  })
+
+  it('is false in the second term of a renewed lease that left before that term was up', () => {
+    expect(completedTerm({ ...lease, termMonths: 12, endsOn: '2027-08-01' })).toBe(false)
   })
 })

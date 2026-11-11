@@ -351,6 +351,13 @@
       "when": 1793906955704,
       "tag": "0049_room_leases",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1794424369177,
+      "tag": "0050_room_contracts",
+      "breakpoints": true
     }
   ]
 }

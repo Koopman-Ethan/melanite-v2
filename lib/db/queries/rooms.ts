@@ -5,7 +5,8 @@ import { and, asc, desc, eq, gte, inArray, lt, ne } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { addDays } from '@/lib/db/queries/admin-calendar'
 import { providers, roomBookings, roomLeases, rooms } from '@/lib/db/schema'
-import { completedTerm } from '@/lib/rooms/lease-schedule'
+import { getContractStates } from '@/lib/rooms/contracts'
+import { completedTerm, contractEndsOn } from '@/lib/rooms/lease-schedule'
 
 // The rentable spaces (migration 0048).
 //
@@ -113,9 +114,12 @@ export interface LeaseView {
   depositCents: number
   depositStatus: 'held_outside' | 'charged' | 'refunded' | 'kept'
   noticeGivenOn: string | null
+  /** The day rent stops. The contract's end unless notice or Keoni brought it forward. */
   endsOn: string | null
+  /** The last day the signed contract covers. A renewal moves it. */
+  contractEnd: string
   pastDueSince: Date | null
-  /** Keoni's rule as a suggestion: refund after a completed term with notice, else keep. */
+  /** Keoni's rule as a suggestion: refund when they stayed to the end of the contract, else keep. */
   suggestRefund: boolean
 }
 
@@ -147,7 +151,12 @@ function leaseQuery() {
 
 function asLease(r: Awaited<ReturnType<typeof leaseQuery>>[number]): LeaseView {
   const { firstName, lastName, ...rest } = r
-  return { ...rest, tenantName: `${firstName} ${lastName}`, suggestRefund: completedTerm(r) }
+  return {
+    ...rest,
+    tenantName: `${firstName} ${lastName}`,
+    contractEnd: contractEndsOn(r),
+    suggestRefund: completedTerm(r),
+  }
 }
 
 /** Leases still running, one per space at most. */
@@ -179,6 +188,8 @@ export interface TenantOption {
   id: string
   name: string
   hasCard: boolean
+  /** A signed contract is on file and no lease has used it yet — what starting one needs. */
+  waitingContractId: string | null
 }
 
 /** Who a lease can be started for: room tenants Keoni has invited, laser providers excluded —
@@ -195,8 +206,10 @@ export async function getTenantOptions(): Promise<TenantOption[]> {
     .from(providers)
     .where(and(eq(providers.practiceType, 'room_only'), ne(providers.status, 'inactive')))
     .orderBy(asc(providers.firstName))
+  const contracts = await getContractStates(rows.map((r) => r.id))
   return rows.map((r) => ({
     id: r.id,
+    waitingContractId: contracts.get(r.id)?.waiting?.id ?? null,
     // Someone still in setup has no name yet; their email is how Keoni knows them.
     name: `${r.firstName} ${r.lastName}`.trim() || r.email,
     hasCard: Boolean(r.paymentMethodId),

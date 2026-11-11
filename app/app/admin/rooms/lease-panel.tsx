@@ -5,13 +5,19 @@ import { useState, useTransition } from 'react'
 import { Button } from '@/components/ui/button'
 import { Notice } from '@/components/ui/field'
 import type { LeaseView, TenantOption } from '@/lib/db/queries/rooms'
+import type { ContractState } from '@/lib/rooms/contracts'
+import { daysUntil } from '@/lib/rooms/lease-schedule'
 
+import { ContractUpload } from '../../room-rental/contract-upload'
 import {
   decideDepositAction,
   endLeaseNowAction,
   recordNoticeAction,
+  renewLeaseAction,
   startLeaseAction,
 } from './actions'
+
+const contractLink = 'text-xs text-ink-muted underline underline-offset-2 hover:text-ink'
 
 // What Keoni does with one monthly space: start a lease, record notice, end it, and decide the
 // deposit. Each action is a Stripe call, so each one is a button press with its outcome said
@@ -91,6 +97,7 @@ export function StartLease({
                 <option key={t.id} value={t.id}>
                   {t.name}
                   {t.hasCard ? '' : ' (no card yet)'}
+                  {t.waitingContractId ? '' : ' (no contract yet)'}
                 </option>
               ))}
             </select>
@@ -119,8 +126,38 @@ export function StartLease({
       <p className="text-xs text-ink-faint">
         Rent is {usd(monthlyCents)} a month plus card processing, taken on the 1st. A start this
         month charges the part-month now; a start on a later 1st charges nothing until then.
-        {heldOutside ? ' No deposit will be charged.' : ' The deposit is charged to their card now.'}
+        {heldOutside ? ' No deposit will be charged.' : ' The deposit is charged to their card now.'}{' '}
+        The lease runs six months from its start, and ends then unless you renew it on a new
+        contract.
       </p>
+
+      {/* The contract is the other thing a lease needs, and either of them can put it on file. */}
+      {chosen && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+          {chosen.waitingContractId ? (
+            <>
+              <span className="text-ink-muted">Signed contract on file.</span>
+              <a
+                href={`/api/room-contract/${chosen.waitingContractId}`}
+                target="_blank"
+                rel="noreferrer"
+                className={contractLink}
+              >
+                View
+              </a>
+              <ContractUpload providerId={chosen.id} label="Replace it" quiet />
+            </>
+          ) : (
+            <>
+              <span className="text-warning">
+                No signed contract yet. {chosen.name} can upload it on their Room Rental page, or
+                you can:
+              </span>
+              <ContractUpload providerId={chosen.id} label="Upload it for them" quiet />
+            </>
+          )}
+        </div>
+      )}
 
       {chosen && !chosen.hasCard && (
         <Notice tone="warning">
@@ -132,7 +169,7 @@ export function StartLease({
       <div className="flex gap-2">
         <Button
           size="sm"
-          disabled={pending || !providerId || !chosen?.hasCard}
+          disabled={pending || !providerId || !chosen?.hasCard || !chosen?.waitingContractId}
           onClick={() =>
             run(() => startLeaseAction({ providerId, roomId, startsOn, deposit, depositHeldOutside: heldOutside }))
           }
@@ -147,10 +184,23 @@ export function StartLease({
   )
 }
 
-export function RunningLease({ lease, today }: { lease: LeaseView; today: string }) {
+export function RunningLease({
+  lease,
+  contract,
+  today,
+}: {
+  lease: LeaseView
+  contract: ContractState
+  today: string
+}) {
   const [noticeOn, setNoticeOn] = useState(today)
   const [confirmEnd, setConfirmEnd] = useState(false)
   const { outcome, pending, run } = useOutcome()
+
+  const endsOn = lease.endsOn ?? lease.contractEnd
+  const daysLeft = daysUntil(endsOn, today)
+  // Leaving on notice is a different thing from a contract simply running out.
+  const leaving = lease.noticeGivenOn !== null
 
   return (
     <div className="space-y-2">
@@ -167,17 +217,54 @@ export function RunningLease({ lease, today }: { lease: LeaseView; today: string
         ) : (
           <span className="text-xs text-ink-muted">Since {dateLabel(lease.startsOn)}</span>
         )}
-        {lease.endsOn && <span className="text-xs text-warning">Ends {dateLabel(lease.endsOn)}</span>}
+        <span className={leaving || daysLeft <= 30 ? 'text-xs text-warning' : 'text-xs text-ink-muted'}>
+          {leaving ? 'Notice given — ends' : 'Contract ends'} {dateLabel(endsOn)}
+          {!leaving && daysLeft <= 30 && daysLeft >= 0 && ` (${daysLeft} day${daysLeft === 1 ? '' : 's'})`}
+        </span>
         <span className="text-xs text-ink-faint">
           Deposit {usd(lease.depositCents)}
           {lease.depositStatus === 'held_outside' ? ' (held by you)' : ''}
         </span>
       </div>
 
+      {/* The paper this lease runs on, and the next one if it has arrived. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+        {contract.current && (
+          <a
+            href={`/api/room-contract/${contract.current.id}`}
+            target="_blank"
+            rel="noreferrer"
+            className={contractLink}
+          >
+            View contract
+          </a>
+        )}
+        {contract.waiting ? (
+          <>
+            <span className="text-ink-muted">
+              New contract uploaded{contract.waiting.byTenant ? ' by the tenant' : ''}.
+            </span>
+            <a
+              href={`/api/room-contract/${contract.waiting.id}`}
+              target="_blank"
+              rel="noreferrer"
+              className={contractLink}
+            >
+              View it
+            </a>
+            <Button size="sm" disabled={pending} onClick={() => run(() => renewLeaseAction(lease.id))}>
+              Renew for 6 months
+            </Button>
+          </>
+        ) : (
+          <ContractUpload providerId={lease.providerId} label="Upload a renewal contract" quiet />
+        )}
+      </div>
+
       {outcome && <Notice tone={outcome.tone}>{outcome.text}</Notice>}
 
       <div className="flex flex-wrap items-end gap-3">
-        {!lease.endsOn && (
+        {!leaving && (
           <>
             <label className="text-xs">
               <span className="block text-ink-faint">Notice given on</span>
@@ -223,8 +310,8 @@ export function DepositDecision({ lease }: { lease: LeaseView }) {
       {/* The rule as a suggestion, never as the decision. */}
       <p className="text-xs text-ink-muted">
         {lease.suggestRefund
-          ? 'They completed the term and gave notice, so by your rule the deposit goes back.'
-          : 'They left before the end of the term (or without notice), so by your rule the deposit is kept.'}
+          ? 'They stayed to the end of their contract, so by your rule the deposit goes back.'
+          : 'The lease ended before the contract did, so by your rule the deposit is kept.'}
         {outside && ' You hold this deposit yourself — this only records what you decided.'}
       </p>
       {outcome && <Notice tone={outcome.tone}>{outcome.text}</Notice>}

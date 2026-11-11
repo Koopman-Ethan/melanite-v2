@@ -1711,7 +1711,9 @@ export const roomLeases = pgTable('room_leases', {
   depositStatus: roomDepositStatus().notNull(),
   depositPaymentIntentId: text(),
   depositDecidedAt: timestamp({ withTimezone: true }),
-  /** Notice given, and the day the lease ends: 30 days later. Rent is prorated to that day. */
+  /** The day the lease ends, and rent with it, prorated. Set from the start: the end of the
+   *  contract term (`startsOn` + `termMonths`, which a renewal extends). Notice brings it forward
+   *  to 30 days after `noticeGivenOn`. Null only on leases older than 11 November 2026. */
   noticeGivenOn: date(),
   endsOn: date(),
   endedAt: timestamp({ withTimezone: true }),
@@ -1730,6 +1732,33 @@ export const roomLeases = pgTable('room_leases', {
   check('room_leases_rent_positive', sql`${t.monthlyCents} > 0`),
   check('room_leases_deposit_nonnegative', sql`${t.depositCents} >= 0`),
   check('room_leases_term_positive', sql`${t.termMonths} > 0`),
+])
+
+/** A signed room contract, as a file (11 November 2026).
+ *
+ *  Uploaded by the tenant on their Room Rental page, or by Keoni for them. It belongs to the
+ *  TENANT first and to a lease second: a contract is signed before the lease it allows exists, so
+ *  `leaseId` is null until Keoni starts or renews a lease with it. A lease cannot start, and
+ *  cannot run past its term, without one.
+ *
+ *  The row holds a storage key, never a URL — see `lib/blob.ts`. */
+export const roomContracts = pgTable('room_contracts', {
+  id: uuid().primaryKey().defaultRandom(),
+  uploadedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  /** Null when the uploader's account has since been removed. Equal to `providerId` when the
+   *  tenant sent it themselves. */
+  uploadedBy: uuid().references(() => providers.id, { onDelete: 'set null' }),
+  providerId: uuid()
+    .notNull()
+    .references(() => providers.id, { onDelete: 'restrict' }),
+  leaseId: uuid().references(() => roomLeases.id, { onDelete: 'set null' }),
+  storageKey: text().notNull(),
+  mimeType: text().notNull(),
+  sizeBytes: integer().notNull(),
+}, (t) => [
+  index().on(t.providerId),
+  index().on(t.leaseId),
+  uniqueIndex().on(t.storageKey),
 ])
 
 // ---------------------------------------------------------------------------

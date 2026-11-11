@@ -43,7 +43,8 @@ export function TenantCard({
       )}
       {waitingForLease && card && (
         <p className="text-xs text-ink-faint">
-          You&rsquo;re all set. Melanite will set up your rental and let you know.
+          Your card is saved. Melanite sets up your rental once your signed contract is on file
+          too.
         </p>
       )}
       {error && <Notice>{error}</Notice>}

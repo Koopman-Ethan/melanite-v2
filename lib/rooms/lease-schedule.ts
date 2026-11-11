@@ -74,22 +74,42 @@ export function leaseSchedule(startsOn: string, today: string): LeaseSchedule | 
   }
 }
 
-/** The day a lease ends when notice is given on `noticeOn`. */
-export function endsAfterNotice(noticeOn: string): string {
-  return addDaysYmd(noticeOn, NOTICE_DAYS)
+/** The last day a contract covers: the lease's start plus its term. A renewal adds to the term
+ *  rather than moving the start, so this is always the end of the LATEST contract. */
+export function contractEndsOn(lease: { startsOn: string; termMonths: number }): string {
+  return addMonthsYmd(lease.startsOn, lease.termMonths)
+}
+
+/** The day a lease ends when notice is given on `noticeOn`: 30 days later, but never past the end
+ *  of the contract — notice cannot make a lease outlast the paper it runs on. */
+export function endsAfterNotice(noticeOn: string, contractEnd?: string): string {
+  const afterNotice = addDaysYmd(noticeOn, NOTICE_DAYS)
+  return contractEnd && contractEnd < afterNotice ? contractEnd : afterNotice
+}
+
+/** Days from `today` until the contract runs out. Negative once it has. */
+export function daysUntil(date: string, today: string): number {
+  const ms = (ymd: string) => {
+    const [y, m, d] = ymd.split('-').map(Number)
+    return Date.UTC(y, m - 1, d)
+  }
+  return Math.round((ms(date) - ms(today)) / 86_400_000)
 }
 
 /**
- * Did the tenant complete the term? Keoni refunds the deposit after a completed term with 30
- * days' notice, and keeps it if they leave early — this is her rule as a SUGGESTION. The decision
- * is still hers each time; a tenant who left a week early for a good reason is her call.
+ * Did the tenant stay to the end of their contract? Keoni refunds the deposit after a completed
+ * term and keeps it if they leave early — this is her rule as a SUGGESTION. The decision is still
+ * hers each time; a tenant who left a week early for a good reason is her call.
+ *
+ * Notice is no longer part of the test (11 November 2026). A lease now ends on its own when the
+ * contract does, so one that ran to that day completed its term whether or not anybody said so.
+ * One Keoni ended early, or that notice ended early, did not.
  */
 export function completedTerm(lease: {
   startsOn: string
   termMonths: number
   endsOn: string | null
-  noticeGivenOn: string | null
 }): boolean {
-  if (!lease.endsOn || !lease.noticeGivenOn) return false
-  return lease.endsOn >= addMonthsYmd(lease.startsOn, lease.termMonths)
+  if (!lease.endsOn) return false
+  return lease.endsOn >= contractEndsOn(lease)
 }

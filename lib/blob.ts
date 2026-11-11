@@ -32,7 +32,9 @@ import 'server-only'
 // obvious is cheap now and expensive to retrofit.
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
-import { del, get, put } from '@vercel/blob'
+import { del, get, head, put } from '@vercel/blob'
+
+import { CONTRACT_MAX_BYTES, CONTRACT_MIME } from '@/lib/rooms/contract-file'
 
 /** What a phone camera produces, and nothing else. No PDFs, no HEIC — Safari converts HEIC to
  *  JPEG on upload, and accepting formats we cannot render is how a broken thumbnail becomes a
@@ -424,5 +426,114 @@ export async function deleteReceipt(storageKey: string): Promise<DeleteResult> {
   } catch (err) {
     console.error('[blob] could not remove receipt', storageKey, err)
     return { ok: false, reason: 'failed', detail: 'The receipt could not be removed.' }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// Room contracts.
+//
+// The third binary, and the first that is KEPT: a signed six-month contract is the record a lease
+// runs on, so nothing deletes it when the lease ends. It names the tenant and carries their
+// signature, so reads are the receipt rule, not the equipment one — the tenant and Keoni only.
+//
+// It is also the first that does not pass through this server on the way in. A scanned contract
+// can be several megabytes and a server action carries four, so the browser sends it straight to
+// the store with a short-lived token that `app/api/room-contract/upload/route.ts` issues for ONE
+// pathname. What this module does for a contract is therefore name it, check it after it has
+// landed, read it and remove it — never `put` it.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+function contractPrefix(): string {
+  return process.env.MELANITE_ENV === 'prod' ? 'contracts/' : 'contracts/dev/'
+}
+
+const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+
+/** Where a new contract for this tenant goes. The tenant's id is in the path so the token route
+ *  can tell whose it is from the pathname alone; an id is not a name, and the key says nothing
+ *  else about them. */
+export function newContractKey(
+  providerId: string,
+  contractId: string,
+  mimeType: string,
+): string | null {
+  const ext = CONTRACT_MIME[mimeType]
+  if (!ext) return null
+  return `${contractPrefix()}${providerId}/${contractId}.${ext}`
+}
+
+/** Reads a contract key back into whose it is. Null for anything that is not one of THIS
+ *  environment's contract keys — so a token is never issued for another prefix, and appdev never
+ *  writes among production's contracts. */
+export function parseContractKey(
+  storageKey: string,
+): { providerId: string; contractId: string; mimeType: string } | null {
+  const prefix = contractPrefix()
+  if (!storageKey.startsWith(prefix)) return null
+  const match = new RegExp(`^(${UUID})/(${UUID})\\.([a-z]+)$`).exec(storageKey.slice(prefix.length))
+  if (!match) return null
+  const mimeType = Object.keys(CONTRACT_MIME).find((m) => CONTRACT_MIME[m] === match[3])
+  if (!mimeType) return null
+  return { providerId: match[1], contractId: match[2], mimeType }
+}
+
+/** What actually landed in the store, or null when nothing did. The browser says an upload
+ *  finished; this is the server checking before it writes a row that says so. */
+export async function headContract(
+  storageKey: string,
+): Promise<{ sizeBytes: number; contentType: string } | null> {
+  if (!blobConfigured()) return null
+  try {
+    const found = await head(storageKey)
+    return { sizeBytes: found.size, contentType: found.contentType }
+  } catch {
+    return null
+  }
+}
+
+export function contractAcceptable(file: { sizeBytes: number; contentType: string }): boolean {
+  return (
+    file.sizeBytes > 0 && file.sizeBytes <= CONTRACT_MAX_BYTES && file.contentType in CONTRACT_MIME
+  )
+}
+
+/** Fetches the bytes, server-side, with the token. Used only by `/api/room-contract/[id]`. */
+export async function readContract(
+  storageKey: string,
+): Promise<{ body: ReadableStream<Uint8Array>; contentType: string } | null> {
+  if (!blobConfigured()) return null
+  try {
+    const result = await get(storageKey, { access: 'private' })
+    if (!result?.stream) return null
+    return {
+      body: result.stream as ReadableStream<Uint8Array>,
+      contentType: result.blob.contentType ?? 'application/octet-stream',
+    }
+  } catch (err) {
+    console.error('[blob] could not read contract', storageKey, err)
+    return null
+  }
+}
+
+/** Removes a contract that was replaced before any lease used it, or one that failed the check
+ *  after landing. Never one a lease runs on. Best effort, like `deleteReceipt`. */
+export async function deleteContract(storageKey: string): Promise<DeleteResult> {
+  if (!blobConfigured()) {
+    return { ok: false, reason: 'not-configured', detail: 'Contract storage is not set up here.' }
+  }
+  if (!ownsStorageKey(storageKey)) {
+    console.warn('[blob] refusing to delete', storageKey, '— it belongs to another environment')
+    return {
+      ok: false,
+      reason: 'foreign',
+      detail: 'That contract belongs to a different environment.',
+    }
+  }
+  try {
+    await del(storageKey)
+    return { ok: true }
+  } catch (err) {
+    console.error('[blob] could not remove contract', storageKey, err)
+    return { ok: false, reason: 'failed', detail: 'The contract could not be removed.' }
   }
 }

@@ -12,7 +12,11 @@ import { grossUpForProcessing, toMoney } from '@/lib/money'
 import { StripeApiError, stripeDelete, stripeGet, stripePost } from '@/lib/stripe/client'
 import { appOrigin, isMissingCustomerError } from '@/lib/stripe/config'
 
-import { endsAfterNotice, leaseSchedule } from './lease-schedule'
+import { attachContract, waitingContractId } from './contracts'
+import { addMonthsYmd, contractEndsOn, endsAfterNotice, leaseSchedule } from './lease-schedule'
+
+/** How long one signed contract runs. A renewal adds this much again. */
+const TERM_MONTHS = 6
 
 // Monthly leases for the rooms and nail stations (migration 0049).
 //
@@ -109,6 +113,18 @@ export async function startLease(input: {
     }
   }
 
+  // No lease without the paper it runs on (11 November). Checked before anything is charged.
+  const contractId = await waitingContractId(input.providerId)
+  if (!contractId) {
+    return {
+      error:
+        'There is no signed contract on file for them yet. They can upload it on their Room Rental page, or you can upload it for them below.',
+    }
+  }
+  // The lease ends when the contract does. Stripe is told the same day, so rent stops on its own
+  // and the last part-month is prorated; a renewal moves both.
+  const endsOn = addMonthsYmd(input.startsOn, TERM_MONTHS)
+
   const monthlyCents = room.monthlyPriceCents
   const rentCharge = await grossed(monthlyCents)
   const depositCharge = input.depositHeldOutside ? 0 : await grossed(input.depositCents)
@@ -122,6 +138,8 @@ export async function startLease(input: {
         providerId: input.providerId,
         roomId: room.id,
         startsOn: input.startsOn,
+        termMonths: TERM_MONTHS,
+        endsOn,
         monthlyCents,
         depositCents: input.depositCents,
         depositStatus: input.depositHeldOutside || input.depositCents === 0 ? 'held_outside' : 'charged',
@@ -194,6 +212,7 @@ export async function startLease(input: {
               ...(schedule.backdated ? { backdate_start_date: unix(schedule.periodStart) } : {}),
             }
           : { trial_end: unix(schedule.firstCharge) }),
+        cancel_at: unix(endsOn),
         // `plan` is what keeps the invoice webhooks from treating rent as medical direction —
         // see `planFromMetadata`.
         metadata: { plan: 'room_lease', lease_id: leaseId, provider_id: input.providerId },
@@ -238,14 +257,60 @@ export async function startLease(input: {
     .update(roomLeases)
     .set({ status: 'active', stripeSubscriptionId: subscriptionId, depositPaymentIntentId: depositIntent })
     .where(eq(roomLeases.id, leaseId))
+  // Last, so a lease that failed to start leaves the contract waiting for the next attempt.
+  await attachContract(contractId, leaseId)
 
   return {
     ok: true,
     detail:
-      schedule.kind === 'future'
+      (schedule.kind === 'future'
         ? `${room.name} is let from ${input.startsOn}. The first rent is taken that day.`
-        : `${room.name} is let. The part-month was charged now; full rent comes out on the 1st.`,
+        : `${room.name} is let. The part-month was charged now; full rent comes out on the 1st.`) +
+      ` The contract runs to ${endsOn}.`,
   }
+}
+
+/**
+ * Renews a running lease for another term, on a newly signed contract.
+ *
+ * The lease is the same lease: same space, same rent, same deposit, no gap and nothing charged.
+ * What changes is the day it ends — six months after the day it WOULD have ended, not six months
+ * from today, so renewing early does not shorten what the tenant signed for. Notice that had been
+ * given is withdrawn by this: a tenant who signs again is staying.
+ */
+export async function renewLease(leaseId: string): Promise<LeaseResult> {
+  const [lease] = await db
+    .select({
+      status: roomLeases.status,
+      providerId: roomLeases.providerId,
+      startsOn: roomLeases.startsOn,
+      termMonths: roomLeases.termMonths,
+      subscriptionId: roomLeases.stripeSubscriptionId,
+    })
+    .from(roomLeases)
+    .where(eq(roomLeases.id, leaseId))
+    .limit(1)
+  if (!lease || lease.status === 'ended' || !lease.subscriptionId) {
+    return { error: 'That lease has ended. Start a new one instead.' }
+  }
+
+  const contractId = await waitingContractId(lease.providerId)
+  if (!contractId) {
+    return { error: 'Upload the newly signed contract first, then renew.' }
+  }
+
+  const termMonths = lease.termMonths + TERM_MONTHS
+  const endsOn = contractEndsOn({ startsOn: lease.startsOn, termMonths })
+
+  // Stripe first: if it refuses, nothing here has changed and the contract is still waiting.
+  await stripePost(`/subscriptions/${lease.subscriptionId}`, { cancel_at: unix(endsOn) })
+  await db
+    .update(roomLeases)
+    .set({ termMonths, endsOn, noticeGivenOn: null })
+    .where(eq(roomLeases.id, leaseId))
+  await attachContract(contractId, leaseId)
+
+  return { ok: true, detail: `Renewed. The lease now runs to ${endsOn}.` }
 }
 
 function declineMessage(err: unknown, fallback: string): string {
@@ -259,7 +324,12 @@ function declineMessage(err: unknown, fallback: string): string {
 /** Records 30 days' notice. Rent stops at the end date, prorated, and the lease ends there. */
 export async function recordNotice(leaseId: string, noticeOn: string): Promise<LeaseResult> {
   const [lease] = await db
-    .select({ status: roomLeases.status, subscriptionId: roomLeases.stripeSubscriptionId })
+    .select({
+      status: roomLeases.status,
+      subscriptionId: roomLeases.stripeSubscriptionId,
+      startsOn: roomLeases.startsOn,
+      termMonths: roomLeases.termMonths,
+    })
     .from(roomLeases)
     .where(eq(roomLeases.id, leaseId))
     .limit(1)
@@ -268,7 +338,8 @@ export async function recordNotice(leaseId: string, noticeOn: string): Promise<L
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(noticeOn)) return { error: 'Choose the day notice was given.' }
 
-  const endsOn = endsAfterNotice(noticeOn)
+  // Never later than the contract's own end: notice shortens a lease, it cannot lengthen one.
+  const endsOn = endsAfterNotice(noticeOn, contractEndsOn(lease))
   await stripePost(`/subscriptions/${lease.subscriptionId}`, {
     cancel_at: unix(endsOn),
     proration_behavior: 'create_prorations',

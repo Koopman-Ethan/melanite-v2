@@ -15,8 +15,10 @@ import { db } from '@/lib/db'
 import { getMyLease } from '@/lib/db/queries/rooms'
 import { providers } from '@/lib/db/schema'
 import { clearedForRoom } from '@/lib/rooms/access'
-import { firstOfNextMonth } from '@/lib/rooms/lease-schedule'
+import { getContractState } from '@/lib/rooms/contracts'
+import { daysUntil, firstOfNextMonth } from '@/lib/rooms/lease-schedule'
 
+import { ContractUpload } from './contract-upload'
 import { RentalShell } from './rental-shell'
 import { TenantCard } from './tenant-card'
 
@@ -40,10 +42,11 @@ export default async function RoomRentalPage({
   // someone looks at the page is still cleared before it can affect them.
   await releaseExpiredHolds()
 
-  const [days, rentals, lease, [card]] = await Promise.all([
+  const [days, rentals, lease, contract, [card]] = await Promise.all([
     getMonthOccupancy(month, user.id, settings),
     getMyRentals(user.id),
     getMyLease(user.id),
+    getContractState(user.id),
     db
       .select({
         paymentMethodId: providers.billingPaymentMethodId,
@@ -56,6 +59,20 @@ export default async function RoomRentalPage({
   ])
 
   const tenant = user.practiceType === 'room_only'
+
+  // When the lease stops, and why. A contract running out is not the same news as notice.
+  const leaseEnds = lease ? (lease.endsOn ?? lease.contractEnd) : null
+  const leaving = Boolean(lease?.noticeGivenOn)
+  const daysLeft = leaseEnds ? daysUntil(leaseEnds, today) : null
+  const expiring = !leaving && daysLeft !== null && daysLeft <= 30
+  const uploaded = (at: Date) =>
+    at.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      timeZone: 'America/Denver',
+    })
+
   // A tenant who cannot use the daily room is not shown it at all — their page is their room. A
   // laser provider still sees why it is closed, as before.
   const showDaily = !tenant || (settings.enabled && user.roomRentalEnabled) || rentals.length > 0
@@ -113,19 +130,19 @@ export default async function RoomRentalPage({
             <div>
               <dt className="text-xs text-ink-faint">Next rent</dt>
               <dd>
-                {lease.endsOn && lease.endsOn <= firstOfNextMonth(today)
+                {leaseEnds && leaseEnds <= firstOfNextMonth(today)
                   ? 'None — your lease ends first'
                   : lease.startsOn > today
                     ? lease.startsOn
                     : firstOfNextMonth(today)}
               </dd>
             </div>
-            {lease.endsOn && (
-              <div>
-                <dt className="text-xs text-ink-faint">Ends</dt>
-                <dd>{lease.endsOn}</dd>
-              </div>
-            )}
+            <div>
+              <dt className="text-xs text-ink-faint">
+                {leaving ? 'Ends (notice given)' : 'Contract ends'}
+              </dt>
+              <dd>{leaseEnds}</dd>
+            </div>
             <div>
               <dt className="text-xs text-ink-faint">Deposit</dt>
               <dd>
@@ -148,6 +165,77 @@ export default async function RoomRentalPage({
           card={card?.paymentMethodId ? { brand: card.brand, last4: card.last4 } : null}
           waitingForLease={!lease}
         />
+      )}
+
+      {/* The signed contract, beside the card: the two things a rental needs from them. Shown
+          whoever uploaded it — Keoni can put it on file for them from her Rooms page. */}
+      {(tenant || lease) && (
+        <section className="space-y-3 rounded-card border border-line p-5">
+          <h2 className="text-sm font-medium uppercase tracking-wide text-ink-muted">
+            Signed contract
+          </h2>
+
+          {expiring && !contract.waiting && (
+            <Notice tone="warning">
+              Your contract ends on {leaseEnds}, and your rental ends with it. To stay, upload your
+              newly signed contract here and Melanite will renew it.
+            </Notice>
+          )}
+
+          {contract.current && (
+            <p className="text-sm">
+              On file — uploaded {uploaded(contract.current.uploadedAt)}
+              {contract.current.byTenant ? '' : ' by Melanite'}.{' '}
+              <a
+                href={`/api/room-contract/${contract.current.id}`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-gold underline underline-offset-4"
+              >
+                View
+              </a>
+            </p>
+          )}
+
+          {contract.waiting && (
+            <p className="text-sm">
+              {lease ? 'New contract received' : 'Received'} — uploaded{' '}
+              {uploaded(contract.waiting.uploadedAt)}
+              {contract.waiting.byTenant ? '' : ' by Melanite'}.{' '}
+              <a
+                href={`/api/room-contract/${contract.waiting.id}`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-gold underline underline-offset-4"
+              >
+                View
+              </a>
+              <span className="mt-1 block text-xs text-ink-faint">
+                {lease
+                  ? 'Melanite will renew your rental on it.'
+                  : 'Melanite will set up your rental and let you know.'}
+              </span>
+            </p>
+          )}
+
+          {!contract.current && !contract.waiting && (
+            <p className="text-sm text-ink-muted">
+              No contract on file. Upload your signed contract so Melanite can set up your rental.
+            </p>
+          )}
+
+          <ContractUpload
+            providerId={user.id}
+            label={
+              contract.waiting
+                ? 'Upload a different file'
+                : contract.current
+                  ? 'Upload a renewal contract'
+                  : 'Upload signed contract'
+            }
+          />
+          <p className="text-xs text-ink-faint">A PDF or a photo of every signed page, up to 10MB.</p>
+        </section>
       )}
 
       {params.paid === '1' && (
